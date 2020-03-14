@@ -47,9 +47,21 @@ impl Read for File {
     }
 }
 
+impl<'a> Read for &'a File {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        (&self.f).read(buf)
+    }
+}
+
 impl Seek for File {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
         self.f.seek(pos)
+    }
+}
+
+impl<'a> Seek for &'a File {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        (&self.f).seek(pos)
     }
 }
 
