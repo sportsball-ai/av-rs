@@ -7,7 +7,7 @@ use std::convert::TryInto;
 use std::fmt;
 use std::io::{Cursor, Read, Seek, Write};
 
-use byteorder::{BigEndian, ByteOrder};
+use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
 use serde::{de, ser};
 
 pub fn read_one<T: AtomData, R: Read + Seek>(mut reader: R) -> Result<Option<T>> {
@@ -314,11 +314,12 @@ impl AtomData for ChunkOffsetData {
     const TYPE: FourCC = FourCC(0x7374636f);
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SampleSizeData {
     pub version: u8,
     pub flags: [u8; 3],
     pub constant_sample_size: u32,
+    pub sample_count: u32,
     pub sample_sizes: Vec<u32>,
 }
 
@@ -340,6 +341,7 @@ impl ReadData for SampleSizeData {
                     version: buf[0],
                     flags: buf[1..4].try_into().unwrap(),
                     constant_sample_size: 0,
+                    sample_count: number_of_entries,
                     sample_sizes: (0..number_of_entries as usize).map(|i| BigEndian::read_u32(&buf[i * 4..])).collect(),
                 })
             },
@@ -347,9 +349,27 @@ impl ReadData for SampleSizeData {
                 version: buf[0],
                 flags: buf[1..4].try_into().unwrap(),
                 constant_sample_size: constant_sample_size,
+                sample_count: BigEndian::read_u32(&buf[8..]),
                 sample_sizes: vec![],
             }),
         }
+    }
+}
+
+impl WriteData for SampleSizeData {
+    fn write<W: Write>(&self, mut writer: W) -> Result<()> {
+        writer.write_u8(self.version)?;
+        writer.write(&self.flags)?;
+        writer.write_u32::<BigEndian>(self.constant_sample_size)?;
+        if self.constant_sample_size == 0 {
+            writer.write_u32::<BigEndian>(self.sample_sizes.len() as _)?;
+            for entry in self.sample_sizes.iter() {
+                entry.write(&mut writer)?;
+            }
+        } else {
+            writer.write_u32::<BigEndian>(self.sample_count)?;
+        }
+        Ok(())
     }
 }
 
@@ -376,12 +396,15 @@ impl SampleSizeData {
     // Returns a new version of the data for the given range of samples.
     pub fn trimmed(&self, start_sample: u64, sample_count: u64) -> Self {
         if self.constant_sample_size != 0 {
-            self.clone()
+            let mut ret = self.clone();
+            ret.sample_count = sample_count as _;
+            ret
         } else {
             let mut ret = Self::default();
             let source_sample_count = self.sample_sizes.len() as u64;
             let start_sample = start_sample.min(source_sample_count);
             let end_sample = (start_sample + sample_count).min(source_sample_count);
+            ret.sample_count = sample_count as _;
             ret.sample_sizes.extend_from_slice(&self.sample_sizes.as_slice()[start_sample as usize..end_sample as usize]);
             ret
         }
@@ -765,6 +788,11 @@ impl<M: MediaType> SampleTableData<M> {
     }
 
     pub fn sample_count(&self) -> u64 {
+        if let Some(sample_size) = self.sample_size.as_ref() {
+            if sample_size.constant_sample_size == 0 || sample_size.sample_count != 0 {
+                return sample_size.sample_count as u64;
+            }
+        }
         let chunk_count = if let Some(co) = &self.chunk_offset_64 {
             co.offsets.len() as u32
         } else if let Some(co) = &self.chunk_offset {
@@ -919,6 +947,7 @@ mod tests {
                 version: 0,
                 flags: [9, 85, 12],
                 constant_sample_size: 0,
+                sample_count: 9,
                 sample_sizes: vec![611596, 611652, 611568, 611532, 611640, 611560, 611656, 611588, 611544],
             }),
             sample_to_chunk: Some(SampleToChunkData{
@@ -948,6 +977,7 @@ mod tests {
                 version: 0,
                 flags: [0; 3],
                 constant_sample_size: 6,
+                sample_count: 2048+2048+1024+2048+1024+2048+1024+2048+2048,
                 sample_sizes: vec![],
             }),
             sample_to_chunk: Some(SampleToChunkData{
@@ -996,6 +1026,7 @@ mod tests {
             version: 0,
             flags: [0; 3],
             constant_sample_size: 0,
+            sample_count: 4,
             sample_sizes: vec![0, 1, 2, 3],
         };
 
