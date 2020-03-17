@@ -1,8 +1,11 @@
-use std::{io, io::{Read, Seek, SeekFrom}};
+use std::{io, io::{copy, Read, Seek, SeekFrom, Write}};
 
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+use super::data::{AtomData, WriteData};
+use super::error::Result;
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 pub struct FourCC(pub u32);
 
 impl FourCC {
@@ -31,9 +34,20 @@ impl AtomSize {
         }
     }
 }
+
 impl From<AtomSize> for usize {
     fn from(s: AtomSize) -> usize {
         s.as_usize()
+    }
+}
+
+impl From<usize> for AtomSize {
+    fn from(s: usize) -> AtomSize {
+        if s <= 0xffffffff {
+            AtomSize::Size(s as _)
+        } else {
+            AtomSize::ExtendedSize(s as _)
+        }
     }
 }
 
@@ -95,6 +109,11 @@ impl Atom {
         };
         SectionReader::new(reader, self.offset + header_size, self.size.as_usize() - header_size)
     }
+
+    pub fn copy<R: Read + Seek, W: Write>(&self, mut reader: R, mut writer: W) -> io::Result<()> {
+        reader.seek(SeekFrom::Start(self.offset as u64))?;
+        copy(&mut reader.take(self.size.as_usize() as _), &mut writer).map(|_| ())
+    }
 }
 
 pub struct AtomReader<R: Read + Seek> {
@@ -144,3 +163,49 @@ impl<R: Read + Seek> Iterator for AtomReader<R> {
         Some(Ok(atom))
     }
 }
+
+pub trait AtomWriteExt: Write {
+    fn write_four_cc(&mut self, four_cc: FourCC) -> io::Result<()> {
+        self.write_u32::<BigEndian>(four_cc.0)
+    }
+
+    // Writes an atom header of the given type and size. If the data_size argument is an extended
+    // size, the atom size will be written as an extended size. Otherwise, the atom size will be
+    // written in the smallest form possible.
+    fn write_atom_header<S: Into<AtomSize>>(&mut self, typ: FourCC, data_size: S) -> io::Result<()> {
+        let data_size = data_size.into();
+        let atom_size = match data_size {
+            AtomSize::ExtendedSize(data_size) => {
+                AtomSize::ExtendedSize(data_size + 16)
+            },
+            AtomSize::Size(data_size) => {
+                if data_size > 0xFFFFFFF7 {
+                    AtomSize::ExtendedSize(data_size as u64 + 16)
+                } else {
+                    AtomSize::Size(data_size + 8)
+                }
+            },
+        };
+        match atom_size {
+            AtomSize::ExtendedSize(size) => {
+                self.write_u32::<BigEndian>(1)?;
+                self.write_four_cc(typ)?;
+                self.write_u64::<BigEndian>(size)
+            },
+            AtomSize::Size(size) => {
+                self.write_u32::<BigEndian>(size)?;
+                self.write_four_cc(typ)
+            },
+        }
+    }
+
+    fn write_atom<T: AtomData + WriteData>(&mut self, atom: T) -> Result<()> {
+        let mut buf = Vec::new();
+        atom.write(&mut buf)?;
+        self.write_atom_header(T::TYPE, buf.len())?;
+        copy(&mut buf.as_slice(), self)?;
+        Ok(())
+    }
+}
+
+impl<W: Write> AtomWriteExt for W {}
