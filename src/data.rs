@@ -55,7 +55,7 @@ pub trait AtomData: ReadData {
     const TYPE: FourCC;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FixedPoint16(f32);
 
 impl ser::Serialize for FixedPoint16 {
@@ -90,7 +90,13 @@ impl From<f32> for FixedPoint16 {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+impl From<FixedPoint16> for f32 {
+    fn from(v: FixedPoint16) -> f32 {
+        v.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FixedPoint32(f32);
 
 impl ser::Serialize for FixedPoint32 {
@@ -122,6 +128,12 @@ impl<'de> de::Visitor<'de> for FixedPoint32Visitor {
 impl From<f32> for FixedPoint32 {
     fn from(v: f32) -> Self {
         Self(v)
+    }
+}
+
+impl From<FixedPoint32> for f32 {
+    fn from(v: FixedPoint32) -> f32 {
+        v.0
     }
 }
 
