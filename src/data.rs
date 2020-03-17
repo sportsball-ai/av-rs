@@ -635,7 +635,7 @@ impl MediaType for VideoMediaType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoMediaInformationData {
     pub header: VideoMediaInformationHeaderData,
-    pub handler_reference: HandlerReferenceData,
+    pub handler_reference: Option<HandlerReferenceData>, // required for qtff, optional for mp4
     pub sample_table: Option<SampleTableData<VideoMediaType>>,
 }
 
@@ -647,7 +647,7 @@ impl ReadData for VideoMediaInformationData {
     fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
         Ok(Self{
             header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing video media information header"))?,
-            handler_reference: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing video media information handler reference"))?,
+            handler_reference: read_one(&mut reader)?,
             sample_table: read_one(&mut reader)?,
         })
     }
@@ -672,6 +672,10 @@ pub struct SoundSampleDescriptionDataEntry {
     pub revision_level: u16,
     pub vendor: u32,
     pub number_of_channels: u16,
+    pub sample_size: u16,
+    pub compression_id: u16,
+    pub packet_size: u16,
+    pub sample_rate: FixedPoint32,
 }
 
 impl MediaType for SoundMediaType {
@@ -681,7 +685,7 @@ impl MediaType for SoundMediaType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundMediaInformationData {
     pub header: SoundMediaInformationHeaderData,
-    pub handler_reference: HandlerReferenceData,
+    pub handler_reference: Option<HandlerReferenceData>, // required for qtff, optional for mp4
     pub sample_table: Option<SampleTableData<SoundMediaType>>,
 }
 
@@ -693,7 +697,7 @@ impl ReadData for SoundMediaInformationData {
     fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
         Ok(Self{
             header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing sound media information header"))?,
-            handler_reference: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing sound media information handler reference"))?,
+            handler_reference: read_one(&mut reader)?,
             sample_table: read_one(&mut reader)?,
         })
     }
@@ -709,7 +713,7 @@ impl AtomData for SoundMediaInformationHeaderData {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BaseMediaInformationData {
     pub header: BaseMediaInformationHeaderData,
-    pub sample_table: Option<SampleTableData<SoundMediaType>>,
+    pub sample_table: Option<SampleTableData<GeneralMediaType>>,
 }
 
 impl AtomData for BaseMediaInformationData {

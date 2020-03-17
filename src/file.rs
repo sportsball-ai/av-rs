@@ -453,4 +453,12 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_file_h264_mp4() {
+        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/h264.mp4")).unwrap();
+
+        let movie_data = f.get_movie_data().unwrap();
+        assert_eq!(movie_data.tracks.len(), 2);
+    }
 }
