@@ -99,8 +99,8 @@ impl File {
                     let mut start_time = (start_time_secs * track.media.header.time_scale as f64).round() as u64;
                     let mut end_time = (end_time_secs * track.media.header.time_scale as f64).round() as u64;
 
-                    if let Some(edit) = track.edit {
-                        if let Some(list) = edit.edit_list {
+                    if let Some(edit) = &track.edit {
+                        if let Some(list) = &edit.edit_list {
                             if list.entries.len() > 1 {
                                 return Err(Error::Other("complex edit lists are not supported"));
                             } else if !list.entries.is_empty() {
@@ -151,13 +151,11 @@ impl File {
 
                     let time_to_sample = source_time_to_sample.map(|stts| stts.trimmed(start_sample, sample_count));
 
-                    let mut source_sample_chunks = Vec::new();
                     let sample_to_chunk = track.media.information.as_ref().and_then(|minf| match minf {
                         data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_to_chunk.as_ref()),
                         data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_to_chunk.as_ref()),
                         data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_to_chunk.as_ref()),
                     }.map(|stsc| {
-                        source_sample_chunks = stsc.sample_chunks(sample_count);
                         stsc.trimmed(start_sample, sample_count)
                     }));
 
@@ -169,35 +167,65 @@ impl File {
                         stsz.trimmed(start_sample, sample_count)
                     }));
 
-                    let sample_chunks = sample_to_chunk.as_ref().map(|stsc| stsc.sample_chunks(sample_count)).unwrap_or(vec![0; sample_count as usize]);
-
-                    let source_sample_offsets: Vec<u64> = track.media.information.as_ref().and_then(|minf| match minf {
-                        data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_offsets()),
-                        data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_offsets()),
-                        data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_offsets()),
-                    }).unwrap_or(vec![]);
-
-                    let chunk_offset = sample_size.as_ref().map(|stsz| {
+                    // TODO: interleave data for better performance?
+                    let chunk_offset = sample_to_chunk.as_ref().and_then(|stsc| {
                         let mut out = data::ChunkOffset64Data::default();
-                        for (n, (&chunk, sample_size)) in sample_chunks.iter().zip(stsz.iter_sample_sizes()).enumerate() {
-                            // TODO: interleave data for better performance?
-                            out.offsets.resize(chunk as usize + 1, data_offset);
-                            let source_sample = n as u64 + start_sample;
-                            if source_sample < source_sample_offsets.len() as u64 {
-                                let source_sample_offset = source_sample_offsets[source_sample as usize];
-                                data_offset += sample_size as u64;
-                                if mdat.len() > 0 {
-                                    let l = mdat.len();
-                                    let last = &mut mdat[l-1];
-                                    if last.0 + last.1 as u64 == source_sample_offset {
-                                        last.1 += sample_size;
-                                        continue;
-                                    }
-                                }
-                                mdat.push((source_sample_offsets[source_sample as usize], sample_size));
+                        if sample_count == 0 {
+                            return Some(out);
+                        }
+
+                        let total_chunks = stsc.sample_chunk(sample_count - 1) + 1;
+                        out.offsets.resize(total_chunks as usize, 0);
+
+                        let minf = track.media.information.as_ref()?;
+                        let mut sample_chunk_info_hint = None;
+                        let sample_offset = |n: u64, hint: &mut Option<data::SampleChunkInfo>| -> Option<u64> {
+                            match minf {
+                                data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().and_then(|stbl| {
+                                    let chunk_info = stbl.sample_chunk_info(n, hint.as_ref())?;
+                                    let ret = stbl.sample_offset(n, &chunk_info);
+                                    *hint = Some(chunk_info);
+                                    ret
+                                }),
+                                data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().and_then(|stbl| {
+                                    let chunk_info = stbl.sample_chunk_info(n, hint.as_ref())?;
+                                    let ret = stbl.sample_offset(n, &chunk_info);
+                                    *hint = Some(chunk_info);
+                                    ret
+                                }),
+                                data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().and_then(|stbl| {
+                                    let chunk_info = stbl.sample_chunk_info(n, hint.as_ref())?;
+                                    let ret = stbl.sample_offset(n, &chunk_info);
+                                    *hint = Some(chunk_info);
+                                    ret
+                                }),
+                            }
+                        };
+
+                        let mut chunk_start_sample = 0;
+                        for i in 0..stsc.entries.len() {
+                            let e = &stsc.entries[i];
+                            let end_chunk = if i + 1 < stsc.entries.len() {
+                                stsc.entries[i + 1].first_chunk - 1
+                            } else {
+                                total_chunks
+                            };
+                            for chunk in (e.first_chunk - 1)..end_chunk {
+                                out.offsets[chunk as usize] = data_offset;
+
+                                let chunk_end_sample = chunk_start_sample + e.samples_per_chunk as u64;
+
+                                let source_start_offset = sample_offset(start_sample + chunk_start_sample, &mut sample_chunk_info_hint)?;
+                                let source_end_offset = sample_offset(start_sample + chunk_end_sample, &mut sample_chunk_info_hint)?;
+
+                                let chunk_size = source_end_offset - source_start_offset;
+                                mdat.push((source_start_offset, chunk_size as _));
+                                data_offset += chunk_size;
+
+                                chunk_start_sample = chunk_end_sample;
                             }
                         }
-                        out
+                        Some(out)
                     });
 
                     // TODO: for better compatibility with lazy player / decoder implementations, we
@@ -383,41 +411,6 @@ mod tests {
             let mut expected_f = File::open(Path::new(file!()).parent().unwrap().join("testdata/braw_trimmed.braw")).unwrap();
             let mut expected_movie_data = expected_f.get_movie_data().unwrap();
             assert_eq!(expected_movie_data.tracks.len(), 3);
-
-            {
-                let audio_samples: Vec<(u64, u32)> = movie_data.tracks.iter().filter_map(|t| {
-                    match t.media.information.as_ref() {
-                        Some(data::MediaInformationData::Sound(minf)) => Some({
-                            let stbl = minf.sample_table.as_ref().unwrap();
-                            stbl.sample_offsets().unwrap().iter().copied().zip(stbl.sample_size.as_ref().unwrap().iter_sample_sizes()).collect()
-                        }),
-                        _ => None,
-                    }
-                }).next().unwrap();
-
-                let expected_audio_samples: Vec<(u64, u32)> = expected_movie_data.tracks.iter().filter_map(|t| {
-                    match t.media.information.as_ref() {
-                        Some(data::MediaInformationData::Sound(minf)) => Some({
-                            let stbl = minf.sample_table.as_ref().unwrap();
-                            stbl.sample_offsets().unwrap().iter().copied().zip(stbl.sample_size.as_ref().unwrap().iter_sample_sizes()).collect()
-                        }),
-                        _ => None,
-                    }
-                }).next().unwrap();
-
-
-                for (expected, actual) in expected_audio_samples.iter().zip(audio_samples.iter()) {
-                    f.seek(SeekFrom::Start(actual.0)).unwrap();
-                    let mut actual_buf = Vec::with_capacity(actual.1 as _);
-                    copy(&mut (&mut f).take(actual.1 as _), &mut actual_buf).unwrap();
-
-                    expected_f.seek(SeekFrom::Start(expected.0)).unwrap();
-                    let mut expected_buf = Vec::with_capacity(expected.1 as _);
-                    copy(&mut (&mut expected_f).take(expected.1 as _), &mut expected_buf).unwrap();
-
-                    assert_eq!(expected_buf, actual_buf);
-                }
-            }
 
             expected_movie_data.header.creation_time = movie_data.header.creation_time;
             expected_movie_data.header.modification_time = movie_data.header.modification_time;

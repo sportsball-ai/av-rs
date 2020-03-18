@@ -55,7 +55,7 @@ pub trait AtomData: ReadData {
     const TYPE: FourCC;
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FixedPoint16(f32);
 
 impl ser::Serialize for FixedPoint16 {
@@ -66,21 +66,7 @@ impl ser::Serialize for FixedPoint16 {
 
 impl<'de> de::Deserialize<'de> for FixedPoint16 {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<FixedPoint16, D::Error> {
-        deserializer.deserialize_u16(FixedPoint16Visitor)
-    }
-}
-
-struct FixedPoint16Visitor;
-
-impl<'de> de::Visitor<'de> for FixedPoint16Visitor {
-    type Value = FixedPoint16;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a fixed point number")
-    }
-
-    fn visit_u16<E: de::Error>(self, value: u16) -> std::result::Result<Self::Value, E> {
-        Ok(((value as f32) / (0x100 as f32)).into())
+        Ok(((u16::deserialize(deserializer)? as f32) / (0x100 as f32)).into())
     }
 }
 
@@ -96,7 +82,7 @@ impl From<FixedPoint16> for f32 {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FixedPoint32(f32);
 
 impl ser::Serialize for FixedPoint32 {
@@ -107,21 +93,7 @@ impl ser::Serialize for FixedPoint32 {
 
 impl<'de> de::Deserialize<'de> for FixedPoint32 {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<FixedPoint32, D::Error> {
-        deserializer.deserialize_u32(FixedPoint32Visitor)
-    }
-}
-
-struct FixedPoint32Visitor;
-
-impl<'de> de::Visitor<'de> for FixedPoint32Visitor {
-    type Value = FixedPoint32;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a fixed point number")
-    }
-
-    fn visit_u32<E: de::Error>(self, value: u32) -> std::result::Result<Self::Value, E> {
-        Ok(((value as f32) / (0x10000 as f32)).into())
+        Ok(((u32::deserialize(deserializer)? as f32) / (0x10000 as f32)).into())
     }
 }
 
@@ -491,6 +463,21 @@ impl AtomData for SampleToChunkData {
     const TYPE: FourCC = FourCC(0x73747363);
 }
 
+#[derive(Clone, Debug)]
+pub struct SampleChunkInfo {
+    // The zero-based chunk number.
+    pub number: u32,
+
+    pub first_sample: u64,
+    pub samples: u64,
+
+    pub entry: usize,
+    pub entry_first_sample: u64,
+
+    // The zero-based sample description.
+    pub sample_description: u32,
+}
+
 impl SampleToChunkData {
     // Returns the zero-based sample number that the given zero-based chunk number starts with.
     pub fn chunk_first_sample(&self, n: u32) -> u64 {
@@ -512,21 +499,52 @@ impl SampleToChunkData {
 
     // Returns the zero-based chunk number that the given zero-based sample number is in.
     pub fn sample_chunk(&self, n: u64) -> u32 {
+        self.sample_chunk_info(n, None).number
+    }
+
+    // Returns info for the chunk that the given zero-based sample number is in. If you provide the
+    // results of an invocation for a sample preceeding n, you can ammortize the cost of iterating
+    // the chunk info entries across multiple invocations.
+    pub fn sample_chunk_info(&self, n: u64, prev: Option<&SampleChunkInfo>) -> SampleChunkInfo {
         if self.entries.len() == 1 {
-            return (n as u32)/self.entries[0].samples_per_chunk;
+            let e = &self.entries[0];
+            return SampleChunkInfo{
+                number: (n / e.samples_per_chunk as u64) as _,
+                first_sample: (n / e.samples_per_chunk as u64) * e.samples_per_chunk as u64,
+                samples: e.samples_per_chunk as u64,
+                entry: 0,
+                entry_first_sample: 0,
+                sample_description: e.sample_description_id - 1,
+            };
         }
-        let mut sample_offset: u64 = 0;
-        for i in 1..self.entries.len() {
+        let mut sample_offset: u64 = prev.as_ref().map(|prev| prev.entry_first_sample).unwrap_or(0);
+        for i in prev.map(|prev| prev.entry + 1).unwrap_or(1) as usize..self.entries.len() {
             let e = &self.entries[i];
             let prev = &self.entries[i-1];
             let new_sample_offset = sample_offset + ((e.first_chunk-prev.first_chunk) as u64) * (prev.samples_per_chunk as u64);
             if new_sample_offset as u64 > n {
-                return prev.first_chunk - 1 + ((n-sample_offset)/(prev.samples_per_chunk as u64)) as u32;
+                let relative = ((n-sample_offset)/(prev.samples_per_chunk as u64)) as u32;
+                return SampleChunkInfo{
+                    number: prev.first_chunk - 1 + relative,
+                    first_sample: sample_offset + relative as u64 * prev.samples_per_chunk as u64,
+                    samples: prev.samples_per_chunk as _,
+                    entry: i - 1,
+                    entry_first_sample: sample_offset,
+                    sample_description: prev.sample_description_id - 1,
+                };
             }
             sample_offset = new_sample_offset;
         }
         let last = &self.entries[self.entries.len()-1];
-        last.first_chunk - 1 + ((n-sample_offset)/(last.samples_per_chunk as u64)) as u32
+        let relative = ((n-sample_offset)/(last.samples_per_chunk as u64)) as u32;
+        SampleChunkInfo{
+            number: last.first_chunk - 1 + relative,
+            first_sample: sample_offset + relative as u64 * last.samples_per_chunk as u64,
+            samples: last.samples_per_chunk as _,
+            entry: self.entries.len() - 1,
+            entry_first_sample: sample_offset,
+            sample_description: last.sample_description_id - 1,
+        }
     }
 
     // Returns the number of samples.
@@ -544,57 +562,69 @@ impl SampleToChunkData {
         ret
     }
 
-    // Returns a Vec of zero-based chunk numbers for all samples, given a total sample count. The returned vector always has a length of exactly sample_count.
-    pub fn sample_chunks(&self, sample_count: u64) -> Vec<u32> {
-        let mut out = Vec::with_capacity(sample_count as _);
-        if !self.entries.is_empty() {
-            let mut sample_offset: u64 = 0;
-            for i in 1..self.entries.len() {
-                let e = &self.entries[i-1];
-                let next = &self.entries[i];
-                for chunk in e.first_chunk..next.first_chunk {
-                    out.resize(out.len() + e.samples_per_chunk as usize, chunk - 1);
-                }
-                let entry_sample_count = ((next.first_chunk - e.first_chunk) as u64) * (e.samples_per_chunk as u64);
-                sample_offset += entry_sample_count;
-                if sample_offset > sample_count {
-                    break;
-                }
-            }
-            let e = &self.entries[self.entries.len()-1];
-            let mut chunk = e.first_chunk - 1;
-            while sample_count > sample_offset {
-                out.resize(out.len() + (sample_count - sample_offset).min(e.samples_per_chunk as _) as usize, chunk);
-                sample_offset += e.samples_per_chunk as u64;
-                chunk += 1;
-            }
-        }
-        out.resize(sample_count as _, 0);
-        out
-    }
-
-    // Returns a new version of the data for the given range of samples. The output of this
-    // function will contain exactly one chunk per entry.
+    // Returns a new version of the data for the given range of samples. The chunks emitted by this
+    // function will be a subset of the original chunks. I.e. each emitted chunk will correspond to
+    // exactly one of the original chunks.
     pub fn trimmed(&self, start_sample: u64, sample_count: u64) -> Self {
         let mut ret = Self::default();
-        let mut sample_offset: u64 = 0;
+        let end_sample = start_sample + sample_count;
+        let mut entry_start_sample: u64 = 0;
+        let mut next_chunk = 1;
         for i in 0..self.entries.len() {
+            if entry_start_sample >= end_sample {
+                break;
+            }
+
             let e = &self.entries[i];
-            let samples = if i + 1 < self.entries.len() {
+
+            let entry_sample_count = if i + 1 < self.entries.len() {
                 (self.entries[i + 1].first_chunk - e.first_chunk) as u64 * e.samples_per_chunk as u64
             } else {
-                sample_count
+                end_sample - entry_start_sample
             };
-            let range_start = sample_offset.max(start_sample);
-            let range_end = (sample_offset+samples).min(start_sample+sample_count);
-            if range_end > range_start {
-                ret.entries.push(SampleToChunkDataEntry{
-                    first_chunk: (ret.entries.len() + 1) as u32,
-                    samples_per_chunk: (range_end - range_start) as u32,
-                    sample_description_id: e.sample_description_id,
-                });
+            let entry_end_sample = entry_start_sample + entry_sample_count;
+
+            let mut overlap_start_sample = start_sample.max(entry_start_sample);
+            let overlap_end_sample = end_sample.min(entry_end_sample);
+
+            if overlap_end_sample > overlap_start_sample {
+                // If the overlap doesn't begin on a chunk boundary, add an entry for the first partial chunk.
+                let partial_chunk_skip = (overlap_start_sample - entry_start_sample) % e.samples_per_chunk as u64;
+                if partial_chunk_skip != 0 {
+                    let samples = (e.samples_per_chunk as u64 - partial_chunk_skip).min(overlap_end_sample - overlap_start_sample) as u32;
+                    ret.entries.push(SampleToChunkDataEntry{
+                        first_chunk: next_chunk,
+                        samples_per_chunk: samples,
+                        sample_description_id: e.sample_description_id,
+                    });
+                    next_chunk += 1;
+                    overlap_start_sample += samples as u64;
+                }
+
+                if overlap_end_sample >= overlap_start_sample + e.samples_per_chunk as u64 {
+                    // Add an entry for all of the full chunks.
+                    ret.entries.push(SampleToChunkDataEntry{
+                        first_chunk: next_chunk,
+                        samples_per_chunk: e.samples_per_chunk,
+                        sample_description_id: e.sample_description_id,
+                    });
+                    let chunks = (overlap_end_sample - overlap_start_sample) / e.samples_per_chunk as u64;
+                    next_chunk += chunks as u32;
+                    overlap_start_sample += chunks * e.samples_per_chunk as u64;
+                }
+
+                if overlap_end_sample > overlap_start_sample {
+                    // Add an entry for the last partial chunk.
+                    ret.entries.push(SampleToChunkDataEntry{
+                        first_chunk: next_chunk,
+                        samples_per_chunk: (overlap_end_sample - overlap_start_sample) as _,
+                        sample_description_id: e.sample_description_id,
+                    });
+                    next_chunk += 1;
+                }
             }
-            sample_offset += samples;
+
+            entry_start_sample = entry_end_sample;
         }
         ret
     }
@@ -602,6 +632,10 @@ impl SampleToChunkData {
 
 pub trait MediaType: fmt::Debug {
     type SampleDescriptionDataEntry: Clone + std::cmp::PartialEq + fmt::Debug + ReadData;
+
+    fn constant_sample_size(_desc: &Self::SampleDescriptionDataEntry) -> Option<u32> {
+        None
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -663,12 +697,8 @@ impl AtomData for VideoMediaInformationHeaderData {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundMediaType;
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-pub struct SoundSampleDescriptionDataEntry {
-    pub data_format: u32,
-    pub reserved: [u8; 6],
-    pub data_reference_index: u16,
-    pub version: u16,
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct SoundSampleDescriptionDataEntryV0 {
     pub revision_level: u16,
     pub vendor: u32,
     pub number_of_channels: u16,
@@ -678,8 +708,76 @@ pub struct SoundSampleDescriptionDataEntry {
     pub sample_rate: FixedPoint32,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct SoundSampleDescriptionDataEntryV1 {
+    pub revision_level: u16,
+    pub vendor: u32,
+    pub number_of_channels: u16,
+    pub sample_size: u16,
+    pub compression_id: u16,
+    pub packet_size: u16,
+    pub sample_rate: FixedPoint32,
+    pub samples_per_packet: u32,
+    pub bytes_per_packet: u32,
+    pub bytes_per_frame: u32,
+    pub bytes_per_sample: u32,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct SoundSampleDescriptionDataEntryV2 {
+    // TODO: add v2 fields. the docs i'm looking at right now seem to be confused about whether v2
+    // appends new fields to v1 or replaces fields in v1 :-/
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SoundSampleDescriptionDataEntryVersion {
+    V0(SoundSampleDescriptionDataEntryV0),
+    V1(SoundSampleDescriptionDataEntryV1),
+    V2(SoundSampleDescriptionDataEntryV2),
+}
+
+impl<'de> de::Deserialize<'de> for SoundSampleDescriptionDataEntryVersion {
+    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        struct VersionVisitor;
+
+        impl<'de> de::Visitor<'de> for VersionVisitor {
+            type Value = SoundSampleDescriptionDataEntryVersion;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a version followed by a sound description")
+            }
+
+            fn visit_seq<S: de::SeqAccess<'de>>(self, mut seq: S) -> std::result::Result<Self::Value, S::Error> {
+                match seq.next_element::<u8>()?.ok_or(de::Error::custom("expected sound description version"))? {
+                    0 => Ok(Self::Value::V0(seq.next_element()?.ok_or(de::Error::custom("expected sound description v0 fields"))?)),
+                    _ => Ok(Self::Value::V1(seq.next_element()?.ok_or(de::Error::custom("expected sound description v1+ fields"))?)),
+                }
+            }
+        }
+
+        deserializer.deserialize_tuple(2, VersionVisitor)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct SoundSampleDescriptionDataEntry {
+    pub data_format: u32,
+    pub reserved: [u8; 6],
+    pub data_reference_index: u16,
+    pub version: SoundSampleDescriptionDataEntryVersion,
+}
+
 impl MediaType for SoundMediaType {
     type SampleDescriptionDataEntry = SoundSampleDescriptionDataEntry;
+
+    // For sound, the constant sample size in the description takes precedence over the size found in the stsz atom.
+    fn constant_sample_size(desc: &Self::SampleDescriptionDataEntry) -> Option<u32> {
+        match &desc.version {
+            SoundSampleDescriptionDataEntryVersion::V0(v) => Some(((v.sample_size / 8) * v.number_of_channels) as u32),
+            SoundSampleDescriptionDataEntryVersion::V1(v) => Some(v.bytes_per_frame as _),
+            SoundSampleDescriptionDataEntryVersion::V2(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -765,20 +863,42 @@ impl<M: MediaType> ReadData for SampleTableData<M> {
 
 impl<M: MediaType> SampleTableData<M> {
     // Returns the offset within the file of the given zero-based sample.
-    pub fn sample_offset(&self, sample: u64) -> Option<u64> {
-        let sample_to_chunk_data = self.sample_to_chunk.as_ref()?;
-        let sample_size_data = self.sample_size.as_ref()?;
-
-        let chunk = sample_to_chunk_data.sample_chunk(sample);
+    pub fn sample_offset(&self, sample: u64, chunk_info: &SampleChunkInfo) -> Option<u64> {
+        let chunk = chunk_info.number;
         let chunk_offset = self.chunk_offset.as_ref().and_then(|d| if (chunk as usize) < d.offsets.len() { Some(d.offsets[chunk as usize] as u64) } else { None });
         let chunk_offset_64 = self.chunk_offset_64.as_ref().and_then(|d| if (chunk as usize) < d.offsets.len() { Some(d.offsets[chunk as usize] as u64) } else { None });
         let chunk_offset = chunk_offset.or(chunk_offset_64)?;
 
-        let mut offset_in_chunk = 0;
-        for sample in sample_to_chunk_data.chunk_first_sample(chunk)..sample {
-            offset_in_chunk += sample_size_data.sample_size(sample)? as u64;
-        }
+        let sample_description = self.sample_description(chunk_info.sample_description)?;
+
+        let sample_size = self.sample_size.as_ref()?;
+        let constant_sample_size = M::constant_sample_size(&sample_description).or(if sample_size.constant_sample_size > 0 {
+            Some(sample_size.constant_sample_size)
+        } else {
+            None
+        });
+
+        let offset_in_chunk = match constant_sample_size {
+            Some(size) => size as u64 * (sample - chunk_info.first_sample),
+            _ => sample_size.sample_sizes[(chunk_info.first_sample as usize)..(sample as usize)].iter().fold(0, |acc, &x| acc + x as u64),
+        };
+
         Some(chunk_offset + offset_in_chunk)
+    }
+
+    // Returns info for the chunk that the given zero-based sample number is in. If you provide the
+    // results of an invocation for a sample preceeding n, you can ammortize the cost of iterating
+    // the chunk info entries across multiple invocations.
+    pub fn sample_chunk_info(&self, sample: u64, hint: Option<&SampleChunkInfo>) -> Option<SampleChunkInfo> {
+        Some(self.sample_to_chunk.as_ref()?.sample_chunk_info(sample, hint))
+    }
+
+    pub fn sample_description<'a>(&'a self, id: u32) -> Option<&'a M::SampleDescriptionDataEntry> {
+        let sample_descriptions = &self.sample_description.as_ref()?.entries;
+        if sample_descriptions.len() <= id as usize {
+            return None;
+        }
+        Some(&sample_descriptions[id as usize])
     }
 
     pub fn iter_chunk_offsets<'a>(&'a self) -> Option<impl 'a + Iterator<Item=u64>> {
@@ -805,18 +925,6 @@ impl<M: MediaType> SampleTableData<M> {
             return 0;
         };
         self.sample_to_chunk.as_ref().map(|v| v.sample_count(chunk_count)).unwrap_or(0)
-    }
-
-    pub fn sample_offsets(&self) -> Option<Vec<u64>> {
-        let mut chunk_offsets: Vec<u64> = self.iter_chunk_offsets()?.collect();
-        let sample_count = self.sample_count();
-        let sample_chunks: Vec<u32> = self.sample_to_chunk.as_ref()?.sample_chunks(sample_count);
-        let mut out = Vec::with_capacity(sample_count as usize);
-        for (&chunk, size) in sample_chunks.iter().zip(self.sample_size.as_ref()?.iter_sample_sizes()) {
-            out.push(chunk_offsets[chunk as usize]);
-            chunk_offsets[chunk as usize] += size as u64;
-        }
-        Some(out)
     }
 }
 
@@ -966,7 +1074,6 @@ mod tests {
         };
 
         assert_eq!(vec![40, 623924, 1247864, 1865576, 2489396, 3107180, 3731028, 4348828, 4972704], table.iter_chunk_offsets().unwrap().collect::<Vec<u64>>());
-        assert_eq!(vec![40, 623924, 1247864, 1865576, 2489396, 3107180, 3731028, 4348828, 4972704], table.sample_offsets().unwrap());
 
         let table = SampleTableData::<SoundMediaType>{
             sample_description: None,
@@ -1021,7 +1128,6 @@ mod tests {
 
         assert_eq!(vec![611636, 1235576, 1859432, 2477108, 3101036, 3718740, 4342684, 4960416, 5584248], table.iter_chunk_offsets().unwrap().collect::<Vec<u64>>());
         assert_eq!(2048+2048+1024+2048+1024+2048+1024+2048+2048, table.sample_count());
-        assert_eq!(table.sample_count(), table.sample_offsets().unwrap().len() as u64);
     }
 
     #[test]
@@ -1086,44 +1192,6 @@ mod tests {
         let data = SampleToChunkData{
             version: 0,
             flags: [0; 3],
-            entries: vec![SampleToChunkDataEntry{
-                first_chunk: 1,
-                samples_per_chunk: 2048,
-                sample_description_id: 1,
-            }, SampleToChunkDataEntry{
-                first_chunk: 3,
-                samples_per_chunk: 1024,
-                sample_description_id: 1,
-            }, SampleToChunkDataEntry {
-                first_chunk: 4,
-                samples_per_chunk: 2048,
-                sample_description_id: 1,
-            }, SampleToChunkDataEntry{
-                first_chunk: 5,
-                samples_per_chunk: 1024,
-                sample_description_id: 1,
-            }, SampleToChunkDataEntry{
-                first_chunk: 6,
-                samples_per_chunk: 2048,
-                sample_description_id: 1,
-            }, SampleToChunkDataEntry{
-                first_chunk: 7,
-                samples_per_chunk: 1024,
-                sample_description_id: 1,
-            }, SampleToChunkDataEntry{
-                first_chunk: 8,
-                samples_per_chunk: 2048,
-                sample_description_id: 1,
-            }],
-        };
-
-        let chunks = data.sample_chunks(15360);
-        assert_eq!(3, chunks[5120]);
-        assert_eq!(8, chunks[15359]);
-
-        let data = SampleToChunkData{
-            version: 0,
-            flags: [0; 3],
             entries: vec![
                 SampleToChunkDataEntry{
                     first_chunk: 1,
@@ -1138,8 +1206,6 @@ mod tests {
             ],
         };
 
-        assert_eq!(vec![0, 0, 0, 0, 1, 1, 1, 1, 2, 2], data.sample_chunks(10));
-
         assert_eq!(vec![
             SampleToChunkDataEntry{
                 first_chunk: 1,
@@ -1151,7 +1217,12 @@ mod tests {
         assert_eq!(vec![
             SampleToChunkDataEntry{
                 first_chunk: 1,
-                samples_per_chunk: 4,
+                samples_per_chunk: 2,
+                sample_description_id: 1,
+            },
+            SampleToChunkDataEntry{
+                first_chunk: 2,
+                samples_per_chunk: 2,
                 sample_description_id: 1,
             },
         ], data.trimmed(2, 4).entries);
@@ -1159,11 +1230,16 @@ mod tests {
         assert_eq!(vec![
             SampleToChunkDataEntry{
                 first_chunk: 1,
-                samples_per_chunk: 6,
+                samples_per_chunk: 2,
                 sample_description_id: 1,
             },
             SampleToChunkDataEntry{
                 first_chunk: 2,
+                samples_per_chunk: 4,
+                sample_description_id: 1,
+            },
+            SampleToChunkDataEntry{
+                first_chunk: 3,
                 samples_per_chunk: 2,
                 sample_description_id: 2,
             },
