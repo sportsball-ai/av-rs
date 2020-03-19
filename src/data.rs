@@ -779,11 +779,11 @@ impl MediaType for SoundMediaType {
 
     // For sound, the constant sample size in the description takes precedence over the size found in the stsz atom.
     fn constant_sample_size(desc: &Self::SampleDescriptionDataEntry) -> Option<u32> {
-        match &desc.version {
+        (match &desc.version {
             SoundSampleDescriptionDataEntryVersion::V0(v) => Some(((v.sample_size / 8) * v.number_of_channels) as u32),
             SoundSampleDescriptionDataEntryVersion::V1(v) => Some(v.bytes_per_frame as _),
             SoundSampleDescriptionDataEntryVersion::V2(_) => None,
-        }
+        }).filter(|&size| size > 0)
     }
 }
 
@@ -1246,6 +1246,29 @@ impl AtomData for EditListData {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sound_media_type() {
+        let desc = SoundSampleDescriptionDataEntry {
+            data_format: 1836069985,
+            reserved: [0, 0, 0, 0, 0, 0],
+            data_reference_index: 1,
+            version: SoundSampleDescriptionDataEntryVersion::V1(SoundSampleDescriptionDataEntryV1{
+                revision_level: 0,
+                vendor: 0,
+                number_of_channels: 2,
+                sample_size: 16,
+                compression_id: 65534,
+                packet_size: 0,
+                sample_rate: 48000.0.into(),
+                samples_per_packet: 1024,
+                bytes_per_packet: 0,
+                bytes_per_frame: 0,
+                bytes_per_sample: 2,
+            }),
+        };
+        assert_eq!(None, SoundMediaType::constant_sample_size(&desc));
+    }
 
     #[test]
     fn test_sample_table_data() {
