@@ -463,6 +463,33 @@ mod tests {
 
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
+
+        for track in movie_data.tracks.iter() {
+            match track.media.information.as_ref().unwrap() {
+                data::MediaInformationData::Sound(minf) => {
+                    let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
+                    assert_eq!(&data::SoundSampleDescriptionDataEntry{
+                        data_format: 1768829492,
+                        reserved: [0, 0, 0, 0, 0, 0],
+                        data_reference_index: 1,
+                        version: data::SoundSampleDescriptionDataEntryVersion::V1(data::SoundSampleDescriptionDataEntryV1{
+                            revision_level: 0,
+                            vendor: 0,
+                            number_of_channels: 2,
+                            sample_size: 16,
+                            compression_id: 0,
+                            packet_size: 0,
+                            sample_rate: 48000.0.into(),
+                            samples_per_packet: 1,
+                            bytes_per_packet: 3,
+                            bytes_per_frame: 6,
+                            bytes_per_sample: 2,
+                        }),
+                    }, desc);
+                },
+                _ => {},
+            }
+        }
     }
 
     #[test]
