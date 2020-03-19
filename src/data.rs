@@ -422,7 +422,11 @@ impl TimeToSampleData {
                 return Some(t + sample * (entry.sample_duration as u64));
             }
         }
-        None
+        if sample == 0 {
+            Some(t)
+        } else {
+            None
+        }
     }
 
     // Returns a new version of the data for the given range of samples.
@@ -1457,7 +1461,6 @@ mod tests {
         assert_eq!(Timecode{negative: false, hours: 1, minutes: 11, seconds: 0, frames: 2}.frame_number(29.97), 7 * 17982 + 60 * 30);
 
         assert_eq!(Timecode{negative: false, hours: 0, minutes: 10, seconds: 0, frames: 0}, Timecode::from_frame_number(10 * 60 * 24, 24.0));
-        assert_eq!(Timecode{negative: false, hours: 0, minutes: 10, seconds: 0, frames: 0}, Timecode::from_frame_number(36900, 24.0));
 
         assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 0, frames: 0}.frame_number(24.0), 0);
         assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 0, frames: 1}.frame_number(24.0), 1);

@@ -529,6 +529,16 @@ mod tests {
     }
 
     #[test]
+    fn test_file_braw_trim_full() {
+        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/braw.braw")).unwrap();
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("tmp.mov");
+        let mut f_out = std::fs::File::create(&path).unwrap();
+        f.trim_frames(&mut f_out, 0, 4).unwrap();
+    }
+
+    #[test]
     fn test_file_h264_mp4() {
         let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/h264.mp4")).unwrap();
 
