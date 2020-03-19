@@ -754,9 +754,10 @@ impl<'de> de::Deserialize<'de> for SoundSampleDescriptionDataEntryVersion {
             }
 
             fn visit_seq<S: de::SeqAccess<'de>>(self, mut seq: S) -> std::result::Result<Self::Value, S::Error> {
-                match seq.next_element::<u8>()?.ok_or(de::Error::custom("expected sound description version"))? {
+                match seq.next_element::<u16>()?.ok_or(de::Error::custom("expected sound description version"))? {
                     0 => Ok(Self::Value::V0(seq.next_element()?.ok_or(de::Error::custom("expected sound description v0 fields"))?)),
-                    _ => Ok(Self::Value::V1(seq.next_element()?.ok_or(de::Error::custom("expected sound description v1+ fields"))?)),
+                    1 => Ok(Self::Value::V1(seq.next_element()?.ok_or(de::Error::custom("expected sound description v1 fields"))?)),
+                    _ => Ok(Self::Value::V2(seq.next_element()?.ok_or(de::Error::custom("expected sound description v2+ fields"))?)),
                 }
             }
         }
