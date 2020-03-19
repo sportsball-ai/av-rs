@@ -5,9 +5,25 @@ use super::atom::{AtomReader, AtomSize, AtomWriteExt, FourCC};
 use super::{data, data::{AtomData, MovieData, ReadData}};
 use super::error::{Error, Result};
 
+use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+
 pub struct File {
     f: std::fs::File,
     movie_data: Option<MovieData>,
+}
+
+enum Data {
+    SourceFile(u64, usize),
+    Vec(Vec<u8>),
+}
+
+impl Data {
+    fn len(&self) -> usize {
+        match self {
+            Self::SourceFile(_, size) => *size,
+            Self::Vec(v) => v.len(),
+        }
+    }
 }
 
 impl File {
@@ -67,9 +83,72 @@ impl File {
         self.trim(w, time_scale, start_time, end_time - start_time)
     }
 
+    fn trim_sample_table<M: Clone + data::MediaType>(source: &data::SampleTableData<M>, start_sample: u64, sample_count: u64, data_offset: &mut u64) -> (data::SampleTableData<M>, Vec<Data>) {
+        let mut dest = data::SampleTableData::default();
+        let mut mdat: Vec<Data> = Vec::new();
+
+        dest.sample_description = source.sample_description.clone();
+        dest.time_to_sample = source.time_to_sample.as_ref().map(|stts| stts.trimmed(start_sample, sample_count));
+        dest.sample_to_chunk = source.sample_to_chunk.as_ref().map(|stsc| stsc.trimmed(start_sample, sample_count));
+        dest.sample_size = source.sample_size.as_ref().map(|stsz| stsz.trimmed(start_sample, sample_count));
+
+        // TODO: interleave data for better performance?
+        dest.chunk_offset_64 = dest.sample_to_chunk.as_ref().and_then(|stsc| {
+            let mut out = data::ChunkOffset64Data::default();
+            if sample_count == 0 {
+                return Some(out);
+            }
+
+            let total_chunks = stsc.sample_chunk(sample_count - 1) + 1;
+            out.offsets.resize(total_chunks as usize, 0);
+
+            let mut sample_chunk_info_hint = None;
+            let source_sample_offset = |n: u64, hint: &mut Option<data::SampleChunkInfo>| -> Option<u64> {
+                let chunk_info = source.sample_chunk_info(n, hint.as_ref())?;
+                let ret = source.sample_offset(n, &chunk_info);
+                *hint = Some(chunk_info);
+                ret
+            };
+            let source_sample_size = |n: u64, hint: &mut Option<data::SampleChunkInfo>| -> Option<u32> {
+                let chunk_info = source.sample_chunk_info(n, hint.as_ref())?;
+                let ret = source.sample_size(n, &chunk_info);
+                *hint = Some(chunk_info);
+                ret
+            };
+
+            let mut chunk_start_sample = 0;
+            for i in 0..stsc.entries.len() {
+                let e = &stsc.entries[i];
+                let end_chunk = if i + 1 < stsc.entries.len() {
+                    stsc.entries[i + 1].first_chunk - 1
+                } else {
+                    total_chunks
+                };
+                for chunk in (e.first_chunk - 1)..end_chunk {
+                    out.offsets[chunk as usize] = *data_offset;
+
+                    let chunk_end_sample = chunk_start_sample + e.samples_per_chunk as u64;
+
+                    let source_start_offset = source_sample_offset(start_sample + chunk_start_sample, &mut sample_chunk_info_hint)?;
+                    let last_sample_size = source_sample_size(start_sample + chunk_end_sample - 1, &mut sample_chunk_info_hint)?;
+                    let source_end_offset = source_sample_offset(start_sample + chunk_end_sample - 1, &mut sample_chunk_info_hint)? + last_sample_size as u64;
+
+                    let chunk_size = source_end_offset - source_start_offset;
+                    mdat.push(Data::SourceFile(source_start_offset, chunk_size as _));
+                    *data_offset += chunk_size;
+
+                    chunk_start_sample = chunk_end_sample;
+                }
+            }
+            Some(out)
+        });
+
+        (dest, mdat)
+    }
+
     pub fn trim<W: Write>(&mut self, mut w: W, time_scale: u32, start: u64, duration: u64) -> Result<()> {
         let mut moov: Vec<u8> = Vec::new();
-        let mut mdat: Vec<(u64, u32)> = Vec::new();
+        let mut mdat: Vec<Data> = Vec::new();
 
         let mut data_offset = 16;
         let start_time_secs = (start as f64) / (time_scale as f64);
@@ -119,6 +198,7 @@ impl File {
 
                     let source_time_to_sample = track.media.information.as_ref().and_then(|minf| match minf {
                         data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().and_then(|v| v.time_to_sample.as_ref()),
+                        data::MediaInformationData::Timecode(minf) => minf.sample_table.as_ref().and_then(|v| v.time_to_sample.as_ref()),
                         data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().and_then(|v| v.time_to_sample.as_ref()),
                         data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().and_then(|v| v.time_to_sample.as_ref()),
                     });
@@ -149,89 +229,76 @@ impl File {
                     let end_sample = end_sample.unwrap_or(0);
                     let sample_count = end_sample - start_sample;
 
-                    let time_to_sample = source_time_to_sample.map(|stts| stts.trimmed(start_sample, sample_count));
+                    let (time_to_sample, sample_to_chunk, sample_size, chunk_offset, mut mdat_additions) = track.media.information.as_ref().and_then(|minf| -> Option<Result<_>> {
+                        match minf { 
+                            data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().map(|v| {
+                                let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
+                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                            }),
+                            data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().map(|v| {
+                                let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
+                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                            }),
+                            data::MediaInformationData::Timecode(minf) => minf.sample_table.as_ref().map(|v| {
+                                let (mut table, mut mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
 
-                    let sample_to_chunk = track.media.information.as_ref().and_then(|minf| match minf {
-                        data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_to_chunk.as_ref()),
-                        data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_to_chunk.as_ref()),
-                        data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_to_chunk.as_ref()),
-                    }.map(|stsc| {
-                        stsc.trimmed(start_sample, sample_count)
-                    }));
+                                if sample_count > 0 && !mdat.is_empty() && start_sample_time < start_time {
+                                    // modify the first timecode sample so we don't have to use an edit
+                                    // list offset for better compatibility
+                                    let offset = (start_time - start_sample_time) as u32;
 
-                    let sample_size = track.media.information.as_ref().and_then(|minf| match minf {
-                        data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_size.as_ref()),
-                        data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_size.as_ref()),
-                        data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().and_then(|v| v.sample_size.as_ref()),
-                    }.map(|stsz| {
-                        stsz.trimmed(start_sample, sample_count)
-                    }));
+                                    // reduce the duration of the first sample so any samples that come after it are timed correctly
+                                    if let Some(time_to_sample) = table.time_to_sample.as_mut() {
+                                        if time_to_sample.entries.len() > 0 {
+                                            let first = &mut time_to_sample.entries[0];
+                                            let new_duration = first.sample_duration - offset;
+                                            if first.sample_count == 1 {
+                                                first.sample_duration = new_duration;
+                                            } else {
+                                                first.sample_count -= 1;
+                                                let mut new_entries = vec![data::TimeToSampleDataEntry{
+                                                    sample_count: 1,
+                                                    sample_duration: new_duration,
+                                                }];
+                                                new_entries.append(&mut time_to_sample.entries);
+                                                time_to_sample.entries = new_entries;
+                                            }
+                                        }
+                                    }
 
-                    // TODO: interleave data for better performance?
-                    let chunk_offset = sample_to_chunk.as_ref().and_then(|stsc| {
-                        let mut out = data::ChunkOffset64Data::default();
-                        if sample_count == 0 {
-                            return Some(out);
+                                    let mut data = match &mdat[0] {
+                                        Data::SourceFile(source_offset, source_size) => {
+                                            self.f.seek(SeekFrom::Start(*source_offset))?;
+                                            let mut buf = Vec::new();
+                                            buf.resize(*source_size as usize, 0);
+                                            self.f.read_exact(&mut buf)?;
+                                            buf
+                                        },
+                                        Data::Vec(buf) => buf.clone(),
+                                    };
+
+                                    let chunk_info = table.sample_chunk_info(0, None).ok_or(Error::Other("Unable to find first timecode sample chunk."))?;
+                                    let description = table.sample_description(chunk_info.sample_description).ok_or(Error::Other("No sample description for timecode sample."))?;
+                                    let sample_data = data.as_slice().read_u32::<BigEndian>()?;
+                                    let offset_secs = (start_time as f64 - start_sample_time as f64) / track.media.header.time_scale as f64;
+                                    let offset_frames = (offset_secs * description.fps()).round() as i64;
+                                    let new_timecode = description.add_frames_to_sample(description.parse_sample_data(sample_data), offset_frames);
+                                    (&mut data.as_mut_slice()).write_u32::<BigEndian>(new_timecode.data())?;
+
+                                    mdat[0] = Data::Vec(data);
+
+                                    start_sample_time = start_time;
+                                }
+
+                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                            }),
+                            data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().map(|v| {
+                                let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
+                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                            }),
                         }
-
-                        let total_chunks = stsc.sample_chunk(sample_count - 1) + 1;
-                        out.offsets.resize(total_chunks as usize, 0);
-
-                        let minf = track.media.information.as_ref()?;
-                        let mut sample_chunk_info_hint = None;
-                        let sample_offset = |n: u64, hint: &mut Option<data::SampleChunkInfo>| -> Option<u64> {
-                            match minf {
-                                data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().and_then(|stbl| {
-                                    let chunk_info = stbl.sample_chunk_info(n, hint.as_ref())?;
-                                    let ret = stbl.sample_offset(n, &chunk_info);
-                                    *hint = Some(chunk_info);
-                                    ret
-                                }),
-                                data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().and_then(|stbl| {
-                                    let chunk_info = stbl.sample_chunk_info(n, hint.as_ref())?;
-                                    let ret = stbl.sample_offset(n, &chunk_info);
-                                    *hint = Some(chunk_info);
-                                    ret
-                                }),
-                                data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().and_then(|stbl| {
-                                    let chunk_info = stbl.sample_chunk_info(n, hint.as_ref())?;
-                                    let ret = stbl.sample_offset(n, &chunk_info);
-                                    *hint = Some(chunk_info);
-                                    ret
-                                }),
-                            }
-                        };
-
-                        let mut chunk_start_sample = 0;
-                        for i in 0..stsc.entries.len() {
-                            let e = &stsc.entries[i];
-                            let end_chunk = if i + 1 < stsc.entries.len() {
-                                stsc.entries[i + 1].first_chunk - 1
-                            } else {
-                                total_chunks
-                            };
-                            for chunk in (e.first_chunk - 1)..end_chunk {
-                                out.offsets[chunk as usize] = data_offset;
-
-                                let chunk_end_sample = chunk_start_sample + e.samples_per_chunk as u64;
-
-                                let source_start_offset = sample_offset(start_sample + chunk_start_sample, &mut sample_chunk_info_hint)?;
-                                let source_end_offset = sample_offset(start_sample + chunk_end_sample, &mut sample_chunk_info_hint)?;
-
-                                let chunk_size = source_end_offset - source_start_offset;
-                                mdat.push((source_start_offset, chunk_size as _));
-                                data_offset += chunk_size;
-
-                                chunk_start_sample = chunk_end_sample;
-                            }
-                        }
-                        Some(out)
-                    });
-
-                    // TODO: for better compatibility with lazy player / decoder implementations, we
-                    // should modify the first timecode sample so we don't have to use an edit list
-                    // offset. the braw sdk seems to do this, and the braw player seems to totally
-                    // ignore edit lists
+                    }).unwrap_or(Ok((None, None, None, None, vec![])))?;
+                    mdat.append(&mut mdat_additions);
 
                     let mut trak: Vec<u8> = Vec::new();
 
@@ -270,7 +337,7 @@ impl File {
                                             data.duration = time_to_sample.as_ref().map(|stts| stts.duration()).unwrap_or(0) as _;
                                             mdia.write_atom(data)?;
                                         },
-                                        data::BaseMediaInformationData::TYPE => {
+                                        data::BaseMediaInformationData::<data::GeneralMediaType>::TYPE => {
                                             let mut minf: Vec<u8> = Vec::new();
 
                                             let mut r = atom.data(&mut r);
@@ -317,7 +384,7 @@ impl File {
                                                 }
                                             }
 
-                                            mdia.write_atom_header(data::BaseMediaInformationData::TYPE, minf.len())?;
+                                            mdia.write_atom_header(data::BaseMediaInformationData::<data::GeneralMediaType>::TYPE, minf.len())?;
                                             copy(&mut minf.as_slice(), &mut mdia)?;
                                         },
                                         data::HandlerReferenceData::TYPE | data::ExtendedLanguageTagData::TYPE | data::UserDataData::TYPE => atom.copy(&mut r, &mut mdia)?,
@@ -341,11 +408,18 @@ impl File {
             }
         }
 
-        let mdat_data_size = mdat.iter().fold(0 as u64, |acc, (_, size)| acc + *size as u64);
+        let mdat_data_size = mdat.iter().fold(0 as u64, |acc, data| acc + data.len() as u64);
         w.write_atom_header(FourCC::from_str("mdat"), AtomSize::ExtendedSize(mdat_data_size))?;
-        for (offset, size) in mdat.drain(..) {
-            self.f.seek(SeekFrom::Start(offset))?;
-            copy(&mut (&self.f).take(size as u64), &mut w)?;
+        for mut data in mdat.drain(..) {
+            match &mut data {
+                Data::SourceFile(offset, size) => {
+                    self.f.seek(SeekFrom::Start(*offset))?;
+                    copy(&mut (&self.f).take(*size as u64), &mut w)?;
+                },
+                Data::Vec(buf) => {
+                    copy(&mut buf.as_slice(), &mut w)?;
+                },
+            }
         }
 
         w.write_atom_header(MovieData::TYPE, moov.len())?;
@@ -423,11 +497,6 @@ mod tests {
                 expected.media.header.creation_time = actual.media.header.creation_time;
                 expected.media.header.modification_time = actual.media.header.modification_time;
 
-                if expected.media.handler_reference.as_ref().map(|r| r.component_subtype) == Some(FourCC::from_str("tmcd")) {
-                    expected.edit = actual.edit.clone();
-                    expected.media.header.duration = actual.media.header.duration.clone();
-                }
-
                 match (&mut expected.media.information, &actual.media.information) {
                     (Some(data::MediaInformationData::Video(expected)), Some(data::MediaInformationData::Video(actual))) => {
                         expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
@@ -435,8 +504,20 @@ mod tests {
                     (Some(data::MediaInformationData::Sound(expected)), Some(data::MediaInformationData::Sound(actual))) => {
                         expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
                     },
+                    (Some(data::MediaInformationData::Timecode(expected_minf)), Some(data::MediaInformationData::Timecode(actual_minf))) => {
+                        let expected_stbl = expected_minf.sample_table.as_ref().unwrap();
+                        let expected_sample_offset = expected_stbl.sample_offset(0, &expected_stbl.sample_chunk_info(0, None).unwrap()).unwrap();
+                        let actual_stbl = actual_minf.sample_table.as_ref().unwrap();
+                        let actual_sample_offset = actual_stbl.sample_offset(0, &actual_stbl.sample_chunk_info(0, None).unwrap()).unwrap();
+                        expected_f.seek(SeekFrom::Start(expected_sample_offset)).unwrap();
+                        f.seek(SeekFrom::Start(actual_sample_offset)).unwrap();
+                        assert_eq!(expected_f.read_u32::<BigEndian>().unwrap(), f.read_u32::<BigEndian>().unwrap());
+
+                        expected.media.header.duration = actual.media.header.duration;
+                        expected_minf.sample_table.as_mut().unwrap().time_to_sample = actual_minf.sample_table.as_ref().unwrap().time_to_sample.clone();
+                        expected_minf.sample_table.as_mut().unwrap().chunk_offset_64 = actual_minf.sample_table.as_ref().unwrap().chunk_offset_64.clone();
+                    },
                     (Some(data::MediaInformationData::Base(expected)), Some(data::MediaInformationData::Base(actual))) => {
-                        expected.sample_table.as_mut().unwrap().time_to_sample = actual.sample_table.as_ref().unwrap().time_to_sample.clone();
                         expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
                     },
                     _ => panic!("mismatched media information"),

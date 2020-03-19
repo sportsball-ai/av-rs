@@ -201,7 +201,8 @@ impl AtomData for TrackHeaderData {
 pub enum MediaInformationData {
     Sound(SoundMediaInformationData),
     Video(VideoMediaInformationData),
-    Base(BaseMediaInformationData),
+    Timecode(BaseMediaInformationData<TimecodeMediaType>),
+    Base(BaseMediaInformationData<GeneralMediaType>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -225,6 +226,7 @@ impl ReadData for MediaData {
                 match component_subtype.as_str() {
                     "vide" => Some(MediaInformationData::Video(read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media video information"))?)),
                     "soun" => Some(MediaInformationData::Sound(read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media sound information"))?)),
+                    "tmcd" => Some(MediaInformationData::Timecode(read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media timecode information"))?)),
                     _ => Some(MediaInformationData::Base(read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media base information"))?)),
                 }
             },
@@ -809,16 +811,174 @@ impl AtomData for SoundMediaInformationHeaderData {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct BaseMediaInformationData {
-    pub header: BaseMediaInformationHeaderData,
-    pub sample_table: Option<SampleTableData<GeneralMediaType>>,
+pub struct TimecodeMediaType;
+
+pub enum TimecodeSampleDescriptionFlags {
+    DropFrame = 0x0001,
+    WrapsAt24Hours = 0x0002,
+    NegativeTimesOk = 0x0004,
+    Counter = 0x0008,
 }
 
-impl AtomData for BaseMediaInformationData {
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct TimecodeSampleDescriptionDataEntry {
+    pub data_format: u32,
+    pub reserved: [u8; 6],
+    pub data_reference_index: u16,
+    pub reserved2: u32,
+    pub flags: u32,
+    pub time_scale: u32,
+    pub frame_duration: u32,
+    pub number_of_frames: u8,
+    pub reserved3: u8,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum TimecodeSample {
+    Counter(u32),
+    Timecode(Timecode),
+}
+
+impl TimecodeSample {
+    pub fn data(&self) -> u32 {
+        match self {
+            Self::Counter(ticks) => *ticks,
+            Self::Timecode(tc) => {
+                ((tc.hours as u32) << 24) |
+                (if tc.negative { 0x800000 } else { 0 }) |
+                ((tc.minutes as u32) << 16) |
+                ((tc.seconds as u32) << 8) |
+                tc.frames as u32
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Timecode {
+    pub negative: bool,
+    pub hours: u8,
+    pub minutes: u8,
+    pub seconds: u8,
+    pub frames: u8,
+}
+
+impl Timecode {
+    pub fn frame_number(&self, fps: f64) -> i64 {
+        let abs_number = if fps.round() != fps {
+            let minutes = self.hours as u64 * 60 + self.minutes as u64;
+            let ten_minutes = minutes / 10;
+            let rem_minutes = minutes % 10;
+            let fp10m = (fps * 600.0).round() as u64;
+            let fps = ((fp10m as f64) / 600.0).ceil() as u64;
+            let dropped_per_minute = (fps * 600 - fp10m) / 9;
+            ten_minutes * fp10m + rem_minutes * (fps * 60 - dropped_per_minute) + self.seconds as u64 * fps + self.frames as u64
+        } else {
+            ((self.hours as u64 * 60 + self.minutes as u64) * 60 + self.seconds as u64) * fps as u64 + self.frames as u64
+        };
+        if self.negative {
+            -(abs_number as i64)
+        } else {
+            abs_number as i64
+        }
+    }
+
+    pub fn from_frame_number(n: i64, fps: f64) -> Timecode {
+        let abs_number = n.abs() as u64;
+        if fps.round() != fps {
+            let fp10m = (fps * 600.0).round() as u64;
+            let ten_minutes = abs_number / fp10m;
+            let abs_number = abs_number % fp10m;
+
+            let fps = ((fp10m as f64) / 600.0).ceil() as u64;
+            let dropped_per_minute = (fps * 600 - fp10m) / 9;
+            let fpm = fps * 60 - dropped_per_minute;
+            let minutes = if abs_number > dropped_per_minute {
+                (abs_number - dropped_per_minute) / fpm
+            } else {
+                abs_number / fpm
+            };
+            let abs_number = if minutes == 0 {
+                abs_number
+            } else {
+                (abs_number - dropped_per_minute) % fpm + dropped_per_minute
+            };
+
+            Timecode{
+                negative: n < 0,
+                hours: (ten_minutes / 6) as _,
+                minutes: ((ten_minutes % 6) * 10 + minutes) as _,
+                seconds: (abs_number / fps) as _,
+                frames: (abs_number % fps) as _,
+            }
+        } else {
+            let fps = fps as u64;
+            let fpm = fps * 60;
+            let fph = fpm * 60;
+            Timecode{
+                negative: n < 0,
+                hours: (abs_number / fph) as _,
+                minutes: ((abs_number / fpm) % 60) as _,
+                seconds: ((abs_number / fps) % 60) as _,
+                frames: (abs_number % fps) as _,
+            }
+        }
+    }
+}
+
+impl TimecodeSampleDescriptionDataEntry {
+    pub fn parse_sample_data(&self, data: u32) -> TimecodeSample {
+        // Samples seem to always be counters instead of timecode records despite what the docs
+        // say. FFMpeg makes the same assumption:
+        // https://github.com/FFmpeg/FFmpeg/blob/dc1c3c640d245bc3e7a7a4c82ae1a6d06343abab/libavformat/mov.c#L7229
+        TimecodeSample::Counter(data)
+    }
+
+    pub fn fps(&self) -> f64 {
+        self.time_scale as f64 / self.frame_duration as f64
+    }
+
+    pub fn add_frames_to_sample(&self, sample: TimecodeSample, frames: i64) -> TimecodeSample {
+        match sample {
+            TimecodeSample::Counter(ticks) => {
+                let wrap = if (self.flags & TimecodeSampleDescriptionFlags::WrapsAt24Hours as u32) != 0 {
+                    self.time_scale as i64 * 60 * 60 * 24 * self.number_of_frames as i64 / self.frame_duration as i64
+                } else {
+                    0xffffffff
+                };
+                if (self.flags & TimecodeSampleDescriptionFlags::Counter as u32) != 0 {
+                    TimecodeSample::Counter(((ticks as i64 + (frames / self.number_of_frames as i64)) % wrap) as u32)
+                } else {
+                    TimecodeSample::Counter(((ticks as i64 + frames) % wrap) as u32)
+                }
+            },
+            TimecodeSample::Timecode(tc) => {
+                let fps = self.fps();
+                let mut new_frame_number = tc.frame_number(fps) + frames;
+                if (self.flags & TimecodeSampleDescriptionFlags::WrapsAt24Hours as u32) != 0 {
+                    new_frame_number = new_frame_number % (fps * 60.0 * 60.0 * 24.0).round() as i64;
+                }
+                TimecodeSample::Timecode(Timecode::from_frame_number(new_frame_number, fps))
+            },
+        }
+    }
+}
+
+impl MediaType for TimecodeMediaType {
+    type SampleDescriptionDataEntry = TimecodeSampleDescriptionDataEntry;
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BaseMediaInformationData<M: MediaType> {
+    pub header: BaseMediaInformationHeaderData,
+    pub sample_table: Option<SampleTableData<M>>,
+}
+
+impl<M: MediaType> AtomData for BaseMediaInformationData<M> {
     const TYPE: FourCC = FourCC(0x6d696e66);
 }
 
-impl ReadData for BaseMediaInformationData {
+impl<M: MediaType> ReadData for BaseMediaInformationData<M> {
     fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
         Ok(Self{
             header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing base media information header"))?,
@@ -842,6 +1002,19 @@ pub struct SampleTableData<M: MediaType> {
     pub sample_size: Option<SampleSizeData>,
     pub sample_to_chunk: Option<SampleToChunkData>,
     pub time_to_sample: Option<TimeToSampleData>,
+}
+
+impl<M: MediaType> Default for SampleTableData<M> {
+    fn default() -> Self {
+        Self{
+            sample_description: None,
+            chunk_offset: None,
+            chunk_offset_64: None,
+            sample_size: None,
+            sample_to_chunk: None,
+            time_to_sample: None,
+        }
+    }
 }
 
 impl<M: MediaType> AtomData for SampleTableData<M> {
@@ -880,10 +1053,35 @@ impl<M: MediaType> SampleTableData<M> {
 
         let offset_in_chunk = match constant_sample_size {
             Some(size) => size as u64 * (sample - chunk_info.first_sample),
-            _ => sample_size.sample_sizes[(chunk_info.first_sample as usize)..(sample as usize)].iter().fold(0, |acc, &x| acc + x as u64),
+            _ => {
+                if chunk_info.first_sample <= sample && (sample as usize) < sample_size.sample_sizes.len() {
+                    sample_size.sample_sizes[(chunk_info.first_sample as usize)..(sample as usize)].iter().fold(0, |acc, &x| acc + x as u64)
+                } else {
+                    return None;
+                }
+            },
         };
 
         Some(chunk_offset + offset_in_chunk)
+    }
+
+    pub fn sample_size(&self, sample: u64, chunk_info: &SampleChunkInfo) -> Option<u32> {
+        let sample_description = self.sample_description(chunk_info.sample_description)?;
+
+        let sample_size = self.sample_size.as_ref()?;
+        let constant_sample_size = M::constant_sample_size(&sample_description).or(if sample_size.constant_sample_size > 0 {
+            Some(sample_size.constant_sample_size)
+        } else {
+            None
+        });
+
+        constant_sample_size.or_else(|| {
+            if (sample as usize) < sample_size.sample_sizes.len() {
+                Some(sample_size.sample_sizes[sample as usize])
+            } else {
+                None
+            }
+        })
     }
 
     // Returns info for the chunk that the given zero-based sample number is in. If you provide the
@@ -1244,5 +1442,36 @@ mod tests {
                 sample_description_id: 2,
             },
         ], data.trimmed(2, 8).entries);
+    }
+
+    #[test]
+    fn test_timecode() {
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 9, seconds: 59, frames: 28}, Timecode::from_frame_number(17980, 29.97));
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 10, seconds: 0, frames: 0}, Timecode::from_frame_number(17982, 29.97));
+
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 0, frames: 0}.frame_number(29.97), 0);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 0, frames: 1}.frame_number(29.97), 1);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 1, frames: 1}.frame_number(29.97), 31);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 1, seconds: 0, frames: 2}.frame_number(29.97), 60 * 30);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 10, seconds: 0, frames: 0}.frame_number(29.97), 17982);
+        assert_eq!(Timecode{negative: false, hours: 1, minutes: 11, seconds: 0, frames: 2}.frame_number(29.97), 7 * 17982 + 60 * 30);
+
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 10, seconds: 0, frames: 0}, Timecode::from_frame_number(10 * 60 * 24, 24.0));
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 10, seconds: 0, frames: 0}, Timecode::from_frame_number(36900, 24.0));
+
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 0, frames: 0}.frame_number(24.0), 0);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 0, frames: 1}.frame_number(24.0), 1);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 0, seconds: 1, frames: 1}.frame_number(24.0), 25);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 1, seconds: 0, frames: 2}.frame_number(24.0), 60 * 24 + 2);
+        assert_eq!(Timecode{negative: false, hours: 0, minutes: 10, seconds: 0, frames: 0}.frame_number(24.0), 10 * 60 * 24);
+        assert_eq!(Timecode{negative: false, hours: 1, minutes: 11, seconds: 0, frames: 2}.frame_number(24.0), 71 * 60 * 24 + 2);
+
+        for frame in -300000..300000 {
+            let tc = Timecode::from_frame_number(frame, 29.97);
+            assert_eq!(frame, tc.frame_number(29.97));
+
+            let tc = Timecode::from_frame_number(frame, 24.0);
+            assert_eq!(frame, tc.frame_number(24.0));
+        }
     }
 }
