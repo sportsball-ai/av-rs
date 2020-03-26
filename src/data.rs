@@ -308,15 +308,15 @@ impl ReadData for SampleSizeData {
         match BigEndian::read_u32(&buf[4..]) {
             0 => {
                 let number_of_entries = BigEndian::read_u32(&buf[8..]);
-                let mut buf = Vec::new();
-                buf.resize(number_of_entries as usize * 4, 0);
-                reader.read_exact(&mut buf)?;
+                let mut entry_buf = Vec::new();
+                entry_buf.resize(number_of_entries as usize * 4, 0);
+                reader.read_exact(&mut entry_buf)?;
                 Ok(Self{
                     version: buf[0],
                     flags: buf[1..4].try_into().unwrap(),
                     constant_sample_size: 0,
                     sample_count: number_of_entries,
-                    sample_sizes: (0..number_of_entries as usize).map(|i| BigEndian::read_u32(&buf[i * 4..])).collect(),
+                    sample_sizes: (0..number_of_entries as usize).map(|i| BigEndian::read_u32(&entry_buf[i * 4..])).collect(),
                 })
             },
             constant_sample_size @ _ => Ok(Self{

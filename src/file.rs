@@ -572,4 +572,12 @@ mod tests {
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 2);
     }
+
+    #[test]
+    fn test_file_empty_mov() {
+        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/empty.mov")).unwrap();
+
+        let movie_data = f.get_movie_data().unwrap();
+        assert_eq!(movie_data.tracks.len(), 3);
+    }
 }
