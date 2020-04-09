@@ -499,6 +499,46 @@ mod tests {
         assert_eq!(movie_data.tracks.len(), 3);
 
         {
+            let metadata = movie_data.metadata.as_ref().unwrap().metadata();
+            for (k, v) in [
+                ("manufacturer", data::MetadataValue::String("Blackmagic Design".to_string())),
+                ("camera_id", data::MetadataValue::String("7860b0bc-64aa-416b-919a-fdef19fb483c".to_string())),
+                ("camera_type", data::MetadataValue::String("Blackmagic URSA Mini Pro 4.6K".to_string())),
+                ("firmware_version", data::MetadataValue::String("6.0".to_string())),
+                ("braw_compression_ratio", data::MetadataValue::String("12:1".to_string())),
+                ("crop_origin", data::MetadataValue::Dimensions{width: 16.0, height: 16.0}),
+                ("crop_size", data::MetadataValue::Dimensions{width: 4608.0, height: 2592.0}),
+                ("clip_number", data::MetadataValue::String("A057_08251201_C159".to_string())),
+                ("reel_name", data::MetadataValue::String("57".to_string())),
+                ("scene", data::MetadataValue::String("1".to_string())),
+                ("take", data::MetadataValue::String("99".to_string())),
+                ("good_take", data::MetadataValue::String("false".to_string())),
+                ("environment", data::MetadataValue::String("interior".to_string())),
+                ("day_night", data::MetadataValue::String("day".to_string())),
+                ("lens_type", data::MetadataValue::String("Sigma or Tamron 24-70mm f/2.8".to_string())),
+                ("camera_number", data::MetadataValue::String("A".to_string())),
+                ("aspect_ratio", data::MetadataValue::String("2.40:1".to_string())),
+                ("tone_curve_contrast", data::MetadataValue::F32(1.410178)),
+                ("tone_curve_saturation", data::MetadataValue::F32(1.0)),
+                ("tone_curve_midpoint", data::MetadataValue::F32(0.409008)),
+                ("tone_curve_highlights", data::MetadataValue::F32(0.221778)),
+                ("tone_curve_shadows", data::MetadataValue::F32(1.633367)),
+                ("tone_curve_video_black_level", data::MetadataValue::U16(0)),
+                ("post_3dlut_mode", data::MetadataValue::String("Disabled".to_string())),
+                ("viewing_gamma", data::MetadataValue::String("Blackmagic Design Extended Video".to_string())),
+                ("viewing_gamut", data::MetadataValue::String("Blackmagic Design".to_string())),
+                ("viewing_bmdgen", data::MetadataValue::U16(4)),
+                ("date_recorded", data::MetadataValue::String("2018:08:25".to_string())),
+            ].iter() {
+                let values = metadata.get(&k.to_string());
+                assert_eq!(values.is_some(), true, "{}", k);
+                let values = values.unwrap();
+                assert_eq!(values.len(), 1, "{}", k);
+                assert_eq!(values[0].value, *v, "{}", k);
+            }
+        }
+
+        {
             let dir = tempfile::TempDir::new().unwrap();
             let path = dir.path().join("tmp.mov");
             {

@@ -3,11 +3,12 @@ use super::deserializer::Deserializer;
 use super::serializer::Serializer;
 use super::error::{Error, Result};
 
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt;
 use std::io::{Cursor, Read, Seek, Write};
 
-use byteorder::{BigEndian, ByteOrder, WriteBytesExt};
+use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 use serde::{de, ser};
 
 pub fn read_one<T: AtomData, R: Read + Seek>(mut reader: R) -> Result<Option<T>> {
@@ -113,6 +114,7 @@ impl From<FixedPoint32> for f32 {
 pub struct MovieData {
     pub header: MovieHeaderData,
     pub tracks: Vec<TrackData>,
+    pub metadata: Option<MetadataData>,
 }
 
 impl AtomData for MovieData {
@@ -124,6 +126,7 @@ impl ReadData for MovieData {
         Ok(Self{
             header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing movie header"))?,
             tracks: read_all(&mut reader)?,
+            metadata: read_one(&mut reader)?,
         })
     }
 }
@@ -158,6 +161,7 @@ pub struct TrackData {
     pub header: TrackHeaderData,
     pub media: MediaData,
     pub edit: Option<EditData>,
+    pub metadata: Option<MetadataData>,
 }
 
 impl AtomData for TrackData {
@@ -170,6 +174,7 @@ impl ReadData for TrackData {
             header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing track header"))?,
             media: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing track media"))?,
             edit: read_one(&mut reader)?,
+            metadata: read_one(&mut reader)?,
         })
     }
 }
@@ -210,6 +215,7 @@ pub struct MediaData {
     pub header: MediaHeaderData,
     pub handler_reference: Option<HandlerReferenceData>,
     pub information: Option<MediaInformationData>,
+    pub metadata: Option<MetadataData>,
 }
 
 impl AtomData for MediaData {
@@ -231,6 +237,7 @@ impl ReadData for MediaData {
                 }
             },
             handler_reference: handler_reference,
+            metadata: read_one(&mut reader)?,
         })
     }
 }
@@ -1164,11 +1171,220 @@ impl<M: MediaType> AtomData for SampleDescriptionData<M> {
     const TYPE: FourCC = FourCC(0x73747364);
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-pub struct MetadataData {}
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataData {
+    pub handler: MetadataHandlerData,
+    pub item_keys: MetadataItemKeysData,
+    pub item_list: MetadataItemListData,
+}
 
 impl AtomData for MetadataData {
     const TYPE: FourCC = FourCC(0x6d657461);
+}
+
+impl ReadData for MetadataData {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(Self{
+            handler: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing metadata handler"))?,
+            item_keys: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing metadata item keys"))?,
+            item_list: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing metadata item list"))?,
+        })
+    }
+}
+
+impl MetadataData {
+    // Returns metadata as a hashmap.
+    pub fn metadata(&self) -> HashMap<String, &Vec<MetadataValueData>> {
+        let mut ret = HashMap::new();
+        for (key_index, item) in self.item_list.items.iter() {
+            let key_index = *key_index as usize;
+            if key_index >= self.item_keys.entries.len() + 1 {
+                continue;
+            }
+            if let Some(key) = String::from_utf8(self.item_keys.entries[key_index - 1].key_value.clone()).ok() {
+                ret.insert(key, &item.values);
+            }
+        }
+        return ret
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct MetadataHandlerData {
+    pub version: u8,
+    pub flags: [u8; 3],
+    pub predefined: u32,
+    pub handler_type: FourCC,
+}
+
+impl AtomData for MetadataHandlerData {
+    const TYPE: FourCC = FourCC(0x68646c72);
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataItemKeysDataEntry {
+    pub key_namespace: u32,
+    pub key_value: Vec<u8>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataItemKeysData {
+    pub entries: Vec<MetadataItemKeysDataEntry>,
+}
+
+impl AtomData for MetadataItemKeysData {
+    const TYPE: FourCC = FourCC(0x6b657973);
+}
+
+impl ReadData for MetadataItemKeysData {
+    fn read<R: Read>(mut reader: R) -> Result<Self> {
+        let mut buf = [0; 8];
+        reader.read_exact(&mut buf)?;
+        let entry_count = BigEndian::read_u32(&buf[4..]);
+        let mut entries = vec![];
+        for _ in 0..entry_count {
+            reader.read_exact(&mut buf)?;
+            let key_size = BigEndian::read_u32(&buf);
+            if key_size < 8 {
+                return Err(Error::MalformedFile("invalid metadata key size"));
+            }
+            let key_value_size = (key_size - 8) as usize;
+            let mut key_value = Vec::with_capacity(key_value_size);
+            key_value.resize(key_value_size, 0);
+            reader.read_exact(&mut key_value)?;
+            entries.push(MetadataItemKeysDataEntry{
+                key_namespace: BigEndian::read_u32(&buf[4..]),
+                key_value: key_value,
+            })
+        }
+        Ok(Self{
+            entries: entries,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum MetadataValue {
+    F32(f32),
+    F64(f64),
+    I8(i8),
+    I16(i16),
+    I32(i32),
+    I64(i64),
+    U8(u8),
+    U16(u16),
+    U32(u32),
+    U64(u64),
+    String(String),
+    Point{
+        x: f32,
+        y: f32,
+    },
+    Dimensions{
+        width: f32,
+        height: f32,
+    },
+    Rect{
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    },
+    Unknown{
+        type_indicator: u32,
+        data: Vec<u8>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataValueData {
+    pub locale: u32,
+    pub value: MetadataValue,
+}
+
+impl ReadData for MetadataValueData {
+    fn read<R: Read>(mut reader: R) -> Result<Self> {
+        let mut header_buf = [0; 8];
+        reader.read_exact(&mut header_buf)?;
+
+        Ok(Self{
+            locale: BigEndian::read_u32(&header_buf[4..]),
+            value: match BigEndian::read_u32(&header_buf) {
+                1 => {
+                    let mut data = vec![];
+                    reader.read_to_end(&mut data)?;
+                    MetadataValue::String(String::from_utf8(data).map_err(|_| Error::MalformedFile("malformed utf-8 string"))?)
+                },
+                23 => MetadataValue::F32(reader.read_f32::<BigEndian>()?),
+                24 => MetadataValue::F64(reader.read_f64::<BigEndian>()?),
+                65 => MetadataValue::I8(reader.read_i8()?),
+                66 => MetadataValue::I16(reader.read_i16::<BigEndian>()?),
+                67 => MetadataValue::I32(reader.read_i32::<BigEndian>()?),
+                70 => MetadataValue::Point{
+                    x: reader.read_f32::<BigEndian>()?,
+                    y: reader.read_f32::<BigEndian>()?,
+                },
+                71 => MetadataValue::Dimensions{
+                    width: reader.read_f32::<BigEndian>()?,
+                    height: reader.read_f32::<BigEndian>()?,
+                },
+                72 => MetadataValue::Rect{
+                    x: reader.read_f32::<BigEndian>()?,
+                    y: reader.read_f32::<BigEndian>()?,
+                    width: reader.read_f32::<BigEndian>()?,
+                    height: reader.read_f32::<BigEndian>()?,
+                },
+                74 => MetadataValue::I64(reader.read_i64::<BigEndian>()?),
+                75 => MetadataValue::U8(reader.read_u8()?),
+                76 => MetadataValue::U16(reader.read_u16::<BigEndian>()?),
+                77 => MetadataValue::U32(reader.read_u32::<BigEndian>()?),
+                78 => MetadataValue::U64(reader.read_u64::<BigEndian>()?),
+                n @ _ => {
+                    let mut data = vec![];
+                    reader.read_to_end(&mut data)?;
+                    MetadataValue::Unknown{
+                        type_indicator: n,
+                        data: data,
+                    }
+                },
+            },
+        })
+    }
+}
+
+impl AtomData for MetadataValueData {
+    const TYPE: FourCC = FourCC(0x64617461);
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataItemData {
+    pub values: Vec<MetadataValueData>,
+}
+
+impl ReadData for MetadataItemData {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(Self{
+            values: read_all(&mut reader)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct MetadataItemListData {
+    pub items: Vec<(u32, MetadataItemData)>,
+}
+
+impl AtomData for MetadataItemListData {
+    const TYPE: FourCC = FourCC(0x696c7374);
+}
+
+impl ReadData for MetadataItemListData {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        let atoms = AtomReader::new(&mut reader).map(|r| r.map_err(|e| e.into())).collect::<Result<Vec<Atom>>>()?;
+        Ok(Self{
+            items: atoms.iter().map(|a| Ok((a.typ.0, MetadataItemData::read(a.data(&mut reader))?))).collect::<Result<_>>()?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
