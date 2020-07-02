@@ -1,8 +1,8 @@
 use std::fmt::Display;
 use std::io;
 
-use serde::ser::Error as SerdeSerError;
 use serde::de::Error as SerdeDeError;
+use serde::ser::Error as SerdeSerError;
 
 #[derive(Debug)]
 pub enum Error {

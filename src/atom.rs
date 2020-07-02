@@ -1,4 +1,7 @@
-use std::{io, io::{copy, Read, Seek, SeekFrom, Write}};
+use std::{
+    io,
+    io::{copy, Read, Seek, SeekFrom, Write},
+};
 
 use byteorder::{BigEndian, ByteOrder, ReadBytesExt, WriteBytesExt};
 
@@ -60,7 +63,7 @@ pub struct SectionReader<R: Read + Seek> {
 
 impl<R: Read + Seek> SectionReader<R> {
     pub fn new(reader: R, offset: usize, len: usize) -> Self {
-        Self{
+        Self {
             reader: reader,
             begin: offset as _,
             end: (offset + len) as _,
@@ -90,11 +93,11 @@ impl<R: Read + Seek> Seek for SectionReader<R> {
             SeekFrom::End(n) => ((self.end as i64) + n) as u64,
             SeekFrom::Current(n) => ((self.position as i64) + n) as u64,
         };
-        Ok(self.position)
+        Ok(self.position - self.begin)
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Atom {
     pub offset: usize,
     pub typ: FourCC,
@@ -117,16 +120,15 @@ impl Atom {
 }
 
 pub struct AtomReader<R: Read + Seek> {
-    offset: usize,
+    offset: Option<usize>,
     reader: R,
 }
 
 impl<R: Read + Seek> AtomReader<R> {
+    /// Creates a new atom reader with the given reader. Atoms will be read beginning at the
+    /// reader's current position.
     pub fn new(reader: R) -> Self {
-        Self{
-            offset: 0,
-            reader: reader,
-        }
+        Self { offset: None, reader: reader }
     }
 }
 
@@ -134,15 +136,21 @@ impl<R: Read + Seek> Iterator for AtomReader<R> {
     type Item = io::Result<Atom>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Err(e) = self.reader.seek(SeekFrom::Start(self.offset as u64)) {
-            return Some(Err(e));
-        }
+        let offset = match self.reader.seek(match self.offset {
+            Some(offset) => SeekFrom::Start(offset as u64),
+            None => SeekFrom::Current(0),
+        }) {
+            Ok(o) => o as _,
+            Err(e) => return Some(Err(e)),
+        };
         let mut size = match self.reader.read_u32::<BigEndian>() {
             Ok(n) => AtomSize::Size(n),
-            Err(e) => return match e.kind() {
-                io::ErrorKind::UnexpectedEof => None,
-                _ => Some(Err(e)),
-            },
+            Err(e) => {
+                return match e.kind() {
+                    io::ErrorKind::UnexpectedEof => None,
+                    _ => Some(Err(e)),
+                }
+            }
         };
         let typ = match self.reader.read_u32::<BigEndian>() {
             Ok(n) => FourCC(n),
@@ -154,12 +162,12 @@ impl<R: Read + Seek> Iterator for AtomReader<R> {
                 Err(e) => return Some(Err(e)),
             };
         }
-        let atom = Atom{
+        let atom = Atom {
             typ: typ,
             size: size,
-            offset: self.offset,
+            offset: offset,
         };
-        self.offset += atom.size.as_usize();
+        self.offset = Some(offset + atom.size.as_usize());
         Some(Ok(atom))
     }
 }
@@ -175,27 +183,25 @@ pub trait AtomWriteExt: Write {
     fn write_atom_header<S: Into<AtomSize>>(&mut self, typ: FourCC, data_size: S) -> io::Result<()> {
         let data_size = data_size.into();
         let atom_size = match data_size {
-            AtomSize::ExtendedSize(data_size) => {
-                AtomSize::ExtendedSize(data_size + 16)
-            },
+            AtomSize::ExtendedSize(data_size) => AtomSize::ExtendedSize(data_size + 16),
             AtomSize::Size(data_size) => {
                 if data_size > 0xFFFFFFF7 {
                     AtomSize::ExtendedSize(data_size as u64 + 16)
                 } else {
                     AtomSize::Size(data_size + 8)
                 }
-            },
+            }
         };
         match atom_size {
             AtomSize::ExtendedSize(size) => {
                 self.write_u32::<BigEndian>(1)?;
                 self.write_four_cc(typ)?;
                 self.write_u64::<BigEndian>(size)
-            },
+            }
             AtomSize::Size(size) => {
                 self.write_u32::<BigEndian>(size)?;
                 self.write_four_cc(typ)
-            },
+            }
         }
     }
 

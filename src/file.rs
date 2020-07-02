@@ -2,8 +2,11 @@ use std::io::{copy, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use super::atom::{AtomReader, AtomSize, AtomWriteExt, FourCC};
-use super::{data, data::{AtomData, MovieData, ReadData}};
 use super::error::{Error, Result};
+use super::{
+    data,
+    data::{AtomData, MovieData, ReadData},
+};
 
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
@@ -28,7 +31,7 @@ impl Data {
 
 impl File {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<File> {
-        Ok(File{
+        Ok(File {
             f: std::fs::File::open(path)?,
             movie_data: None,
         })
@@ -58,17 +61,21 @@ impl File {
                 let data = MovieData::read(Cursor::new(buf.as_slice()))?;
                 self.movie_data = Some(data.clone());
                 Ok(data)
-            },
+            }
         }
     }
 
     pub fn trim_frames<W: Write>(&mut self, w: W, start_frame: u64, frame_count: u64) -> Result<()> {
         let movie_data = self.get_movie_data()?;
 
-        let video_track = movie_data.tracks.iter().find(|t| match t.media.information.as_ref() {
-            Some(data::MediaInformationData::Video(_)) => true,
-            _ => false,
-        }).ok_or(Error::Other("no video track"))?;
+        let video_track = movie_data
+            .tracks
+            .iter()
+            .find(|t| match t.media.information.as_ref() {
+                Some(data::MediaInformationData::Video(_)) => true,
+                _ => false,
+            })
+            .ok_or(Error::Other("no video track"))?;
 
         let video_minf = match &video_track.media.information {
             Some(data::MediaInformationData::Video(minf)) => minf,
@@ -77,13 +84,26 @@ impl File {
 
         let time_scale = video_track.media.header.time_scale;
         let sample_table = video_minf.sample_table.as_ref().ok_or(Error::Other("no sample table for video"))?;
-        let start_time = sample_table.time_to_sample.as_ref().and_then(|stts| stts.sample_time(start_frame)).ok_or(Error::Other("start frame not found"))?;
-        let end_time = sample_table.time_to_sample.as_ref().and_then(|stts| stts.sample_time(start_frame + frame_count)).ok_or(Error::Other("end frame not found"))?;
+        let start_time = sample_table
+            .time_to_sample
+            .as_ref()
+            .and_then(|stts| stts.sample_time(start_frame))
+            .ok_or(Error::Other("start frame not found"))?;
+        let end_time = sample_table
+            .time_to_sample
+            .as_ref()
+            .and_then(|stts| stts.sample_time(start_frame + frame_count))
+            .ok_or(Error::Other("end frame not found"))?;
 
         self.trim(w, time_scale, start_time, end_time - start_time)
     }
 
-    fn trim_sample_table<M: Clone + data::MediaType>(source: &data::SampleTableData<M>, start_sample: u64, sample_count: u64, data_offset: &mut u64) -> (data::SampleTableData<M>, Vec<Data>) {
+    fn trim_sample_table<M: Clone + data::MediaType>(
+        source: &data::SampleTableData<M>,
+        start_sample: u64,
+        sample_count: u64,
+        data_offset: &mut u64,
+    ) -> (data::SampleTableData<M>, Vec<Data>) {
         let mut dest = data::SampleTableData::default();
         let mut mdat: Vec<Data> = Vec::new();
 
@@ -171,7 +191,7 @@ impl File {
                     data.selection_duration = 0;
                     data.current_time = 0;
                     moov.write_atom(data)?;
-                },
+                }
                 data::TrackData::TYPE => {
                     let track = data::TrackData::read(atom.data(r.clone()))?;
 
@@ -229,75 +249,84 @@ impl File {
                     let end_sample = end_sample.unwrap_or(0);
                     let sample_count = end_sample - start_sample;
 
-                    let (time_to_sample, sample_to_chunk, sample_size, chunk_offset, mut mdat_additions) = track.media.information.as_ref().and_then(|minf| -> Option<Result<_>> {
-                        match minf { 
-                            data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().map(|v| {
-                                let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
-                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
-                            }),
-                            data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().map(|v| {
-                                let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
-                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
-                            }),
-                            data::MediaInformationData::Timecode(minf) => minf.sample_table.as_ref().map(|v| {
-                                let (mut table, mut mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
+                    let (time_to_sample, sample_to_chunk, sample_size, chunk_offset, mut mdat_additions) = track
+                        .media
+                        .information
+                        .as_ref()
+                        .and_then(|minf| -> Option<Result<_>> {
+                            match minf {
+                                data::MediaInformationData::Sound(minf) => minf.sample_table.as_ref().map(|v| {
+                                    let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
+                                    Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                                }),
+                                data::MediaInformationData::Video(minf) => minf.sample_table.as_ref().map(|v| {
+                                    let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
+                                    Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                                }),
+                                data::MediaInformationData::Timecode(minf) => minf.sample_table.as_ref().map(|v| {
+                                    let (mut table, mut mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
 
-                                if sample_count > 0 && !mdat.is_empty() && start_sample_time < start_time {
-                                    // modify the first timecode sample so we don't have to use an edit
-                                    // list offset for better compatibility
-                                    let offset = (start_time - start_sample_time) as u32;
+                                    if sample_count > 0 && !mdat.is_empty() && start_sample_time < start_time {
+                                        // modify the first timecode sample so we don't have to use an edit
+                                        // list offset for better compatibility
+                                        let offset = (start_time - start_sample_time) as u32;
 
-                                    // reduce the duration of the first sample so any samples that come after it are timed correctly
-                                    if let Some(time_to_sample) = table.time_to_sample.as_mut() {
-                                        if time_to_sample.entries.len() > 0 {
-                                            let first = &mut time_to_sample.entries[0];
-                                            let new_duration = first.sample_duration - offset;
-                                            if first.sample_count == 1 {
-                                                first.sample_duration = new_duration;
-                                            } else {
-                                                first.sample_count -= 1;
-                                                let mut new_entries = vec![data::TimeToSampleDataEntry{
-                                                    sample_count: 1,
-                                                    sample_duration: new_duration,
-                                                }];
-                                                new_entries.append(&mut time_to_sample.entries);
-                                                time_to_sample.entries = new_entries;
+                                        // reduce the duration of the first sample so any samples that come after it are timed correctly
+                                        if let Some(time_to_sample) = table.time_to_sample.as_mut() {
+                                            if time_to_sample.entries.len() > 0 {
+                                                let first = &mut time_to_sample.entries[0];
+                                                let new_duration = first.sample_duration - offset;
+                                                if first.sample_count == 1 {
+                                                    first.sample_duration = new_duration;
+                                                } else {
+                                                    first.sample_count -= 1;
+                                                    let mut new_entries = vec![data::TimeToSampleDataEntry {
+                                                        sample_count: 1,
+                                                        sample_duration: new_duration,
+                                                    }];
+                                                    new_entries.append(&mut time_to_sample.entries);
+                                                    time_to_sample.entries = new_entries;
+                                                }
                                             }
                                         }
+
+                                        let mut data = match &mdat[0] {
+                                            Data::SourceFile(source_offset, source_size) => {
+                                                self.f.seek(SeekFrom::Start(*source_offset))?;
+                                                let mut buf = Vec::new();
+                                                buf.resize(*source_size as usize, 0);
+                                                self.f.read_exact(&mut buf)?;
+                                                buf
+                                            }
+                                            Data::Vec(buf) => buf.clone(),
+                                        };
+
+                                        let chunk_info = table
+                                            .sample_chunk_info(0, None)
+                                            .ok_or(Error::Other("Unable to find first timecode sample chunk."))?;
+                                        let description = table
+                                            .sample_description(chunk_info.sample_description)
+                                            .ok_or(Error::Other("No sample description for timecode sample."))?;
+                                        let sample_data = data.as_slice().read_u32::<BigEndian>()?;
+                                        let offset_secs = (start_time as f64 - start_sample_time as f64) / track.media.header.time_scale as f64;
+                                        let offset_frames = (offset_secs * description.fps()).round() as i64;
+                                        let new_timecode = description.add_frames_to_sample(description.parse_sample_data(sample_data), offset_frames);
+                                        (&mut data.as_mut_slice()).write_u32::<BigEndian>(new_timecode.data())?;
+
+                                        mdat[0] = Data::Vec(data);
+
+                                        start_sample_time = start_time;
                                     }
 
-                                    let mut data = match &mdat[0] {
-                                        Data::SourceFile(source_offset, source_size) => {
-                                            self.f.seek(SeekFrom::Start(*source_offset))?;
-                                            let mut buf = Vec::new();
-                                            buf.resize(*source_size as usize, 0);
-                                            self.f.read_exact(&mut buf)?;
-                                            buf
-                                        },
-                                        Data::Vec(buf) => buf.clone(),
-                                    };
-
-                                    let chunk_info = table.sample_chunk_info(0, None).ok_or(Error::Other("Unable to find first timecode sample chunk."))?;
-                                    let description = table.sample_description(chunk_info.sample_description).ok_or(Error::Other("No sample description for timecode sample."))?;
-                                    let sample_data = data.as_slice().read_u32::<BigEndian>()?;
-                                    let offset_secs = (start_time as f64 - start_sample_time as f64) / track.media.header.time_scale as f64;
-                                    let offset_frames = (offset_secs * description.fps()).round() as i64;
-                                    let new_timecode = description.add_frames_to_sample(description.parse_sample_data(sample_data), offset_frames);
-                                    (&mut data.as_mut_slice()).write_u32::<BigEndian>(new_timecode.data())?;
-
-                                    mdat[0] = Data::Vec(data);
-
-                                    start_sample_time = start_time;
-                                }
-
-                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
-                            }),
-                            data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().map(|v| {
-                                let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
-                                Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
-                            }),
-                        }
-                    }).unwrap_or(Ok((None, None, None, None, vec![])))?;
+                                    Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                                }),
+                                data::MediaInformationData::Base(minf) => minf.sample_table.as_ref().map(|v| {
+                                    let (table, mdat) = Self::trim_sample_table(v, start_sample, sample_count, &mut data_offset);
+                                    Ok((table.time_to_sample, table.sample_to_chunk, table.sample_size, table.chunk_offset_64, mdat))
+                                }),
+                            }
+                        })
+                        .unwrap_or(Ok((None, None, None, None, vec![])))?;
                     mdat.append(&mut mdat_additions);
 
                     let mut trak: Vec<u8> = Vec::new();
@@ -312,18 +341,18 @@ impl File {
                                 data.duration = duration as _;
                                 trak.write_atom(data)?;
 
-                                trak.write_atom(data::EditData{
-                                    edit_list: Some(data::EditListData{
+                                trak.write_atom(data::EditData {
+                                    edit_list: Some(data::EditListData {
                                         version: 0,
                                         flags: [0; 3],
-                                        entries: vec![data::EditListDataEntry{
+                                        entries: vec![data::EditListDataEntry {
                                             track_duration: duration as _,
                                             media_time: (start_time as i64 - start_sample_time as i64) as _,
                                             media_rate: 1.0.into(),
                                         }],
                                     }),
                                 })?;
-                            },
+                            }
                             data::MediaData::TYPE => {
                                 let mut mdia: Vec<u8> = Vec::new();
 
@@ -336,7 +365,7 @@ impl File {
                                             data.version = 0;
                                             data.duration = time_to_sample.as_ref().map(|stts| stts.duration()).unwrap_or(0) as _;
                                             mdia.write_atom(data)?;
-                                        },
+                                        }
                                         data::BaseMediaInformationData::<data::GeneralMediaType>::TYPE => {
                                             let mut minf: Vec<u8> = Vec::new();
 
@@ -352,7 +381,7 @@ impl File {
                                                             let atom = atom?;
                                                             match atom.typ {
                                                                 data::SampleDescriptionData::<data::GeneralMediaType>::TYPE => atom.copy(&mut r, &mut stbl)?,
-                                                                _ => {},
+                                                                _ => {}
                                                             }
                                                         }
 
@@ -374,37 +403,39 @@ impl File {
 
                                                         minf.write_atom_header(data::SampleTableData::<data::GeneralMediaType>::TYPE, stbl.len())?;
                                                         copy(&mut stbl.as_slice(), &mut minf)?;
-                                                    },
-                                                    data::BaseMediaInformationHeaderData::TYPE |
-                                                    data::SoundMediaInformationHeaderData::TYPE |
-                                                    data::VideoMediaInformationHeaderData::TYPE |
-                                                    data::DataInformationData::TYPE |
-                                                    data::HandlerReferenceData::TYPE => atom.copy(&mut r, &mut minf)?,
-                                                    _ => {},
+                                                    }
+                                                    data::BaseMediaInformationHeaderData::TYPE
+                                                    | data::SoundMediaInformationHeaderData::TYPE
+                                                    | data::VideoMediaInformationHeaderData::TYPE
+                                                    | data::DataInformationData::TYPE
+                                                    | data::HandlerReferenceData::TYPE => atom.copy(&mut r, &mut minf)?,
+                                                    _ => {}
                                                 }
                                             }
 
                                             mdia.write_atom_header(data::BaseMediaInformationData::<data::GeneralMediaType>::TYPE, minf.len())?;
                                             copy(&mut minf.as_slice(), &mut mdia)?;
-                                        },
-                                        data::HandlerReferenceData::TYPE | data::ExtendedLanguageTagData::TYPE | data::UserDataData::TYPE => atom.copy(&mut r, &mut mdia)?,
-                                        _ => {},
+                                        }
+                                        data::HandlerReferenceData::TYPE | data::ExtendedLanguageTagData::TYPE | data::UserDataData::TYPE => {
+                                            atom.copy(&mut r, &mut mdia)?
+                                        }
+                                        _ => {}
                                     }
                                 }
 
                                 trak.write_atom_header(data::MediaData::TYPE, mdia.len())?;
                                 copy(&mut mdia.as_slice(), &mut trak)?;
-                            },
+                            }
                             data::TrackReferenceData::TYPE | data::UserDataData::TYPE => atom.copy(&mut r, &mut trak)?,
-                            _ => {},
+                            _ => {}
                         }
                     }
 
                     moov.write_atom_header(data::TrackData::TYPE, trak.len())?;
                     copy(&mut trak.as_slice(), &mut moov)?;
-                },
+                }
                 data::MetadataData::TYPE | data::UserDataData::TYPE => atom.copy(r.clone(), &mut moov)?,
-                _ => {},
+                _ => {}
             }
         }
 
@@ -415,10 +446,10 @@ impl File {
                 Data::SourceFile(offset, size) => {
                     self.f.seek(SeekFrom::Start(*offset))?;
                     copy(&mut (&self.f).take(*size as u64), &mut w)?;
-                },
+                }
                 Data::Vec(buf) => {
                     copy(&mut buf.as_slice(), &mut w)?;
-                },
+                }
             }
         }
 
@@ -468,26 +499,29 @@ mod tests {
             match track.media.information.as_ref().unwrap() {
                 data::MediaInformationData::Sound(minf) => {
                     let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
-                    assert_eq!(&data::SoundSampleDescriptionDataEntry{
-                        data_format: 1768829492,
-                        reserved: [0, 0, 0, 0, 0, 0],
-                        data_reference_index: 1,
-                        version: data::SoundSampleDescriptionDataEntryVersion::V1(data::SoundSampleDescriptionDataEntryV1{
-                            revision_level: 0,
-                            vendor: 0,
-                            number_of_channels: 2,
-                            sample_size: 16,
-                            compression_id: 0,
-                            packet_size: 0,
-                            sample_rate: 48000.0.into(),
-                            samples_per_packet: 1,
-                            bytes_per_packet: 3,
-                            bytes_per_frame: 6,
-                            bytes_per_sample: 2,
-                        }),
-                    }, desc);
-                },
-                _ => {},
+                    assert_eq!(
+                        &data::SoundSampleDescriptionDataEntry {
+                            data_format: 1768829492,
+                            reserved: [0, 0, 0, 0, 0, 0],
+                            data_reference_index: 1,
+                            version: data::SoundSampleDescriptionDataEntryVersion::V1(data::SoundSampleDescriptionDataEntryV1 {
+                                revision_level: 0,
+                                vendor: 0,
+                                number_of_channels: 2,
+                                sample_size: 16,
+                                compression_id: 0,
+                                packet_size: 0,
+                                sample_rate: 48000.0.into(),
+                                samples_per_packet: 1,
+                                bytes_per_packet: 3,
+                                bytes_per_frame: 6,
+                                bytes_per_sample: 2,
+                            }),
+                        },
+                        desc
+                    );
+                }
+                _ => {}
             }
         }
     }
@@ -506,8 +540,8 @@ mod tests {
                 ("camera_type", data::MetadataValue::String("Blackmagic URSA Mini Pro 4.6K".to_string())),
                 ("firmware_version", data::MetadataValue::String("6.0".to_string())),
                 ("braw_compression_ratio", data::MetadataValue::String("12:1".to_string())),
-                ("crop_origin", data::MetadataValue::Dimensions{width: 16.0, height: 16.0}),
-                ("crop_size", data::MetadataValue::Dimensions{width: 4608.0, height: 2592.0}),
+                ("crop_origin", data::MetadataValue::Dimensions { width: 16.0, height: 16.0 }),
+                ("crop_size", data::MetadataValue::Dimensions { width: 4608.0, height: 2592.0 }),
                 ("clip_number", data::MetadataValue::String("A057_08251201_C159".to_string())),
                 ("reel_name", data::MetadataValue::String("57".to_string())),
                 ("scene", data::MetadataValue::String("1".to_string())),
@@ -529,7 +563,9 @@ mod tests {
                 ("viewing_gamut", data::MetadataValue::String("Blackmagic Design".to_string())),
                 ("viewing_bmdgen", data::MetadataValue::U16(4)),
                 ("date_recorded", data::MetadataValue::String("2018:08:25".to_string())),
-            ].iter() {
+            ]
+            .iter()
+            {
                 let values = metadata.get(&k.to_string());
                 assert_eq!(values.is_some(), true, "{}", k);
                 let values = values.unwrap();
@@ -567,10 +603,11 @@ mod tests {
                 match (&mut expected.media.information, &actual.media.information) {
                     (Some(data::MediaInformationData::Video(expected)), Some(data::MediaInformationData::Video(actual))) => {
                         expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
-                    },
+                        expected.sample_table.as_mut().unwrap().sample_description = actual.sample_table.as_ref().unwrap().sample_description.clone();
+                    }
                     (Some(data::MediaInformationData::Sound(expected)), Some(data::MediaInformationData::Sound(actual))) => {
                         expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
-                    },
+                    }
                     (Some(data::MediaInformationData::Timecode(expected_minf)), Some(data::MediaInformationData::Timecode(actual_minf))) => {
                         let expected_stbl = expected_minf.sample_table.as_ref().unwrap();
                         let expected_sample_offset = expected_stbl.sample_offset(0, &expected_stbl.sample_chunk_info(0, None).unwrap()).unwrap();
@@ -583,10 +620,10 @@ mod tests {
                         expected.media.header.duration = actual.media.header.duration;
                         expected_minf.sample_table.as_mut().unwrap().time_to_sample = actual_minf.sample_table.as_ref().unwrap().time_to_sample.clone();
                         expected_minf.sample_table.as_mut().unwrap().chunk_offset_64 = actual_minf.sample_table.as_ref().unwrap().chunk_offset_64.clone();
-                    },
+                    }
                     (Some(data::MediaInformationData::Base(expected)), Some(data::MediaInformationData::Base(actual))) => {
                         expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
-                    },
+                    }
                     _ => panic!("mismatched media information"),
                 }
 
