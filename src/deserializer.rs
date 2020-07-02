@@ -11,9 +11,7 @@ pub struct Deserializer<R: Read> {
 
 impl<R: Read> Deserializer<R> {
     pub fn new(reader: R) -> Self {
-        Deserializer{
-            reader: reader,
-        }
+        Deserializer { reader: reader }
     }
 }
 
@@ -87,10 +85,7 @@ struct SeqAccess<'a, R: Read> {
 
 impl<'a, R: Read> SeqAccess<'a, R> {
     fn new(de: &'a mut Deserializer<R>, len: usize) -> Self {
-        SeqAccess {
-            de,
-            left: len,
-        }
+        SeqAccess { de, left: len }
     }
 }
 
@@ -98,7 +93,8 @@ impl<'de, 'a, R: Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
     type Error = Error;
 
     fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
-        where T: DeserializeSeed<'de>
+    where
+        T: DeserializeSeed<'de>,
     {
         if self.left > 0 {
             self.left -= 1;

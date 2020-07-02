@@ -11,9 +11,7 @@ pub struct Serializer<W: Write> {
 
 impl<W: Write> Serializer<W> {
     pub fn new(writer: W) -> Self {
-        Serializer{
-            writer: writer,
-        }
+        Serializer { writer: writer }
     }
 }
 
