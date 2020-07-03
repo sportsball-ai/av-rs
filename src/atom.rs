@@ -154,7 +154,12 @@ impl<R: Read + Seek> Iterator for AtomReader<R> {
         };
         let typ = match self.reader.read_u32::<BigEndian>() {
             Ok(n) => FourCC(n),
-            Err(e) => return Some(Err(e)),
+            Err(e) => {
+                return match e.kind() {
+                    io::ErrorKind::UnexpectedEof if size.as_usize() == 0 => None,
+                    _ => Some(Err(e)),
+                }
+            }
         };
         if size.as_usize() == 1 {
             size = match self.reader.read_u64::<BigEndian>() {
