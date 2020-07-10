@@ -516,6 +516,9 @@ mod tests {
                                 bytes_per_packet: 3,
                                 bytes_per_frame: 6,
                                 bytes_per_sample: 2,
+                                extensions: data::SoundSampleDescriptionDataEntryExtensions {
+                                    elementary_stream_descriptor: None,
+                                },
                             }),
                         },
                         desc
@@ -648,6 +651,42 @@ mod tests {
 
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 2);
+
+        for track in movie_data.tracks.iter() {
+            match track.media.information.as_ref().unwrap() {
+                data::MediaInformationData::Sound(minf) => {
+                    let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
+                    assert_eq!(
+                        &data::SoundSampleDescriptionDataEntry {
+                            data_format: 1836069985,
+                            reserved: [0, 0, 0, 0, 0, 0],
+                            data_reference_index: 1,
+                            version: data::SoundSampleDescriptionDataEntryVersion::V0(data::SoundSampleDescriptionDataEntryV0 {
+                                revision_level: 0,
+                                vendor: 0,
+                                number_of_channels: 2,
+                                sample_size: 16,
+                                compression_id: 0,
+                                packet_size: 0,
+                                sample_rate: 48000.0.into(),
+                                extensions: data::SoundSampleDescriptionDataEntryExtensions {
+                                    elementary_stream_descriptor: Some(data::ElementaryStreamDescriptorData {
+                                        version: 0,
+                                        descriptor: vec![
+                                            0x03, 0x80, 0x80, 0x80, 0x22, 0x00, 0x02, 0x00, 0x04, 0x80, 0x80, 0x80, 0x14, 0x40, 0x15, 0x00, 0x00, 0x00, 0x00,
+                                            0x02, 0xe3, 0xbf, 0x00, 0x02, 0xe3, 0xbf, 0x05, 0x80, 0x80, 0x80, 0x02, 0x11, 0x90, 0x06, 0x80, 0x80, 0x80, 0x01,
+                                            0x02,
+                                        ],
+                                    }),
+                                },
+                            }),
+                        },
+                        desc
+                    );
+                }
+                _ => {}
+            }
+        }
     }
 
     #[test]

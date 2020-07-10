@@ -806,7 +806,43 @@ impl AtomData for VideoMediaInformationHeaderData {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SoundMediaType;
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ElementaryStreamDescriptorData {
+    pub version: u32,
+    pub descriptor: Vec<u8>,
+}
+
+impl AtomData for ElementaryStreamDescriptorData {
+    const TYPE: FourCC = FourCC(0x65736473);
+}
+
+impl ReadData for ElementaryStreamDescriptorData {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(Self {
+            version: read(&mut reader)?,
+            descriptor: {
+                let mut descriptor = Vec::new();
+                reader.read_to_end(&mut descriptor)?;
+                descriptor
+            },
+        })
+    }
+}
+
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct SoundSampleDescriptionDataEntryExtensions {
+    pub elementary_stream_descriptor: Option<ElementaryStreamDescriptorData>,
+}
+
+impl ReadData for SoundSampleDescriptionDataEntryExtensions {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(Self {
+            elementary_stream_descriptor: read_one(&mut reader)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SoundSampleDescriptionDataEntryV0 {
     pub revision_level: u16,
     pub vendor: u32,
@@ -815,9 +851,30 @@ pub struct SoundSampleDescriptionDataEntryV0 {
     pub compression_id: u16,
     pub packet_size: u16,
     pub sample_rate: FixedPoint32,
+
+    pub extensions: SoundSampleDescriptionDataEntryExtensions,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+impl ReadData for SoundSampleDescriptionDataEntryV0 {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(Self {
+            revision_level: read(&mut reader)?,
+            vendor: read(&mut reader)?,
+            number_of_channels: read(&mut reader)?,
+            sample_size: read(&mut reader)?,
+            compression_id: read(&mut reader)?,
+            packet_size: read(&mut reader)?,
+            sample_rate: read(&mut reader)?,
+            extensions: {
+                let begin = reader.seek(SeekFrom::Current(0))? as usize;
+                let end = reader.seek(SeekFrom::End(0))? as usize;
+                read(SectionReader::new(&mut reader, begin, end - begin))?
+            },
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct SoundSampleDescriptionDataEntryV1 {
     pub revision_level: u16,
     pub vendor: u32,
@@ -830,6 +887,31 @@ pub struct SoundSampleDescriptionDataEntryV1 {
     pub bytes_per_packet: u32,
     pub bytes_per_frame: u32,
     pub bytes_per_sample: u32,
+
+    pub extensions: SoundSampleDescriptionDataEntryExtensions,
+}
+
+impl ReadData for SoundSampleDescriptionDataEntryV1 {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(Self {
+            revision_level: read(&mut reader)?,
+            vendor: read(&mut reader)?,
+            number_of_channels: read(&mut reader)?,
+            sample_size: read(&mut reader)?,
+            compression_id: read(&mut reader)?,
+            packet_size: read(&mut reader)?,
+            sample_rate: read(&mut reader)?,
+            samples_per_packet: read(&mut reader)?,
+            bytes_per_packet: read(&mut reader)?,
+            bytes_per_frame: read(&mut reader)?,
+            bytes_per_sample: read(&mut reader)?,
+            extensions: {
+                let begin = reader.seek(SeekFrom::Current(0))? as usize;
+                let end = reader.seek(SeekFrom::End(0))? as usize;
+                read(SectionReader::new(&mut reader, begin, end - begin))?
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -845,42 +927,33 @@ pub enum SoundSampleDescriptionDataEntryVersion {
     V2(SoundSampleDescriptionDataEntryV2),
 }
 
-impl<'de> de::Deserialize<'de> for SoundSampleDescriptionDataEntryVersion {
-    fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        struct VersionVisitor;
-
-        impl<'de> de::Visitor<'de> for VersionVisitor {
-            type Value = SoundSampleDescriptionDataEntryVersion;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str("a version followed by a sound description")
-            }
-
-            fn visit_seq<S: de::SeqAccess<'de>>(self, mut seq: S) -> std::result::Result<Self::Value, S::Error> {
-                match seq.next_element::<u16>()?.ok_or(de::Error::custom("expected sound description version"))? {
-                    0 => Ok(Self::Value::V0(
-                        seq.next_element()?.ok_or(de::Error::custom("expected sound description v0 fields"))?,
-                    )),
-                    1 => Ok(Self::Value::V1(
-                        seq.next_element()?.ok_or(de::Error::custom("expected sound description v1 fields"))?,
-                    )),
-                    _ => Ok(Self::Value::V2(
-                        seq.next_element()?.ok_or(de::Error::custom("expected sound description v2+ fields"))?,
-                    )),
-                }
-            }
-        }
-
-        deserializer.deserialize_tuple(2, VersionVisitor)
+impl ReadData for SoundSampleDescriptionDataEntryVersion {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(match reader.read_u16::<BigEndian>()? {
+            0 => Self::V0(read(&mut reader)?),
+            1 => Self::V1(read(&mut reader)?),
+            _ => Self::V2(read(&mut reader)?),
+        })
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SoundSampleDescriptionDataEntry {
     pub data_format: u32,
     pub reserved: [u8; 6],
     pub data_reference_index: u16,
     pub version: SoundSampleDescriptionDataEntryVersion,
+}
+
+impl ReadData for SoundSampleDescriptionDataEntry {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        Ok(Self {
+            data_format: read(&mut reader)?,
+            reserved: read(&mut reader)?,
+            data_reference_index: read(&mut reader)?,
+            version: read(&mut reader)?,
+        })
+    }
 }
 
 impl MediaType for SoundMediaType {
@@ -1640,6 +1713,9 @@ mod tests {
                 bytes_per_packet: 0,
                 bytes_per_frame: 0,
                 bytes_per_sample: 2,
+                extensions: SoundSampleDescriptionDataEntryExtensions {
+                    elementary_stream_descriptor: None,
+                },
             }),
         };
         assert_eq!(None, SoundMediaType::constant_sample_size(&desc));
