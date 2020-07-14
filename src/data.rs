@@ -744,12 +744,14 @@ impl ReadData for VideoSampleDescriptionDataEntry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct VideoSampleDescriptionDataEntryExtensions {
     pub avc_decoder_configuration: Option<AVCDecoderConfigurationData>,
+    pub hvc_decoder_configuration: Option<HVCDecoderConfigurationData>,
 }
 
 impl ReadData for VideoSampleDescriptionDataEntryExtensions {
     fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
         Ok(Self {
             avc_decoder_configuration: read_one(&mut reader)?,
+            hvc_decoder_configuration: read_one(&mut reader)?,
         })
     }
 }
@@ -764,6 +766,23 @@ impl AtomData for AVCDecoderConfigurationData {
 }
 
 impl ReadData for AVCDecoderConfigurationData {
+    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
+        let mut record = Vec::new();
+        reader.read_to_end(&mut record)?;
+        Ok(Self { record })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HVCDecoderConfigurationData {
+    pub record: Vec<u8>,
+}
+
+impl AtomData for HVCDecoderConfigurationData {
+    const TYPE: FourCC = FourCC(0x68766343);
+}
+
+impl ReadData for HVCDecoderConfigurationData {
     fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
         let mut record = Vec::new();
         reader.read_to_end(&mut record)?;
@@ -1644,7 +1663,7 @@ mod tests {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x36, 0x61, 0x76, 0x63, 0x43, 0x01, 0x64, 0x00, 0x29, 0xFF, 0xE1,
             0x00, 0x19, 0x67, 0x64, 0x00, 0x29, 0xAC, 0x2C, 0xA5, 0x01, 0xE0, 0x11, 0x1F, 0x73, 0x50, 0x10, 0x10, 0x14, 0x00, 0x00, 0x0F, 0xA4, 0x00, 0x03,
-            0xA9, 0x82, 0x10, 0x01, 0x00, 0x06, 0x68, 0xE8, 0x81, 0x13, 0x52, 0x50, 0xFD, 0xF8, 0xF8, 0x00, 0x00, 0x00, 0x00, 0x18,
+            0xA9, 0x82, 0x10, 0x01, 0x00, 0x06, 0x68, 0xE8, 0x81, 0x13, 0x52, 0x50, 0xFD, 0xF8, 0xF8, 0x00,
         ];
         let entry = VideoSampleDescriptionDataEntry::read(Cursor::new(&buf)).unwrap();
         assert_eq!(
@@ -1674,6 +1693,7 @@ mod tests {
                             0xF8, 0x00
                         ]
                     }),
+                    hvc_decoder_configuration: None,
                 },
             },
             entry
