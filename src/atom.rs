@@ -167,11 +167,7 @@ impl<R: Read + Seek> Iterator for AtomReader<R> {
                 Err(e) => return Some(Err(e)),
             };
         }
-        let atom = Atom {
-            typ: typ,
-            size: size,
-            offset: offset,
-        };
+        let atom = Atom { typ, size, offset };
         self.offset = Some(offset + atom.size.as_usize());
         Some(Ok(atom))
     }
