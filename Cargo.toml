@@ -1,5 +1,11 @@
 [workspace]
 
 members = [
+    "srt",
+    "h264",
+    "h265",
+    "mpeg2",
+    "mpegts-segmenter",
+    "mpeg4",
     "qtff",
 ]

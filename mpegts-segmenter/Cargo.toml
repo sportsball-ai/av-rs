@@ -1,0 +1,15 @@
+[package]
+name = "mpegts-segmenter"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+mpeg2 = { path = "../mpeg2" }
+h264 = { path = "../h264" }
+h265 = { path = "../h265" }
+tokio = { version = "0.2.21", features = ["macros", "blocking", "io-util", "fs"] }
+simple-error = "0.2.1"
+async-trait = "0.1.35"
+
+[dev-dependencies]
+tempdir = "0.3.7"
