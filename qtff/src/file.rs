@@ -490,7 +490,7 @@ mod tests {
 
     #[test]
     fn test_file_prores() {
-        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/prores.mov")).unwrap();
+        let mut f = File::open("src/testdata/prores.mov").unwrap();
 
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
@@ -531,7 +531,7 @@ mod tests {
 
     #[test]
     fn test_file_braw() {
-        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/braw.braw")).unwrap();
+        let mut f = File::open("src/testdata/braw.braw").unwrap();
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
 
@@ -588,7 +588,7 @@ mod tests {
             let mut movie_data = f.get_movie_data().unwrap();
             assert_eq!(movie_data.tracks.len(), 3);
 
-            let mut expected_f = File::open(Path::new(file!()).parent().unwrap().join("testdata/braw_trimmed.braw")).unwrap();
+            let mut expected_f = File::open("src/testdata/braw_trimmed.braw").unwrap();
             let mut expected_movie_data = expected_f.get_movie_data().unwrap();
             assert_eq!(expected_movie_data.tracks.len(), 3);
 
@@ -637,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_file_braw_trim_full() {
-        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/braw.braw")).unwrap();
+        let mut f = File::open("src/testdata/braw.braw").unwrap();
 
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("tmp.mov");
@@ -647,7 +647,7 @@ mod tests {
 
     #[test]
     fn test_file_h264_mp4() {
-        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/h264.mp4")).unwrap();
+        let mut f = File::open("src/testdata/h264.mp4").unwrap();
 
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 2);
@@ -691,7 +691,7 @@ mod tests {
 
     #[test]
     fn test_file_h265_mp4() {
-        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/h265.mp4")).unwrap();
+        let mut f = File::open("src/testdata/h265.mp4").unwrap();
 
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 2);
@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn test_file_empty_mov() {
-        let mut f = File::open(Path::new(file!()).parent().unwrap().join("testdata/empty.mov")).unwrap();
+        let mut f = File::open("src/testdata/empty.mov").unwrap();
 
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
