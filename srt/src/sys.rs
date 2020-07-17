@@ -9,7 +9,10 @@ pub enum SRT_SOCKOPT {
     STREAMID = 46,
 }
 
+#[cfg(target_os = "macos")]
 #[link(name = "crypto", kind = "static")]
+extern "C" {}
+
 #[link(name = "srt", kind = "static")]
 extern "C" {
     pub fn srt_startup() -> int;

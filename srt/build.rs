@@ -9,5 +9,6 @@ fn main() {
     {
         println!("cargo:rustc-link-search={}/vendor/linux/lib", env!("CARGO_MANIFEST_DIR"));
         println!("cargo:rustc-link-lib=stdc++");
+        println!("cargo:rustc-link-lib=crypto");
     }
 }
