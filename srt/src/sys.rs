@@ -9,7 +9,7 @@ pub enum SRT_SOCKOPT {
     STREAMID = 46,
 }
 
-#[link(name = "srt")]
+#[link(name = "srt", kind = "static")]
 extern "C" {
     pub fn srt_startup() -> int;
     pub fn srt_cleanup() -> int;
