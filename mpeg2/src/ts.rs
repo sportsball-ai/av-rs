@@ -15,6 +15,7 @@ pub struct Packet<'a> {
 #[derive(Debug, PartialEq)]
 pub struct AdaptationField {
     pub length: u8,
+    pub discontinuity_indicator: bool,
     pub random_access_indicator: bool,
     pub program_clock_reference_27mhz: Option<u64>,
 }
@@ -182,6 +183,7 @@ impl<'a> Packet<'a> {
                 } else {
                     length as _
                 },
+                discontinuity_indicator: buf[5] & 0x80 != 0,
                 random_access_indicator: buf[5] & 0x40 != 0,
                 program_clock_reference_27mhz: if length >= 7 && buf[5] & 0x10 != 0 {
                     let base = (buf[6] as u64) << 25 | (buf[7] as u64) << 17 | (buf[8] as u64) << 9 | (buf[9] as u64) << 1 | (buf[10] as u64) >> 7;
@@ -262,6 +264,7 @@ mod test {
             packets[3].adaptation_field,
             Some(AdaptationField {
                 length: 7,
+                discontinuity_indicator: false,
                 random_access_indicator: true,
                 program_clock_reference_27mhz: Some(18900000),
             })

@@ -13,6 +13,7 @@ pub struct Packet {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PacketHeader {
     pub stream_id: u8,
+    pub optional_header: Option<OptionalHeader>,
     pub data_length: usize,
 }
 
@@ -21,19 +22,18 @@ impl PacketHeader {
         if buf.len() < 6 {
             bail!("not enough bytes for pes header")
         }
-        let stream_id = buf[3];
-        let has_optional_header = match stream_id {
-            0xbc | 0xbf | 0xf0 | 0xf1 | 0xff | 0xf2 | 0xf8 => false,
-            _ => true,
-        };
-        if has_optional_header && buf.len() < 9 {
-            bail!("not enough bytes for pes with optional header")
+        if buf[0] != 0 || buf[1] != 0 || buf[2] != 1 {
+            bail!("incorrect start code for pes header")
         }
-        let packet_length = (buf[4] as usize) << 8 | (buf[5] as usize);
-        let optional_header_length = match has_optional_header {
-            true => 3 + buf[8] as usize,
-            false => 0,
+        let stream_id = buf[3];
+        let (optional_header, optional_header_length) = match stream_id {
+            0xc0..=0xef => {
+                let decoded = OptionalHeader::decode(&buf[6..])?;
+                (Some(decoded.0), decoded.1)
+            }
+            _ => (None, 0),
         };
+        let packet_length = (buf[4] as usize) << 8 | (buf[5] as usize);
         let data_offset = 6 + optional_header_length;
         if data_offset > buf.len() {
             bail!("not enough bytes for pes optional header length")
@@ -41,6 +41,7 @@ impl PacketHeader {
         Ok((
             Self {
                 stream_id,
+                optional_header,
                 data_length: match packet_length {
                     0 => 0,
                     l @ _ => l - optional_header_length,
@@ -48,6 +49,50 @@ impl PacketHeader {
             },
             data_offset,
         ))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct OptionalHeader {
+    pub pts: Option<u64>,
+    pub dts: Option<u64>,
+}
+
+impl OptionalHeader {
+    pub fn decode(buf: &[u8]) -> Result<(Self, usize)> {
+        if buf.len() < 3 {
+            bail!("not enough bytes for pes optional header")
+        }
+        let len = 3 + buf[2] as usize;
+        let mut offset = 3;
+        let pts = if buf[1] & 0x80 != 0 {
+            if buf.len() < offset + 5 {
+                bail!("not enough bytes for pes pts")
+            }
+            let pts = ((buf[offset] as u64 >> 1) & 7) << 30
+                | (buf[offset + 1] as u64) << 22
+                | (buf[offset + 2] as u64 >> 1) << 15
+                | (buf[offset + 3] as u64) << 7
+                | (buf[offset + 4] as u64 >> 1);
+            offset += 5;
+            Some(pts)
+        } else {
+            None
+        };
+        let dts = if buf[1] & 0x40 != 0 {
+            if buf.len() < offset + 5 {
+                bail!("not enough bytes for pes dts")
+            }
+            let dts = ((buf[offset] as u64 >> 1) & 7) << 30
+                | (buf[offset + 1] as u64) << 22
+                | (buf[offset + 2] as u64 >> 1) << 15
+                | (buf[offset + 3] as u64) << 7
+                | (buf[offset + 4] as u64 >> 1);
+            Some(dts)
+        } else {
+            None
+        };
+        Ok((Self { pts, dts }, len))
     }
 }
 
@@ -108,5 +153,31 @@ impl Stream {
         }
 
         Ok(completed)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_packet_header_decode() {
+        let buf = &[
+            0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x80, 0xC0, 0x0A, 0x31, 0x00, 0x07, 0xEF, 0xD7, 0x11, 0x00, 0x07, 0xD8, 0x61,
+        ];
+
+        let (header, n) = PacketHeader::decode(buf).unwrap();
+        assert_eq!(n, buf.len());
+        assert_eq!(
+            header,
+            PacketHeader {
+                stream_id: 0xe0,
+                optional_header: Some(OptionalHeader {
+                    pts: Some(129003),
+                    dts: Some(126000),
+                }),
+                data_length: 0,
+            }
+        );
     }
 }
