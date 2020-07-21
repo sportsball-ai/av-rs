@@ -1,9 +1,9 @@
-use std::env;
-use std::path::PathBuf;
-
 fn main() {
     #[cfg(target_os = "macos")]
     {
+        use std::env;
+        use std::path::PathBuf;
+
         println!("cargo:rustc-link-lib=framework=CoreFoundation");
 
         let sdk_root = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
