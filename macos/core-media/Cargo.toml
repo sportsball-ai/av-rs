@@ -1,0 +1,12 @@
+[package]
+name = "core-media"
+version = "0.1.0"
+edition = "2018"
+build = "build.rs"
+
+[build-dependencies]
+# We're very permissive here with bindgen due to https://github.com/rust-lang/cargo/issues/5237
+bindgen = "0.*"
+
+[dependencies]
+core-foundation = { path = "../core-foundation" }
