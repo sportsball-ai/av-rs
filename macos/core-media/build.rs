@@ -6,7 +6,7 @@ fn main() {
 
         println!("cargo:rustc-link-lib=framework=CoreMedia");
 
-        let sdk_root = "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk";
+        let sdk_root = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk";
 
         let bindings = bindgen::Builder::default()
             .clang_arg(format!("-isysroot{}", sdk_root))
