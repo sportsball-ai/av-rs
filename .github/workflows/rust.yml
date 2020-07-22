@@ -10,13 +10,15 @@ jobs:
         os: [ubuntu-18.04, macos-10.15]
     steps:
     - uses: actions/checkout@v1
+    - name: Configure
+      if: startsWith(matrix.os, 'macos-')
+      run: |
+        echo "::set-env name=LIBCLANG_PATH::/Library/Developer/CommandLineTools/usr/lib/libclang.dylib"
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
         toolchain: 1.42.0
         override: true
-    - name: Setup tmate session
-      uses: mxschmitt/action-tmate@v2
     - name: Build
       uses: actions-rs/cargo@v1
       with:
