@@ -11,9 +11,7 @@ fn main() {
         let target = std::env::var("TARGET").unwrap();
 
         let bindings = bindgen::Builder::default()
-            .clang_args(&["-x", "objective-c", "-fblocks"])
             .clang_arg(format!("-isysroot{}", sdk_root))
-            .clang_args(&[&format!("--target={}", target)])
             .header("src/lib.hpp")
             .whitelist_function("VTDecompressionSession.+")
             .generate()

@@ -11,12 +11,7 @@ fn main() {
         let target = std::env::var("TARGET").unwrap();
 
         let bindings = bindgen::Builder::default()
-            .clang_args(&["-x", "objective-c", "-fblocks"])
             .clang_arg(format!("-isysroot{}", sdk_root))
-            .clang_args(&[&format!("--target={}", target)])
-            .objc_extern_crate(false)
-            .block_extern_crate(false)
-            .generate_block(false)
             .header("src/lib.hpp")
             .whitelist_function("CF.+")
             .whitelist_var("kCFString.+")
