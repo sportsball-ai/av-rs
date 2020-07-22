@@ -26,6 +26,8 @@ macro_rules! trait_impls {
             }
         }
 
+        unsafe impl Send for $e {}
+
         impl core_foundation::CFType for $e {
             unsafe fn with_cf_type_ref(cf: core_foundation::sys::CFTypeRef) -> Self {
                 core_foundation::sys::CFRetain(cf);
