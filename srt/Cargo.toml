@@ -11,4 +11,4 @@ async = ["tokio"]
 [dependencies]
 libc = "0.2.71"
 lazy_static = "1.4.0"
-tokio = { version = "0.2.21", features = ["blocking", "macros", "io-util"], optional = true }
+tokio = { version = "0.2.13", features = ["blocking", "macros", "io-util"], optional = true }
