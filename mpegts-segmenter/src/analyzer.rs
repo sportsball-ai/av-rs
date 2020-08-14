@@ -354,6 +354,13 @@ impl Analyzer {
         }
     }
 
+    pub fn stream(&self, pid: u16) -> Option<&Stream> {
+        match &self.pids[pid as usize] {
+            PIDState::PES { stream } => Some(stream),
+            _ => None,
+        }
+    }
+
     pub fn is_video(&self, pid: u16) -> bool {
         match &self.pids[pid as usize] {
             PIDState::PES { stream } => stream.is_video(),

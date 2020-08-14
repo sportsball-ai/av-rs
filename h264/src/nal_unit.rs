@@ -6,6 +6,7 @@ use std::io;
 /// NALU, mask the first byte with this.
 pub const NAL_UNIT_TYPE_MASK: u8 = 0x1f;
 
+pub const NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE: u8 = 5;
 pub const NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET: u8 = 7;
 pub const NAL_UNIT_TYPE_PICTURE_PARAMETER_SET: u8 = 8;
 

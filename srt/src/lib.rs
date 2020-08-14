@@ -120,6 +120,12 @@ impl ToOption for bool {
     }
 }
 
+impl ToOption for i32 {
+    fn set(&self, sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<()> {
+        check_code(unsafe { sys::srt_setsockopt(sock, 0, opt, self as *const i32 as *const _, std::mem::size_of::<i32>() as _) })
+    }
+}
+
 trait FromOption: Sized {
     fn get(sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<Self>;
 }
@@ -254,6 +260,7 @@ extern "C" fn listener_callback(
 pub enum ListenerOption {
     TimestampBasedPacketDeliveryMode(bool),
     TooLatePacketDrop(bool),
+    ReceiveBufferSize(i32),
 }
 
 impl ListenerOption {
@@ -261,6 +268,7 @@ impl ListenerOption {
         match self {
             ListenerOption::TimestampBasedPacketDeliveryMode(v) => sock.set(sys::SRT_SOCKOPT::TSBPDMODE, *v),
             ListenerOption::TooLatePacketDrop(v) => sock.set(sys::SRT_SOCKOPT::TLPKTDROP, *v),
+            ListenerOption::ReceiveBufferSize(v) => sock.set(sys::SRT_SOCKOPT::RCVBUF, *v),
         }
     }
 }

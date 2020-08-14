@@ -1,4 +1,4 @@
-use super::{Analyzer, SegmentStorage, StreamInfo};
+use super::{analyzer, Analyzer, SegmentStorage, StreamInfo};
 use mpeg2::ts::{Packet, PACKET_LENGTH};
 use std::{fmt, io, time::Duration};
 use tokio::prelude::*;
@@ -84,9 +84,45 @@ impl<S: SegmentStorage> Segmenter<S> {
                         should_start_new_segment = match &self.current_segment {
                             Some(current_segment) => {
                                 let elapsed_seconds = (pcr - current_segment.pcr) as f64 / 27_000_000.0;
-                                (self.analyzer.is_video(p.packet_id) || !self.analyzer.has_video())
-                                    && af.random_access_indicator
+                                if (self.analyzer.is_video(p.packet_id) || !self.analyzer.has_video())
                                     && elapsed_seconds >= self.config.min_segment_duration.as_secs_f64()
+                                {
+                                    // start a new segment if this is a keyframe
+                                    if af.random_access_indicator {
+                                        true
+                                    } else if let Some(payload) = p.payload {
+                                        // some muxers don't set RAI bits. if possible, see if this
+                                        // packet includes the start of a keyframe
+                                        let mut is_keyframe = false;
+                                        match self.analyzer.stream(p.packet_id) {
+                                            Some(analyzer::Stream::AVCVideo { .. }) => {
+                                                for nalu in h264::iterate_annex_b(&payload) {
+                                                    let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
+                                                    is_keyframe |= nalu_type == h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE;
+                                                }
+                                            }
+                                            Some(analyzer::Stream::HEVCVideo { .. }) => {
+                                                use h264::Decode;
+                                                for nalu in h265::iterate_annex_b(&payload) {
+                                                    let mut bs = h265::Bitstream::new(nalu);
+                                                    let header = h265::NALUnitHeader::decode(&mut bs)?;
+                                                    if header.nuh_layer_id.0 == 0 {
+                                                        match header.nal_unit_type.0 {
+                                                            16..=21 => is_keyframe = true,
+                                                            _ => {}
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
+                                        }
+                                        is_keyframe
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                }
                             }
                             None => true,
                         }
@@ -266,5 +302,28 @@ mod test {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_segmenter_8k() {
+        let mut storage = MemorySegmentStorage::new();
+
+        {
+            let mut f = File::open("src/testdata/h264-8k.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(1),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert_eq!(segments.len(), 2);
     }
 }
