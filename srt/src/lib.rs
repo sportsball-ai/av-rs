@@ -114,6 +114,12 @@ impl ToOption for &String {
     }
 }
 
+impl ToOption for bool {
+    fn set(&self, sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<()> {
+        check_code(unsafe { sys::srt_setsockopt(sock, 0, opt, self as *const bool as *const _, std::mem::size_of::<bool>() as _) })
+    }
+}
+
 trait FromOption: Sized {
     fn get(sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<Self>;
 }
@@ -244,9 +250,31 @@ extern "C" fn listener_callback(
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum ListenerOption {
+    TimestampBasedPacketDeliveryMode(bool),
+    TooLatePacketDrop(bool),
+}
+
+impl ListenerOption {
+    pub(crate) fn set(&self, sock: &Socket) -> Result<()> {
+        match self {
+            ListenerOption::TimestampBasedPacketDeliveryMode(v) => sock.set(sys::SRT_SOCKOPT::TSBPDMODE, *v),
+            ListenerOption::TooLatePacketDrop(v) => sock.set(sys::SRT_SOCKOPT::TLPKTDROP, *v),
+        }
+    }
+}
+
 impl Listener<'static> {
     pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+        Self::bind_with_options(addr, vec![])
+    }
+
+    pub fn bind_with_options<A: ToSocketAddrs, O: IntoIterator<Item = ListenerOption>>(addr: A, opts: O) -> Result<Self> {
         let socket = Socket::new()?;
+        for opt in opts.into_iter() {
+            opt.set(&socket)?;
+        }
         for addr in addr.to_socket_addrs()? {
             let (addr, len) = to_sockaddr(&addr);
             unsafe {
@@ -376,7 +404,7 @@ mod test {
     #[test]
     fn test_passphrase() {
         let server_thread = thread::spawn(|| {
-            let listener = Listener::bind("127.0.0.1:1236")
+            let listener = Listener::bind_with_options("127.0.0.1:1236", [ListenerOption::TooLatePacketDrop(false)].iter().cloned())
                 .unwrap()
                 .with_callback(|stream_id: Option<&_>| {
                     assert_eq!(stream_id, Some("mystreamid"));
