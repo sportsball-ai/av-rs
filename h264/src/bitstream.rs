@@ -35,7 +35,7 @@ impl<'a, T: Iterator<Item = &'a u8>> Bitstream<T> {
         } else {
             self.next_bits_length -= n;
         }
-        return true;
+        true
     }
 
     pub fn next_bits(&mut self, n: usize) -> Option<u64> {
@@ -44,7 +44,7 @@ impl<'a, T: Iterator<Item = &'a u8>> Bitstream<T> {
             self.next_bits = (self.next_bits << 8) | b;
             self.next_bits_length += 8;
         }
-        return Some(((self.next_bits >> (self.next_bits_length - n)) & (0xffffffffffffffff >> (64 - n))) as u64);
+        Some(((self.next_bits >> (self.next_bits_length - n)) & (0xffffffffffffffff >> (64 - n))) as u64)
     }
 
     pub fn read_bits(&mut self, n: usize) -> io::Result<u64> {
