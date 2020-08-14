@@ -9,7 +9,7 @@ pub struct VideoParameterSetSubLayerOrderingInfo {
 }
 
 impl Decode for VideoParameterSetSubLayerOrderingInfo {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         Ok(Self {
             vps_max_dec_pic_buffering_minus1: UE::decode(bs)?,
             vps_max_num_reorder_pics: UE::decode(bs)?,
@@ -49,7 +49,7 @@ pub struct VideoParameterSet {
 }
 
 impl Decode for VideoParameterSet {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(
@@ -103,9 +103,12 @@ mod test {
 
     #[test]
     fn test_sequence_parameter_set() {
-        let mut bs = Bitstream::new(vec![
-            0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x00, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0x17, 0x02, 0x40,
-        ]);
+        let mut bs = Bitstream::new(
+            [
+                0x0c, 0x01, 0xff, 0xff, 0x01, 0x60, 0x00, 0x00, 0x00, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0x17, 0x02, 0x40,
+            ]
+            .iter(),
+        );
 
         let vps = VideoParameterSet::decode(&mut bs).unwrap();
 
@@ -113,9 +116,12 @@ mod test {
         assert_eq!(0xb00000000000, vps.profile_tier_level.general_constraint_flags.0);
         assert_eq!(0, vps.vps_timing_info_present_flag.0);
 
-        let mut bs = Bitstream::new(vec![
-            0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x00, 0x9d, 0x08, 0x00, 0x00, 0x00, 0x00, 0x78, 0x95, 0x98, 0x09,
-        ]);
+        let mut bs = Bitstream::new(
+            [
+                0x0c, 0x01, 0xff, 0xff, 0x04, 0x08, 0x00, 0x00, 0x00, 0x9d, 0x08, 0x00, 0x00, 0x00, 0x00, 0x78, 0x95, 0x98, 0x09,
+            ]
+            .iter(),
+        );
 
         let vps = VideoParameterSet::decode(&mut bs).unwrap();
 

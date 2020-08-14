@@ -13,3 +13,8 @@ async-trait = "0.1.35"
 
 [dev-dependencies]
 tempdir = "0.3.7"
+criterion = "0.3"
+
+[[bench]]
+name = "benches"
+harness = false

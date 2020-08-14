@@ -19,18 +19,16 @@ pub enum Stream {
         width: u32,
         height: u32,
         frame_rate: f64,
-        frame_count: u64,
         rfc6381_codec: Option<String>,
-        maybe_start_new_access_unit: bool,
+        access_unit_counter: h264::AccessUnitCounter,
     },
     HEVCVideo {
         pes: pes::Stream,
         width: u32,
         height: u32,
         frame_rate: f64,
-        frame_count: u64,
         rfc6381_codec: Option<String>,
-        maybe_start_new_access_unit: bool,
+        access_unit_counter: h265::AccessUnitCounter,
     },
     Other(u8),
 }
@@ -62,28 +60,28 @@ impl Stream {
                 width,
                 height,
                 frame_rate,
-                frame_count,
+                access_unit_counter,
                 rfc6381_codec,
                 ..
             } => StreamInfo::Video {
                 width: *width,
                 height: *height,
                 frame_rate: *frame_rate,
-                frame_count: *frame_count,
+                frame_count: access_unit_counter.count(),
                 rfc6381_codec: rfc6381_codec.clone(),
             },
             Self::HEVCVideo {
                 width,
                 height,
                 frame_rate,
-                frame_count,
+                access_unit_counter,
                 rfc6381_codec,
                 ..
             } => StreamInfo::Video {
                 width: *width,
                 height: *height,
                 frame_rate: *frame_rate,
-                frame_count: *frame_count,
+                frame_count: access_unit_counter.count(),
                 rfc6381_codec: rfc6381_codec.clone(),
             },
             Self::Other(_) => StreamInfo::Other,
@@ -140,9 +138,8 @@ impl Stream {
                 width,
                 height,
                 frame_rate,
-                frame_count,
                 rfc6381_codec,
-                maybe_start_new_access_unit,
+                access_unit_counter,
                 ..
             } => {
                 use h264::Decode;
@@ -152,26 +149,15 @@ impl Stream {
                         continue;
                     }
 
+                    access_unit_counter.count_nalu(&nalu)?;
+
                     let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
-
-                    // ITU-T H.264, 04/2017, 7.4.1.2.3
-                    // TODO: implement 7.4.1.2.4?
-                    match nalu_type {
-                        1 | 2 | 3 | 4 | 5 => *maybe_start_new_access_unit = true,
-                        6 | 7 | 8 | 9 | 14 | 15 | 16 | 17 | 18 => {
-                            if *maybe_start_new_access_unit {
-                                *maybe_start_new_access_unit = false;
-                                *frame_count += 1;
-                            }
-                        }
-                        _ => {}
-                    }
-
                     match nalu_type {
                         h264::NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
-                            let mut bs = h264::Bitstream::new(&nalu);
-                            let nalu = h264::NALUnit::decode(&mut bs)?;
-                            let mut rbsp = h264::Bitstream::new(&nalu.rbsp_byte);
+                            let bs = h264::Bitstream::new(nalu);
+                            let mut nalu = h264::NALUnit::decode(bs)?;
+                            let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
+                            let leading_bytes = require_with!(rbsp.next_bits(24), "unable to get leading SPS RBSP bytes");
                             let sps = h264::SequenceParameterSet::decode(&mut rbsp)?;
                             *width = sps.frame_cropping_rectangle_width() as _;
                             *height = sps.frame_cropping_rectangle_height() as _;
@@ -182,9 +168,12 @@ impl Stream {
                                 0 => 0.0,
                                 num_units_in_tick @ _ => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
                             };
-                            if nalu.rbsp_byte.len() >= 3 {
-                                *rfc6381_codec = Some(format!("avc1.{:02x}{:02x}{:02x}", nalu.rbsp_byte[0], nalu.rbsp_byte[1], nalu.rbsp_byte[2]))
-                            }
+                            *rfc6381_codec = Some(format!(
+                                "avc1.{:02x}{:02x}{:02x}",
+                                (leading_bytes >> 16) as u8,
+                                (leading_bytes >> 8) as u8,
+                                leading_bytes as u8,
+                            ))
                         }
                         _ => {}
                     }
@@ -194,9 +183,8 @@ impl Stream {
                 width,
                 height,
                 frame_rate,
-                frame_count,
                 rfc6381_codec,
-                maybe_start_new_access_unit,
+                access_unit_counter,
                 ..
             } => {
                 use h265::Decode;
@@ -206,25 +194,16 @@ impl Stream {
                         continue;
                     }
 
-                    let mut bs = h265::Bitstream::new(&nalu);
-                    let header = h265::NALUnitHeader::decode(&mut bs)?;
+                    access_unit_counter.count_nalu(&nalu)?;
 
-                    // ITU-T H.265, 11/2019, 7.4.2.4.4
-                    match header.nal_unit_type.0 {
-                        0..=31 => *maybe_start_new_access_unit = true,
-                        _ => {
-                            if *maybe_start_new_access_unit && header.nuh_layer_id.0 == 0 {
-                                *maybe_start_new_access_unit = false;
-                                *frame_count += 1;
-                            }
-                        }
-                    }
+                    let mut bs = h265::Bitstream::new(nalu);
+                    let header = h265::NALUnitHeader::decode(&mut bs)?;
 
                     match header.nal_unit_type.0 {
                         h265::NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
-                            let mut bs = h265::Bitstream::new(&nalu);
-                            let nalu = h265::NALUnit::decode(&mut bs)?;
-                            let mut rbsp = h265::Bitstream::new(&nalu.rbsp_byte);
+                            let bs = h265::Bitstream::new(nalu);
+                            let mut nalu = h265::NALUnit::decode(bs)?;
+                            let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
                             let sps = h265::SequenceParameterSet::decode(&mut rbsp)?;
                             *width = sps.pic_width_in_luma_samples.0 as _;
                             *height = sps.pic_height_in_luma_samples.0 as _;
@@ -269,9 +248,9 @@ impl Stream {
                             ))
                         }
                         h265::NAL_UNIT_TYPE_VIDEO_PARAMETER_SET => {
-                            let mut bs = h265::Bitstream::new(&nalu);
-                            let nalu = h265::NALUnit::decode(&mut bs)?;
-                            let mut rbsp = h265::Bitstream::new(&nalu.rbsp_byte);
+                            let bs = h265::Bitstream::new(nalu);
+                            let mut nalu = h265::NALUnit::decode(bs)?;
+                            let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
                             let vps = h265::VideoParameterSet::decode(&mut rbsp)?;
                             if vps.vps_timing_info_present_flag.0 != 0 {
                                 *frame_rate = match vps.vps_num_units_in_tick.0 {
@@ -429,8 +408,7 @@ impl Analyzer {
                                         width: 0,
                                         height: 0,
                                         frame_rate: 0.0,
-                                        frame_count: 0,
-                                        maybe_start_new_access_unit: true,
+                                        access_unit_counter: h264::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
                                     },
                                     0x24 => Stream::HEVCVideo {
@@ -438,8 +416,7 @@ impl Analyzer {
                                         width: 0,
                                         height: 0,
                                         frame_rate: 0.0,
-                                        frame_count: 0,
-                                        maybe_start_new_access_unit: true,
+                                        access_unit_counter: h265::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
                                     },
                                     t @ _ => Stream::Other(t),
@@ -502,6 +479,39 @@ mod test {
                     channel_count: 2,
                     sample_rate: 48000,
                     sample_count: 481280,
+                    rfc6381_codec: Some("mp4a.40.2".to_string()),
+                }
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyzer_h264_8k() {
+        let mut analyzer = Analyzer::new();
+
+        {
+            let mut f = File::open("src/testdata/h264-8k.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            let packets = ts::decode_packets(&buf).unwrap();
+            analyzer.handle_packets(&packets).unwrap();
+            analyzer.flush().unwrap();
+        }
+
+        assert_eq!(
+            analyzer.streams(),
+            vec![
+                StreamInfo::Video {
+                    width: 7680,
+                    height: 4320,
+                    frame_rate: 29.97,
+                    frame_count: 33,
+                    rfc6381_codec: Some("avc1.42003c".to_string()),
+                },
+                StreamInfo::Audio {
+                    channel_count: 2,
+                    sample_rate: 48000,
+                    sample_count: 81920,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]

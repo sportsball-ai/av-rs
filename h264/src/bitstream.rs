@@ -2,46 +2,63 @@ use std::io;
 
 pub struct Bitstream<T> {
     inner: T,
-    bit_offset: usize,
+    next_bits: u128,
+    next_bits_length: usize,
 }
 
-impl<T: AsRef<[u8]>> Bitstream<T> {
-    pub fn new(inner: T) -> Self {
-        Self { inner, bit_offset: 0 }
+impl<'a, T: Iterator<Item = &'a u8>> Bitstream<T> {
+    pub fn new<U: IntoIterator<Item = &'a u8, IntoIter = T>>(inner: U) -> Self {
+        Self {
+            inner: inner.into_iter(),
+            next_bits: 0,
+            next_bits_length: 0,
+        }
     }
 
-    pub fn bits_remaining(&self) -> usize {
-        self.inner.as_ref().len() * 8 - self.bit_offset
+    pub fn advance_bits(&mut self, mut n: usize) -> bool {
+        if n > self.next_bits_length {
+            n -= self.next_bits_length;
+            self.next_bits_length = 0;
+            for _ in 0..(n / 8) {
+                if self.inner.next().is_none() {
+                    return false;
+                }
+            }
+            n = n % 8;
+            if n > 0 {
+                self.next_bits = match self.inner.next() {
+                    Some(b) => *b as u128,
+                    None => return false,
+                };
+                self.next_bits_length = 8 - n;
+            }
+        } else {
+            self.next_bits_length -= n;
+        }
+        true
     }
 
-    pub fn advance_bits(&mut self, n: usize) -> bool {
-        if self.bits_remaining() < n {
-            return false;
+    pub fn next_bits(&mut self, n: usize) -> Option<u64> {
+        while self.next_bits_length < n {
+            let b = *self.inner.next()? as u128;
+            self.next_bits = (self.next_bits << 8) | b;
+            self.next_bits_length += 8;
         }
-        self.bit_offset += n;
-        return true;
-    }
-
-    pub fn next_bits(&self, n: usize) -> Option<u64> {
-        if self.bits_remaining() < n {
-            return None;
-        }
-        let mut ret = 0;
-        let data = self.inner.as_ref();
-        for i in 0..n {
-            ret = (ret << 1) | ((data[(self.bit_offset + i) / 8] >> (8 - (self.bit_offset + i) % 8 - 1)) & 1) as u64;
-        }
-        Some(ret)
+        Some(((self.next_bits >> (self.next_bits_length - n)) & (0xffffffffffffffff >> (64 - n))) as u64)
     }
 
     pub fn read_bits(&mut self, n: usize) -> io::Result<u64> {
         match self.next_bits(n) {
             Some(ret) => {
-                self.bit_offset += n;
+                self.next_bits_length -= n;
                 Ok(ret)
             }
             None => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected end of bitstream")),
         }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.inner
     }
 
     pub fn decode<V: Decode>(&mut self, v: &mut V) -> io::Result<()> {
@@ -51,7 +68,7 @@ impl<T: AsRef<[u8]>> Bitstream<T> {
 }
 
 pub trait Decode: Sized {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self>;
+    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self>;
 }
 
 #[macro_export]

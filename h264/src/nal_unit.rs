@@ -1,4 +1,4 @@
-use super::{decode, syntax_elements::*, Bitstream, Decode};
+use super::{decode, syntax_elements::*, Bitstream};
 
 use std::io;
 
@@ -10,45 +10,69 @@ pub const NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET: u8 = 7;
 pub const NAL_UNIT_TYPE_PICTURE_PARAMETER_SET: u8 = 8;
 
 // ITU-T H.264, 04/2017, 7.3.1
-#[derive(Default)]
-pub struct NALUnit {
+pub struct NALUnit<T> {
     pub forbidden_zero_bit: F1,
     pub nal_ref_idc: U2,
     pub nal_unit_type: U5,
-    pub rbsp_byte: Vec<u8>,
+    pub rbsp_byte: RBSP<T>,
 }
 
-pub fn decode_rbsp<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Vec<u8>> {
-    let mut rbsp = Vec::with_capacity(bs.bits_remaining() / 8);
-    while bs.bits_remaining() >= 8 {
-        if bs.next_bits(24) == Some(0x000003) {
-            rbsp.push(0);
-            rbsp.push(0);
-            bs.advance_bits(24);
-        } else {
-            rbsp.push(bs.read_bits(8)? as u8);
+pub struct RBSP<T> {
+    inner: T,
+    zeros: usize,
+}
+
+impl<T> RBSP<T> {
+    pub fn new(inner: T) -> Self {
+        Self { inner, zeros: 0 }
+    }
+}
+
+impl<'a, T: Iterator<Item = &'a u8>> Iterator for &mut RBSP<T> {
+    type Item = &'a u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.inner.next() {
+                Some(3) if self.zeros >= 2 => {
+                    self.zeros = 0;
+                    continue;
+                }
+                next @ Some(0) => {
+                    self.zeros += 1;
+                    return next;
+                }
+                next @ Some(_) => {
+                    self.zeros = 0;
+                    return next;
+                }
+                None => return None,
+            }
         }
     }
-    Ok(rbsp)
 }
 
-impl Decode for NALUnit {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
-        let mut ret = Self::default();
+impl<'a, T: Iterator<Item = &'a u8>> NALUnit<T> {
+    pub fn decode(mut bs: Bitstream<T>) -> io::Result<Self> {
+        let mut forbidden_zero_bit = F1::default();
+        let mut nal_ref_idc = U2::default();
+        let mut nal_unit_type = U5::default();
+        decode!(bs, &mut forbidden_zero_bit, &mut nal_ref_idc, &mut nal_unit_type)?;
 
-        decode!(bs, &mut ret.forbidden_zero_bit, &mut ret.nal_ref_idc, &mut ret.nal_unit_type)?;
-
-        if ret.forbidden_zero_bit.0 != 0 {
+        if forbidden_zero_bit.0 != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "non-zero forbidden_zero_bit"));
         }
 
-        match ret.nal_unit_type.0 {
+        match nal_unit_type.0 {
             14 | 20 | 21 => return Err(io::Error::new(io::ErrorKind::Other, "unsupported nal_unit_type")),
             _ => {}
         }
 
-        ret.rbsp_byte = decode_rbsp(bs)?;
-
-        Ok(ret)
+        Ok(Self {
+            forbidden_zero_bit,
+            nal_ref_idc,
+            nal_unit_type,
+            rbsp_byte: RBSP::new(bs.into_inner()),
+        })
     }
 }

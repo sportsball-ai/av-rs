@@ -9,7 +9,7 @@ macro_rules! define_syntax_element_u {
         pub struct $e(pub $t);
 
         impl Decode for $e {
-            fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+            fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
                 Ok(Self(bs.read_bits($n)? as _))
             }
         }
@@ -36,7 +36,7 @@ define_syntax_element_u!(F1, u8, 1);
 pub struct UE(pub u64);
 
 impl Decode for UE {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut leading_zero_bits = 0;
         while bs.read_bits(1)? == 0 {
             leading_zero_bits += 1;
@@ -49,7 +49,7 @@ impl Decode for UE {
 pub struct SE(pub i64);
 
 impl Decode for SE {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let ue = UE::decode(bs)?;
         let mut value = ((ue.0 + 1) >> 1) as i64;
         if (ue.0 & 1) == 0 {
