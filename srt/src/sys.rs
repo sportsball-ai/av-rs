@@ -5,7 +5,9 @@ pub type SRTSOCKET = int;
 #[repr(C)]
 #[allow(non_camel_case_types)]
 pub enum SRT_SOCKOPT {
+    TSBPDMODE = 22,
     PASSPHRASE = 26,
+    TLPKTDROP = 31,
     STREAMID = 46,
 }
 

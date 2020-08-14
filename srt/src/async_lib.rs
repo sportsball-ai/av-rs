@@ -1,4 +1,4 @@
-use super::{check_code, listener_callback, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, Result, Socket};
+use super::{check_code, listener_callback, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result, Socket};
 use std::{
     future::Future,
     io,
@@ -25,7 +25,14 @@ pub struct AsyncListener<'c> {
 
 impl AsyncListener<'static> {
     pub fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self> {
+        Self::bind_with_options(addr, vec![])
+    }
+
+    pub fn bind_with_options<A: ToSocketAddrs, O: IntoIterator<Item = ListenerOption>>(addr: A, opts: O) -> Result<Self> {
         let socket = Socket::new()?;
+        for opt in opts.into_iter() {
+            opt.set(&socket)?;
+        }
         for addr in addr.to_socket_addrs()? {
             let (addr, len) = to_sockaddr(&addr);
             unsafe {
@@ -276,7 +283,10 @@ impl AsyncWrite for AsyncStream {
 
 #[cfg(test)]
 mod test {
-    use super::{super::ListenerCallbackAction, *};
+    use super::{
+        super::{ListenerCallbackAction, ListenerOption},
+        *,
+    };
     use tokio::{
         io::{AsyncReadExt, AsyncWriteExt},
         join,
@@ -301,7 +311,7 @@ mod test {
 
     #[tokio::test]
     async fn test_async_passphrase() {
-        let listener = AsyncListener::bind("127.0.0.1:1237")
+        let listener = AsyncListener::bind_with_options("127.0.0.1:1237", [ListenerOption::TooLatePacketDrop(false)].iter().cloned())
             .unwrap()
             .with_callback(|stream_id: Option<&_>| {
                 assert_eq!(stream_id, Some("mystreamid"));
