@@ -3,7 +3,7 @@ use super::{decode, syntax_elements::*, Bitstream, Decode};
 use std::io;
 
 // ITU-T H.264, 04/2017, 7.3.2.1.1
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SequenceParameterSet {
     pub profile_idc: U8,
     pub constraint_set0_flag: U1,
@@ -267,7 +267,7 @@ impl Decode for SequenceParameterSet {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct VUIParameters {
     pub aspect_ratio_info_present_flag: U1,
 

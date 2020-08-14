@@ -1,4 +1,4 @@
-use std::iter::Iterator;
+use std::{io, iter::Iterator};
 
 pub mod bitstream;
 pub use bitstream::*;
@@ -8,6 +8,9 @@ pub use sequence_parameter_set::*;
 
 pub mod nal_unit;
 pub use nal_unit::*;
+
+pub mod slice_header;
+pub use slice_header::*;
 
 pub mod syntax_elements;
 pub use syntax_elements::*;
@@ -87,6 +90,75 @@ impl<'a> Iterator for AnnexBIter<'a> {
                 len -= 1;
             }
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct AccessUnitCounter {
+    maybe_start_new_access_unit: bool,
+    count: u64,
+    sps: Option<SequenceParameterSet>,
+    prev_frame_num: u64,
+}
+
+impl AccessUnitCounter {
+    pub fn new() -> Self {
+        Self {
+            maybe_start_new_access_unit: true,
+            count: 0,
+            sps: None,
+            prev_frame_num: 0,
+        }
+    }
+
+    pub fn count(&self) -> u64 {
+        self.count
+    }
+
+    pub fn count_nalu<T: AsRef<[u8]>>(&mut self, nalu: T) -> io::Result<()> {
+        let nalu = nalu.as_ref();
+        let nalu_type = nalu[0] & NAL_UNIT_TYPE_MASK;
+
+        // ITU-T H.264, 04/2017, 7.4.1.2.3
+        // TODO: implement the rest of 7.4.1.2.4?
+        match nalu_type {
+            1 | 2 => {
+                if self.maybe_start_new_access_unit {
+                    if let Some(sps) = &self.sps {
+                        let mut bs = Bitstream::new(&nalu);
+                        let nalu = NALUnit::decode(&mut bs)?;
+                        let mut rbsp = Bitstream::new(&nalu.rbsp_byte);
+                        let slice_header = SliceHeader::decode(&mut rbsp, sps)?;
+                        if slice_header.frame_num != self.prev_frame_num {
+                            self.prev_frame_num = slice_header.frame_num;
+                            self.count += 1;
+                        }
+                    }
+                }
+                self.maybe_start_new_access_unit = true;
+            }
+            3 | 4 | 5 => self.maybe_start_new_access_unit = true,
+            6 | 7 | 8 | 9 | 14 | 15 | 16 | 17 | 18 => {
+                if self.maybe_start_new_access_unit {
+                    self.maybe_start_new_access_unit = false;
+                    self.count += 1;
+                }
+            }
+            _ => {}
+        }
+
+        match nalu_type {
+            NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
+                let mut bs = Bitstream::new(&nalu);
+                let nalu = NALUnit::decode(&mut bs)?;
+                let mut rbsp = Bitstream::new(&nalu.rbsp_byte);
+                let sps = SequenceParameterSet::decode(&mut rbsp)?;
+                self.sps = Some(sps);
+            }
+            _ => {}
+        }
+
+        Ok(())
     }
 }
 
