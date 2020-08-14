@@ -1,26 +1,22 @@
 use super::{decode, syntax_elements::*, Bitstream, Decode};
-pub use h264::decode_rbsp;
+pub use h264::RBSP;
 use std::io;
 
 pub const NAL_UNIT_TYPE_VIDEO_PARAMETER_SET: u8 = 32;
 pub const NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET: u8 = 33;
 
 // ITU-T H.265, 11/2019, 7.3.1.1
-#[derive(Default)]
-pub struct NALUnit {
+pub struct NALUnit<T> {
     pub nal_unit_header: NALUnitHeader,
-    pub rbsp_byte: Vec<u8>,
+    pub rbsp_byte: RBSP<T>,
 }
 
-impl Decode for NALUnit {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
-        let mut ret = Self::default();
-
-        decode!(bs, &mut ret.nal_unit_header)?;
-
-        ret.rbsp_byte = decode_rbsp(bs)?;
-
-        Ok(ret)
+impl<'a, T: Iterator<Item = &'a u8>> NALUnit<T> {
+    pub fn decode(mut bs: Bitstream<T>) -> io::Result<Self> {
+        Ok(Self {
+            nal_unit_header: NALUnitHeader::decode(&mut bs)?,
+            rbsp_byte: RBSP::new(bs.into_inner()),
+        })
     }
 }
 
@@ -34,7 +30,7 @@ pub struct NALUnitHeader {
 }
 
 impl Decode for NALUnitHeader {
-    fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(

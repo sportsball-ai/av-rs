@@ -43,7 +43,7 @@ impl AccessUnitCounter {
     pub fn count_nalu<T: AsRef<[u8]>>(&mut self, nalu: T) -> io::Result<()> {
         let nalu = nalu.as_ref();
 
-        let mut bs = Bitstream::new(&nalu);
+        let mut bs = Bitstream::new(nalu);
         let header = NALUnitHeader::decode(&mut bs)?;
 
         // ITU-T H.265, 11/2019, 7.4.2.4.4

@@ -125,9 +125,9 @@ impl AccessUnitCounter {
             1 | 2 => {
                 if self.maybe_start_new_access_unit {
                     if let Some(sps) = &self.sps {
-                        let mut bs = Bitstream::new(&nalu);
-                        let nalu = NALUnit::decode(&mut bs)?;
-                        let mut rbsp = Bitstream::new(&nalu.rbsp_byte);
+                        let bs = Bitstream::new(nalu);
+                        let mut nalu = NALUnit::decode(bs)?;
+                        let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
                         let slice_header = SliceHeader::decode(&mut rbsp, sps)?;
                         if slice_header.frame_num != self.prev_frame_num {
                             self.prev_frame_num = slice_header.frame_num;
@@ -149,9 +149,9 @@ impl AccessUnitCounter {
 
         match nalu_type {
             NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
-                let mut bs = Bitstream::new(&nalu);
-                let nalu = NALUnit::decode(&mut bs)?;
-                let mut rbsp = Bitstream::new(&nalu.rbsp_byte);
+                let bs = Bitstream::new(nalu);
+                let mut nalu = NALUnit::decode(bs)?;
+                let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
                 let sps = SequenceParameterSet::decode(&mut rbsp)?;
                 self.sps = Some(sps);
             }

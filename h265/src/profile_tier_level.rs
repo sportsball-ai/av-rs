@@ -15,7 +15,7 @@ pub struct ProfileTierLevel {
 }
 
 impl ProfileTierLevel {
-    pub fn decode<T: AsRef<[u8]>>(bs: &mut Bitstream<T>, profile_present_flag: u8, max_num_sub_layers_minus1: u8) -> io::Result<Self> {
+    pub fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>, profile_present_flag: u8, max_num_sub_layers_minus1: u8) -> io::Result<Self> {
         let mut ret = Self::default();
 
         if profile_present_flag != 0 {
