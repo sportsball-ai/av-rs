@@ -557,4 +557,37 @@ mod test {
             ]
         );
     }
+
+    #[tokio::test]
+    async fn test_analyzer_h265_8k() {
+        let mut analyzer = Analyzer::new();
+
+        {
+            let mut f = File::open("src/testdata/h265-8k.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            let packets = ts::decode_packets(&buf).unwrap();
+            analyzer.handle_packets(&packets).unwrap();
+            analyzer.flush().unwrap();
+        }
+
+        assert_eq!(
+            analyzer.streams(),
+            vec![
+                StreamInfo::Video {
+                    width: 7680,
+                    height: 4320,
+                    frame_rate: 59.94,
+                    frame_count: 24,
+                    rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
+                },
+                StreamInfo::Audio {
+                    channel_count: 2,
+                    sample_rate: 48000,
+                    sample_count: 37888,
+                    rfc6381_codec: Some("mp4a.40.2".to_string()),
+                }
+            ]
+        );
+    }
 }
