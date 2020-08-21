@@ -578,13 +578,13 @@ mod test {
                     width: 7680,
                     height: 4320,
                     frame_rate: 59.94,
-                    frame_count: 24,
+                    frame_count: 31,
                     rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
                     sample_rate: 48000,
-                    sample_count: 37888,
+                    sample_count: 49152,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]

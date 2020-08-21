@@ -41,7 +41,7 @@ impl Decode for NALUnitHeader {
             &mut ret.nuh_temporal_id_plus1
         )?;
 
-        if ret.forbidden_zero_bit.0 != 0 {
+        if ret.nal_unit_type.0 < 48 && ret.forbidden_zero_bit.0 != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "non-zero forbidden_zero_bit"));
         }
 

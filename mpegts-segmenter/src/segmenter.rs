@@ -174,7 +174,7 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
         if bytes_read == 0 {
             break;
         }
-        segmenter.write(&buf).await?;
+        segmenter.write(&buf[..bytes_read]).await?;
     }
     segmenter.flush().await?;
 
@@ -310,6 +310,29 @@ mod test {
 
         {
             let mut f = File::open("src/testdata/h264-8k.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(1),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert_eq!(segments.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_segmenter_h265_8k() {
+        let mut storage = MemorySegmentStorage::new();
+
+        {
+            let mut f = File::open("src/testdata/h265-8k.ts").unwrap();
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
             segment(
