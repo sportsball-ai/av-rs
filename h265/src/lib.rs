@@ -14,6 +14,9 @@ pub use profile_tier_level::*;
 pub mod sequence_parameter_set;
 pub use sequence_parameter_set::*;
 
+pub mod slice_segment_header;
+pub use slice_segment_header::*;
+
 pub mod video_parameter_set;
 pub use video_parameter_set::*;
 
@@ -48,6 +51,18 @@ impl AccessUnitCounter {
 
         // ITU-T H.265, 11/2019, 7.4.2.4.4
         match header.nal_unit_type.0 {
+            0..=9 | 16..=21 => {
+                if self.maybe_start_new_access_unit {
+                    let bs = Bitstream::new(nalu);
+                    let mut nalu = NALUnit::decode(bs)?;
+                    let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
+                    let slice_segment_header = SliceSegmentHeader::decode(&mut rbsp)?;
+                    if slice_segment_header.first_slice_segment_in_pic_flag.0 != 0 {
+                        self.count += 1;
+                    }
+                }
+                self.maybe_start_new_access_unit = true;
+            }
             0..=31 => self.maybe_start_new_access_unit = true,
             _ => {
                 if self.maybe_start_new_access_unit && header.nuh_layer_id.0 == 0 {
