@@ -65,6 +65,14 @@ impl<S: SegmentStorage> Segmenter<S> {
         }
     }
 
+    pub fn storage(&self) -> &S {
+        &self.storage
+    }
+
+    pub fn storage_mut(&mut self) -> &mut S {
+        &mut self.storage
+    }
+
     /// Writes packets to the segmenter. The segmenter does not do any internal buffering, so buf
     /// must be divisible by 188 (the MPEG TS packet length).
     pub async fn write(&mut self, buf: &[u8]) -> Result<(), Error> {
