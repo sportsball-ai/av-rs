@@ -20,6 +20,7 @@ pub enum Stream {
         height: u32,
         frame_rate: f64,
         rfc6381_codec: Option<String>,
+        is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
     },
     HEVCVideo {
@@ -60,6 +61,7 @@ impl Stream {
                 width,
                 height,
                 frame_rate,
+                is_interlaced,
                 access_unit_counter,
                 rfc6381_codec,
                 ..
@@ -67,7 +69,11 @@ impl Stream {
                 width: *width,
                 height: *height,
                 frame_rate: *frame_rate,
-                frame_count: access_unit_counter.count(),
+                frame_count: if *is_interlaced {
+                    access_unit_counter.count() / 2
+                } else {
+                    access_unit_counter.count()
+                },
                 rfc6381_codec: rfc6381_codec.clone(),
             },
             Self::HEVCVideo {
@@ -139,6 +145,7 @@ impl Stream {
                 height,
                 frame_rate,
                 rfc6381_codec,
+                is_interlaced,
                 access_unit_counter,
                 ..
             } => {
@@ -159,6 +166,7 @@ impl Stream {
                             let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
                             let leading_bytes = require_with!(rbsp.next_bits(24), "unable to get leading SPS RBSP bytes");
                             let sps = h264::SequenceParameterSet::decode(&mut rbsp)?;
+                            *is_interlaced = sps.frame_mbs_only_flag.0 == 0;
                             *width = sps.frame_cropping_rectangle_width() as _;
                             *height = sps.frame_cropping_rectangle_height() as _;
                             // XXX: if vui parameters aren't present or if the video does not have
@@ -415,6 +423,7 @@ impl Analyzer {
                                         width: 0,
                                         height: 0,
                                         frame_rate: 0.0,
+                                        is_interlaced: false,
                                         access_unit_counter: h264::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
                                     },
@@ -585,6 +594,39 @@ mod test {
                     channel_count: 2,
                     sample_rate: 48000,
                     sample_count: 49152,
+                    rfc6381_codec: Some("mp4a.40.2".to_string()),
+                }
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyzer_program() {
+        let mut analyzer = Analyzer::new();
+
+        {
+            let mut f = File::open("src/testdata/program.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            let packets = ts::decode_packets(&buf).unwrap();
+            analyzer.handle_packets(&packets).unwrap();
+            analyzer.flush().unwrap();
+        }
+
+        assert_eq!(
+            analyzer.streams(),
+            vec![
+                StreamInfo::Video {
+                    width: 1920,
+                    height: 1080,
+                    frame_rate: 29.97,
+                    frame_count: 152,
+                    rfc6381_codec: Some("avc1.4d4028".to_string()),
+                },
+                StreamInfo::Audio {
+                    channel_count: 2,
+                    sample_rate: 48000,
+                    sample_count: 243712,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]

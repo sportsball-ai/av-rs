@@ -211,6 +211,8 @@ impl Decode for SequenceParameterSet {
             if ret.seq_scaling_matrix_present_flag.0 != 0 {
                 return Err(io::Error::new(io::ErrorKind::Other, "decoding scaling matrices is not supported"));
             }
+        } else {
+            ret.chroma_format_idc.0 = 1;
         }
 
         decode!(bs, &mut ret.log2_max_frame_num_minus4, &mut ret.pic_order_cnt_type)?;

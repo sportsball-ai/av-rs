@@ -46,8 +46,12 @@ impl DecompressionSession {
     pub fn decode_frame(&mut self, frame_data: &[u8], format_desc: &VideoFormatDescription) -> Result<ImageBuffer, OSStatus> {
         let (tx, rx) = mpsc::channel();
         let mut cb: Pin<Box<Callback>> = Box::pin(Box::new(move |status, image_buffer| {
-            tx.send(result(status.into()).map(|_| unsafe { ImageBuffer::with_cf_type_ref(image_buffer as _) }))
-                .unwrap();
+            tx.send(if image_buffer.is_null() {
+                Err(status.into())
+            } else {
+                result(status.into()).map(|_| unsafe { ImageBuffer::with_cf_type_ref(image_buffer as _) })
+            })
+            .unwrap();
         }));
         result(
             unsafe {
