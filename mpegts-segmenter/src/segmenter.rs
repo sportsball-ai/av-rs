@@ -84,56 +84,57 @@ impl<S: SegmentStorage> Segmenter<S> {
             let p = Packet::decode(&buf)?;
             self.analyzer.handle_packet(&p)?;
 
+            if let Some(af) = &p.adaptation_field {
+                self.pcr = af.program_clock_reference_27mhz.or(self.pcr);
+            }
+
             let mut should_start_new_segment = false;
             if self.analyzer.is_pes(p.packet_id) {
-                if let Some(af) = &p.adaptation_field {
-                    self.pcr = af.program_clock_reference_27mhz.or(self.pcr);
-                    if let Some(pcr) = self.pcr {
-                        should_start_new_segment = match &self.current_segment {
-                            Some(current_segment) => {
-                                let elapsed_seconds = (pcr as i64 - current_segment.pcr as i64) as f64 / 27_000_000.0;
-                                if (self.analyzer.is_video(p.packet_id) || !self.analyzer.has_video())
-                                    && (elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64())
-                                {
-                                    // start a new segment if this is a keyframe
-                                    if af.random_access_indicator {
-                                        true
-                                    } else if let Some(payload) = p.payload {
-                                        // some muxers don't set RAI bits. if possible, see if this
-                                        // packet includes the start of a keyframe
-                                        let mut is_keyframe = false;
-                                        match self.analyzer.stream(p.packet_id) {
-                                            Some(analyzer::Stream::AVCVideo { .. }) => {
-                                                for nalu in h264::iterate_annex_b(&payload) {
-                                                    let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
-                                                    is_keyframe |= nalu_type == h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE;
-                                                }
+                if let Some(pcr) = self.pcr {
+                    should_start_new_segment = match &self.current_segment {
+                        Some(current_segment) => {
+                            let elapsed_seconds = (pcr as i64 - current_segment.pcr as i64) as f64 / 27_000_000.0;
+                            if (self.analyzer.is_video(p.packet_id) || !self.analyzer.has_video())
+                                && (elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64())
+                            {
+                                // start a new segment if this is a keyframe
+                                if p.adaptation_field.map(|af| af.random_access_indicator).unwrap_or(false) {
+                                    true
+                                } else if let Some(payload) = p.payload {
+                                    // some muxers don't set RAI bits. if possible, see if this
+                                    // packet includes the start of a keyframe
+                                    let mut is_keyframe = false;
+                                    match self.analyzer.stream(p.packet_id) {
+                                        Some(analyzer::Stream::AVCVideo { .. }) => {
+                                            for nalu in h264::iterate_annex_b(&payload) {
+                                                let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
+                                                is_keyframe |= nalu_type == h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE;
                                             }
-                                            Some(analyzer::Stream::HEVCVideo { .. }) => {
-                                                use h264::Decode;
-                                                for nalu in h265::iterate_annex_b(&payload) {
-                                                    let mut bs = h265::Bitstream::new(nalu);
-                                                    let header = h265::NALUnitHeader::decode(&mut bs)?;
-                                                    if header.nuh_layer_id.0 == 0 {
-                                                        match header.nal_unit_type.0 {
-                                                            16..=21 => is_keyframe = true,
-                                                            _ => {}
-                                                        }
+                                        }
+                                        Some(analyzer::Stream::HEVCVideo { .. }) => {
+                                            use h264::Decode;
+                                            for nalu in h265::iterate_annex_b(&payload) {
+                                                let mut bs = h265::Bitstream::new(nalu);
+                                                let header = h265::NALUnitHeader::decode(&mut bs)?;
+                                                if header.nuh_layer_id.0 == 0 {
+                                                    match header.nal_unit_type.0 {
+                                                        16..=21 => is_keyframe = true,
+                                                        _ => {}
                                                     }
                                                 }
                                             }
-                                            _ => {}
                                         }
-                                        is_keyframe
-                                    } else {
-                                        false
+                                        _ => {}
                                     }
+                                    is_keyframe
                                 } else {
                                     false
                                 }
+                            } else {
+                                false
                             }
-                            None => true,
                         }
+                        None => true,
                     }
                 }
             }
@@ -381,5 +382,30 @@ mod test {
 
         let segments = storage.segments();
         assert_eq!(segments.len(), 25);
+    }
+
+    #[tokio::test]
+    /// The file used for this test has PCR fields only for non-pes packets. It is also interlaced
+    /// and has keyframes beginning on packets without adaptation fields.
+    async fn test_segmenter_program() {
+        let mut storage = MemorySegmentStorage::new();
+
+        {
+            let mut f = File::open("src/testdata/program.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(1),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert_eq!(segments.len(), 3);
     }
 }
