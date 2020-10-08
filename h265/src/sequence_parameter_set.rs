@@ -1,4 +1,4 @@
-use super::{decode, syntax_elements::*, Bitstream, Decode, ProfileTierLevel};
+use super::{decode, encode, syntax_elements::*, Bitstream, BitstreamWriter, Decode, Encode, ProfileTierLevel};
 use std::io;
 
 #[derive(Debug, Default)]
@@ -18,11 +18,27 @@ impl Decode for SequenceParameterSetSubLayerOrderingInfo {
     }
 }
 
+impl Encode for SequenceParameterSetSubLayerOrderingInfo {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        encode!(
+            bs,
+            &self.sps_max_dec_pic_buffering_minus1,
+            &self.sps_max_num_reorder_pics,
+            &self.sps_max_latency_increase_plus1
+        )
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SequenceParameterSetShortTermRefPicSet {
     // if( stRpsIdx != 0 )
     pub inter_ref_pic_set_prediction_flag: U1,
-    // TODO: expose fields?
+
+    pub delta_poc_s0_minus1: Vec<UE>,
+    pub used_by_curr_pic_s0_flag: Vec<U1>,
+
+    pub delta_poc_s1_minus1: Vec<UE>,
+    pub used_by_curr_pic_s1_flag: Vec<U1>,
 }
 
 impl SequenceParameterSetShortTermRefPicSet {
@@ -42,16 +58,40 @@ impl SequenceParameterSetShortTermRefPicSet {
             let num_negative_pics = UE::decode(bs)?;
             let num_positive_pics = UE::decode(bs)?;
             for _ in 0..num_negative_pics.0 {
-                UE::decode(bs)?;
-                U1::decode(bs)?;
+                ret.delta_poc_s0_minus1.push(UE::decode(bs)?);
+                ret.used_by_curr_pic_s0_flag.push(U1::decode(bs)?);
             }
             for _ in 0..num_positive_pics.0 {
-                UE::decode(bs)?;
-                U1::decode(bs)?;
+                ret.delta_poc_s1_minus1.push(UE::decode(bs)?);
+                ret.used_by_curr_pic_s1_flag.push(U1::decode(bs)?);
             }
         }
 
         Ok(ret)
+    }
+
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>, st_rps_idx: u64) -> io::Result<()> {
+        if st_rps_idx != 0 {
+            encode!(bs, &self.inter_ref_pic_set_prediction_flag)?;
+        }
+
+        if self.inter_ref_pic_set_prediction_flag.0 != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "short term ref picture set source candidates are not supported",
+            ));
+        } else {
+            UE(self.delta_poc_s0_minus1.len() as _).encode(bs)?;
+            UE(self.delta_poc_s1_minus1.len() as _).encode(bs)?;
+            for i in 0..self.delta_poc_s0_minus1.len() {
+                encode!(bs, &self.delta_poc_s0_minus1[i], &self.used_by_curr_pic_s0_flag[i])?;
+            }
+            for i in 0..self.delta_poc_s1_minus1.len() {
+                encode!(bs, &self.delta_poc_s1_minus1[i], &self.used_by_curr_pic_s1_flag[i])?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -120,7 +160,8 @@ pub struct SequenceParameterSet {
     // if( long_term_ref_pics_present_flag ) {
     pub num_long_term_ref_pics_sps: UE,
     // for( i = 0; i < num_long_term_ref_pics_sps; i++ ) {
-    // TODO: expose long-term reference pic fields?
+    pub lt_ref_pic_poc_lsb_sps: Vec<u64>,
+    pub used_by_curr_pic_lt_sps_flag: Vec<U1>,
     // }
     // }
     pub sps_temporal_mvp_enabled_flag: U1,
@@ -129,7 +170,9 @@ pub struct SequenceParameterSet {
 
     // if( vui_parameters_present_flag )
     pub vui_parameters: VUIParameters,
+
     // XXX: VUIParameters does not yet parse all fields. extensions cannot be added until it's completed
+    pub remaining_bits: Vec<U1>,
 }
 
 impl Decode for SequenceParameterSet {
@@ -232,8 +275,9 @@ impl Decode for SequenceParameterSet {
         if ret.long_term_ref_pics_present_flag.0 != 0 {
             decode!(bs, &mut ret.num_long_term_ref_pics_sps)?;
             for _ in 0..ret.num_long_term_ref_pics_sps.0 {
-                bs.read_bits(ret.log2_max_pic_order_cnt_lsb_minus4.0 as usize + 4)?;
-                U1::decode(bs)?;
+                ret.lt_ref_pic_poc_lsb_sps
+                    .push(bs.read_bits(ret.log2_max_pic_order_cnt_lsb_minus4.0 as usize + 4)?);
+                ret.used_by_curr_pic_lt_sps_flag.push(U1::decode(bs)?);
             }
         }
 
@@ -248,7 +292,124 @@ impl Decode for SequenceParameterSet {
             decode!(bs, &mut ret.vui_parameters)?;
         }
 
+        ret.remaining_bits = bs.bits().map(|b| U1(b as _)).collect();
+
         Ok(ret)
+    }
+}
+
+impl Encode for SequenceParameterSet {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        encode!(
+            bs,
+            &self.sps_video_parameter_set_id,
+            &self.sps_max_sub_layers_minus1,
+            &self.sps_temporal_id_nesting_flag
+        )?;
+
+        self.profile_tier_level.encode(bs, 1, self.sps_max_sub_layers_minus1.0)?;
+
+        encode!(bs, &self.sps_seq_parameter_set_id, &self.chroma_format_idc)?;
+
+        if self.chroma_format_idc.0 == 3 {
+            encode!(bs, &self.separate_colour_plane_flag)?;
+        }
+
+        encode!(
+            bs,
+            &self.pic_width_in_luma_samples,
+            &self.pic_height_in_luma_samples,
+            &self.conformance_window_flag
+        )?;
+
+        if self.conformance_window_flag.0 != 0 {
+            encode!(
+                bs,
+                &self.conf_win_left_offset,
+                &self.conf_win_right_offset,
+                &self.conf_win_top_offset,
+                &self.conf_win_bottom_offset
+            )?;
+        }
+
+        encode!(
+            bs,
+            &self.bit_depth_luma_minus8,
+            &self.bit_depth_chroma_minus8,
+            &self.log2_max_pic_order_cnt_lsb_minus4,
+            &self.sps_sub_layer_ordering_info_present_flag
+        )?;
+
+        let mut i = match self.sps_sub_layer_ordering_info_present_flag.0 {
+            0 => self.sps_max_sub_layers_minus1.0,
+            _ => 0,
+        };
+        while i <= self.sps_max_sub_layers_minus1.0 {
+            self.sub_layer_ordering_info.encode(bs)?;
+            i += 1;
+        }
+
+        encode!(
+            bs,
+            &self.log2_min_luma_coding_block_size_minus3,
+            &self.log2_diff_max_min_luma_coding_block_size,
+            &self.log2_min_luma_transform_block_size_minus2,
+            &self.log2_diff_max_min_luma_transform_block_size,
+            &self.max_transform_hierarchy_depth_inter,
+            &self.max_transform_hierarchy_depth_intra,
+            &self.scaling_list_enabled_flag
+        )?;
+
+        if self.scaling_list_enabled_flag.0 != 0 {
+            encode!(bs, &self.sps_scaling_list_data_present_flag)?;
+            if self.sps_scaling_list_data_present_flag.0 != 0 {
+                return Err(io::Error::new(io::ErrorKind::Other, "decoding scaling matrices is not supported"));
+            }
+        }
+
+        encode!(bs, &self.amp_enabled_flag, &self.sample_adaptive_offset_enabled_flag, &self.pcm_enabled_flag)?;
+
+        if self.pcm_enabled_flag.0 != 0 {
+            encode!(
+                bs,
+                &self.pcm_sample_bit_depth_luma_minus1,
+                &self.pcm_sample_bit_depth_chroma_minus1,
+                &self.log2_min_pcm_luma_coding_block_size_minus3,
+                &self.log2_diff_max_min_pcm_luma_coding_block_size,
+                &self.pcm_loop_filter_disabled_flag
+            )?;
+        }
+
+        encode!(bs, &self.num_short_term_ref_pic_sets)?;
+
+        for i in 0..self.num_short_term_ref_pic_sets.0 {
+            self.st_ref_pic_set[i as usize].encode(bs, i)?;
+        }
+
+        encode!(bs, &self.long_term_ref_pics_present_flag)?;
+
+        if self.long_term_ref_pics_present_flag.0 != 0 {
+            encode!(bs, &self.num_long_term_ref_pics_sps)?;
+            for i in 0..self.num_long_term_ref_pics_sps.0 {
+                bs.write_bits(self.lt_ref_pic_poc_lsb_sps[i as usize], self.log2_max_pic_order_cnt_lsb_minus4.0 as usize + 4)?;
+                self.used_by_curr_pic_lt_sps_flag[i as usize].encode(bs)?;
+            }
+        }
+
+        encode!(
+            bs,
+            &self.sps_temporal_mvp_enabled_flag,
+            &self.strong_intra_smoothing_enabled_flag,
+            &self.vui_parameters_present_flag
+        )?;
+
+        if self.vui_parameters_present_flag.0 != 0 {
+            encode!(bs, &self.vui_parameters)?;
+        }
+
+        self.remaining_bits.encode(bs)?;
+
+        Ok(())
     }
 }
 
@@ -378,76 +539,150 @@ impl Decode for VUIParameters {
     }
 }
 
+impl Encode for VUIParameters {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        encode!(bs, &self.aspect_ratio_info_present_flag)?;
+
+        if self.aspect_ratio_info_present_flag.0 != 0 {
+            encode!(bs, &self.aspect_ratio_idc)?;
+
+            if self.aspect_ratio_idc.0 == ASPECT_RATIO_IDC_EXTENDED_SAR {
+                encode!(bs, &self.sar_width, &self.sar_height)?;
+            }
+        }
+
+        encode!(bs, &self.overscan_info_present_flag)?;
+
+        if self.overscan_info_present_flag.0 != 0 {
+            encode!(bs, &self.overscan_appropriate_flag)?;
+        }
+
+        encode!(bs, &self.video_signal_type_present_flag)?;
+
+        if self.video_signal_type_present_flag.0 != 0 {
+            encode!(bs, &self.video_format, &self.video_full_range_flag, &self.colour_description_present_flag)?;
+
+            if self.colour_description_present_flag.0 != 0 {
+                encode!(bs, &self.colour_primaries, &self.transfer_characteristics, &self.matrix_coefficients)?;
+            }
+        }
+
+        encode!(bs, &self.chroma_loc_info_present_flag)?;
+
+        if self.chroma_loc_info_present_flag.0 != 0 {
+            encode!(bs, &self.chroma_sample_loc_type_top_field, &self.chroma_sample_loc_type_bottom_field)?;
+        }
+
+        encode!(
+            bs,
+            &self.neutral_chroma_indication_flag,
+            &self.field_seq_flag,
+            &self.frame_field_info_present_flag,
+            &self.default_display_window_flag
+        )?;
+
+        if self.default_display_window_flag.0 != 0 {
+            encode!(
+                bs,
+                &self.def_disp_win_left_offset,
+                &self.def_disp_win_right_offset,
+                &self.def_disp_win_top_offset,
+                &self.def_disp_win_bottom_offset
+            )?;
+        }
+
+        encode!(bs, &self.vui_timing_info_present_flag)?;
+
+        if self.vui_timing_info_present_flag.0 != 0 {
+            encode!(bs, &self.vui_num_units_in_tick, &self.vui_time_scale)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn test_sequence_parameter_set() {
-        let mut bs = Bitstream::new(
-            [
+        {
+            let data = vec![
                 0x01, 0x01, 0x60, 0x00, 0x00, 0x00, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0xa0, 0x02, 0x80, 0x80, 0x2d, 0x16, 0x20, 0x5e, 0xe4, 0x59, 0x14,
                 0xbf, 0xf2, 0xe7, 0xf1, 0x3f, 0xac, 0x05, 0xa8, 0x10, 0x10, 0x10, 0x04,
-            ]
-            .iter(),
-        );
+            ];
+            let mut bs = Bitstream::new(data.iter());
 
-        let sps = SequenceParameterSet::decode(&mut bs).unwrap();
+            let sps = SequenceParameterSet::decode(&mut bs).unwrap();
 
-        assert_eq!(0, sps.sps_video_parameter_set_id.0);
-        assert_eq!(0, sps.sps_max_sub_layers_minus1.0);
-        assert_eq!(0x60000000, sps.profile_tier_level.general_profile_compatibility_flags.0);
-        assert_eq!(0xb00000000000, sps.profile_tier_level.general_constraint_flags.0);
-        assert_eq!(0, sps.sps_seq_parameter_set_id.0);
-        assert_eq!(1, sps.chroma_format_idc.0);
-        assert_eq!(1280, sps.pic_width_in_luma_samples.0);
-        assert_eq!(720, sps.pic_height_in_luma_samples.0);
-        assert_eq!(0, sps.conformance_window_flag.0);
-        assert_eq!(0, sps.bit_depth_luma_minus8.0);
-        assert_eq!(0, sps.bit_depth_chroma_minus8.0);
-        assert_eq!(0, sps.sps_sub_layer_ordering_info_present_flag.0);
-        assert_eq!(1, sps.scaling_list_enabled_flag.0);
-        assert_eq!(0, sps.sps_scaling_list_data_present_flag.0);
-        assert_eq!(0, sps.amp_enabled_flag.0);
-        assert_eq!(1, sps.sample_adaptive_offset_enabled_flag.0);
-        assert_eq!(0, sps.pcm_enabled_flag.0);
-        assert_eq!(4, sps.num_short_term_ref_pic_sets.0);
-        assert_eq!(0, sps.long_term_ref_pics_present_flag.0);
-        assert_eq!(1, sps.vui_parameters_present_flag.0);
-        assert_eq!(0, sps.vui_parameters.vui_timing_info_present_flag.0);
+            assert_eq!(0, sps.sps_video_parameter_set_id.0);
+            assert_eq!(0, sps.sps_max_sub_layers_minus1.0);
+            assert_eq!(0x60000000, sps.profile_tier_level.general_profile_compatibility_flags.0);
+            assert_eq!(0xb00000000000, sps.profile_tier_level.general_constraint_flags.0);
+            assert_eq!(0, sps.sps_seq_parameter_set_id.0);
+            assert_eq!(1, sps.chroma_format_idc.0);
+            assert_eq!(1280, sps.pic_width_in_luma_samples.0);
+            assert_eq!(720, sps.pic_height_in_luma_samples.0);
+            assert_eq!(0, sps.conformance_window_flag.0);
+            assert_eq!(0, sps.bit_depth_luma_minus8.0);
+            assert_eq!(0, sps.bit_depth_chroma_minus8.0);
+            assert_eq!(0, sps.sps_sub_layer_ordering_info_present_flag.0);
+            assert_eq!(1, sps.scaling_list_enabled_flag.0);
+            assert_eq!(0, sps.sps_scaling_list_data_present_flag.0);
+            assert_eq!(0, sps.amp_enabled_flag.0);
+            assert_eq!(1, sps.sample_adaptive_offset_enabled_flag.0);
+            assert_eq!(0, sps.pcm_enabled_flag.0);
+            assert_eq!(4, sps.num_short_term_ref_pic_sets.0);
+            assert_eq!(0, sps.long_term_ref_pics_present_flag.0);
+            assert_eq!(1, sps.vui_parameters_present_flag.0);
+            assert_eq!(0, sps.vui_parameters.vui_timing_info_present_flag.0);
 
-        let mut bs = Bitstream::new(
-            [
+            assert_eq!(bs.next_bits(1), None);
+
+            let mut round_trip = Vec::new();
+            sps.encode(&mut BitstreamWriter::new(&mut round_trip)).unwrap();
+            assert_eq!(round_trip, data);
+        }
+
+        {
+            let data = vec![
                 0x01, 0x04, 0x08, 0x00, 0x00, 0x00, 0x9d, 0x08, 0x00, 0x00, 0x00, 0x00, 0x78, 0xb0, 0x02, 0x80, 0x80, 0x2d, 0x13, 0x65, 0x95, 0x9a, 0x49, 0x32,
                 0xbc, 0x05, 0xa0, 0x20, 0x00, 0x00, 0x7d, 0x20, 0x00, 0x1d, 0x4c, 0x01,
-            ]
-            .iter(),
-        );
+            ];
+            let mut bs = Bitstream::new(data.iter());
 
-        let sps = SequenceParameterSet::decode(&mut bs).unwrap();
+            let sps = SequenceParameterSet::decode(&mut bs).unwrap();
 
-        assert_eq!(0, sps.sps_video_parameter_set_id.0);
-        assert_eq!(0, sps.sps_max_sub_layers_minus1.0);
-        assert_eq!(0x8000000, sps.profile_tier_level.general_profile_compatibility_flags.0);
-        assert_eq!(0x9d0800000000, sps.profile_tier_level.general_constraint_flags.0);
-        assert_eq!(0, sps.sps_seq_parameter_set_id.0);
-        assert_eq!(2, sps.chroma_format_idc.0);
-        assert_eq!(1280, sps.pic_width_in_luma_samples.0);
-        assert_eq!(720, sps.pic_height_in_luma_samples.0);
-        assert_eq!(0, sps.conformance_window_flag.0);
-        assert_eq!(2, sps.bit_depth_luma_minus8.0);
-        assert_eq!(2, sps.bit_depth_chroma_minus8.0);
-        assert_eq!(1, sps.sps_sub_layer_ordering_info_present_flag.0);
-        assert_eq!(0, sps.scaling_list_enabled_flag.0);
-        assert_eq!(0, sps.sps_scaling_list_data_present_flag.0);
-        assert_eq!(0, sps.amp_enabled_flag.0);
-        assert_eq!(1, sps.sample_adaptive_offset_enabled_flag.0);
-        assert_eq!(0, sps.pcm_enabled_flag.0);
-        assert_eq!(0, sps.num_short_term_ref_pic_sets.0);
-        assert_eq!(0, sps.long_term_ref_pics_present_flag.0);
-        assert_eq!(1, sps.vui_parameters_present_flag.0);
-        assert_eq!(1, sps.vui_parameters.vui_timing_info_present_flag.0);
-        assert_eq!(1001, sps.vui_parameters.vui_num_units_in_tick.0);
-        assert_eq!(60000, sps.vui_parameters.vui_time_scale.0);
+            assert_eq!(0, sps.sps_video_parameter_set_id.0);
+            assert_eq!(0, sps.sps_max_sub_layers_minus1.0);
+            assert_eq!(0x8000000, sps.profile_tier_level.general_profile_compatibility_flags.0);
+            assert_eq!(0x9d0800000000, sps.profile_tier_level.general_constraint_flags.0);
+            assert_eq!(0, sps.sps_seq_parameter_set_id.0);
+            assert_eq!(2, sps.chroma_format_idc.0);
+            assert_eq!(1280, sps.pic_width_in_luma_samples.0);
+            assert_eq!(720, sps.pic_height_in_luma_samples.0);
+            assert_eq!(0, sps.conformance_window_flag.0);
+            assert_eq!(2, sps.bit_depth_luma_minus8.0);
+            assert_eq!(2, sps.bit_depth_chroma_minus8.0);
+            assert_eq!(1, sps.sps_sub_layer_ordering_info_present_flag.0);
+            assert_eq!(0, sps.scaling_list_enabled_flag.0);
+            assert_eq!(0, sps.sps_scaling_list_data_present_flag.0);
+            assert_eq!(0, sps.amp_enabled_flag.0);
+            assert_eq!(1, sps.sample_adaptive_offset_enabled_flag.0);
+            assert_eq!(0, sps.pcm_enabled_flag.0);
+            assert_eq!(0, sps.num_short_term_ref_pic_sets.0);
+            assert_eq!(0, sps.long_term_ref_pics_present_flag.0);
+            assert_eq!(1, sps.vui_parameters_present_flag.0);
+            assert_eq!(1, sps.vui_parameters.vui_timing_info_present_flag.0);
+            assert_eq!(1001, sps.vui_parameters.vui_num_units_in_tick.0);
+            assert_eq!(60000, sps.vui_parameters.vui_time_scale.0);
+
+            assert_eq!(bs.next_bits(1), None);
+
+            let mut round_trip = Vec::new();
+            sps.encode(&mut BitstreamWriter::new(&mut round_trip)).unwrap();
+            assert_eq!(round_trip, data);
+        }
     }
 }

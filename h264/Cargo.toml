@@ -2,3 +2,6 @@
 name = "h264"
 version = "0.1.0"
 edition = "2018"
+
+[dependencies]
+bytes = "0.5.6"
