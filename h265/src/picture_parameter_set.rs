@@ -91,7 +91,7 @@ impl Decode for PictureParameterSet {
                 &mut ret.num_tile_rows_minus1,
                 &mut ret.uniform_spacing_flag
             )?;
-            if ret.uniform_spacing_flag.0 != 0 {
+            if ret.uniform_spacing_flag.0 == 0 {
                 for _ in 0..ret.num_tile_columns_minus1.0 {
                     ret.column_width_minus1.push(UE::decode(bs)?);
                 }
@@ -145,7 +145,7 @@ impl Encode for PictureParameterSet {
 
         if self.tiles_enabled_flag.0 != 0 {
             encode!(bs, &self.num_tile_columns_minus1, &self.num_tile_rows_minus1, &self.uniform_spacing_flag)?;
-            if self.uniform_spacing_flag.0 != 0 {
+            if self.uniform_spacing_flag.0 == 0 {
                 encode!(bs, &self.column_width_minus1, &self.row_height_minus1)?;
             }
             encode!(bs, &self.loop_filter_across_tiles_enabled_flag)?;
@@ -163,41 +163,82 @@ mod test {
 
     #[test]
     fn test_picture_parameter_set() {
-        let data = [0xc0, 0xf2, 0xc6, 0x8d, 0x09, 0xc0, 0xa0, 0x14, 0x7b, 0x24];
-        let mut bs = Bitstream::new(data.iter());
+        {
+            let data = [0xc0, 0xf2, 0xc6, 0x8d, 0x09, 0xc0, 0xa0, 0x14, 0x7b, 0x24];
+            let mut bs = Bitstream::new(data.iter());
 
-        let pps = PictureParameterSet::decode(&mut bs).unwrap();
+            let pps = PictureParameterSet::decode(&mut bs).unwrap();
 
-        assert_eq!(pps.pps_pic_parameter_set_id.0, 0);
-        assert_eq!(pps.pps_seq_parameter_set_id.0, 0);
-        assert_eq!(pps.dependent_slice_segments_enabled_flag.0, 0);
-        assert_eq!(pps.output_flag_present_flag.0, 0);
-        assert_eq!(pps.num_extra_slice_header_bits.0, 0);
-        assert_eq!(pps.sign_data_hiding_enabled_flag.0, 0);
-        assert_eq!(pps.cabac_init_present_flag.0, 1);
-        assert_eq!(pps.num_ref_idx_l0_default_active_minus1.0, 0);
-        assert_eq!(pps.num_ref_idx_l1_default_active_minus1.0, 0);
-        assert_eq!(pps.init_qp_minus26.0, 0);
-        assert_eq!(pps.constrained_intra_pred_flag.0, 0);
-        assert_eq!(pps.transform_skip_enabled_flag.0, 0);
-        assert_eq!(pps.cu_qp_delta_enabled_flag.0, 1);
-        assert_eq!(pps.diff_cu_qp_delta_depth.0, 2);
-        assert_eq!(pps.pps_cb_qp_offset.0, -6);
-        assert_eq!(pps.pps_cr_qp_offset.0, -6);
-        assert_eq!(pps.pps_slice_chroma_qp_offsets_present_flag.0, 0);
-        assert_eq!(pps.weighted_pred_flag.0, 0);
-        assert_eq!(pps.weighted_bipred_flag.0, 0);
-        assert_eq!(pps.transquant_bypass_enabled_flag.0, 0);
-        assert_eq!(pps.tiles_enabled_flag.0, 1);
-        assert_eq!(pps.entropy_coding_sync_enabled_flag.0, 0);
-        assert_eq!(pps.num_tile_columns_minus1.0, 2);
-        assert_eq!(pps.num_tile_rows_minus1.0, 0);
-        assert_eq!(pps.uniform_spacing_flag.0, 0);
+            assert_eq!(pps.pps_pic_parameter_set_id.0, 0);
+            assert_eq!(pps.pps_seq_parameter_set_id.0, 0);
+            assert_eq!(pps.dependent_slice_segments_enabled_flag.0, 0);
+            assert_eq!(pps.output_flag_present_flag.0, 0);
+            assert_eq!(pps.num_extra_slice_header_bits.0, 0);
+            assert_eq!(pps.sign_data_hiding_enabled_flag.0, 0);
+            assert_eq!(pps.cabac_init_present_flag.0, 1);
+            assert_eq!(pps.num_ref_idx_l0_default_active_minus1.0, 0);
+            assert_eq!(pps.num_ref_idx_l1_default_active_minus1.0, 0);
+            assert_eq!(pps.init_qp_minus26.0, 0);
+            assert_eq!(pps.constrained_intra_pred_flag.0, 0);
+            assert_eq!(pps.transform_skip_enabled_flag.0, 0);
+            assert_eq!(pps.cu_qp_delta_enabled_flag.0, 1);
+            assert_eq!(pps.diff_cu_qp_delta_depth.0, 2);
+            assert_eq!(pps.pps_cb_qp_offset.0, -6);
+            assert_eq!(pps.pps_cr_qp_offset.0, -6);
+            assert_eq!(pps.pps_slice_chroma_qp_offsets_present_flag.0, 0);
+            assert_eq!(pps.weighted_pred_flag.0, 0);
+            assert_eq!(pps.weighted_bipred_flag.0, 0);
+            assert_eq!(pps.transquant_bypass_enabled_flag.0, 0);
+            assert_eq!(pps.tiles_enabled_flag.0, 1);
+            assert_eq!(pps.entropy_coding_sync_enabled_flag.0, 0);
+            assert_eq!(pps.num_tile_columns_minus1.0, 2);
+            assert_eq!(pps.num_tile_rows_minus1.0, 0);
+            assert_eq!(pps.uniform_spacing_flag.0, 0);
 
-        assert_eq!(bs.next_bits(1), None);
+            assert_eq!(bs.next_bits(1), None);
 
-        let mut round_trip = Vec::new();
-        pps.encode(&mut BitstreamWriter::new(&mut round_trip)).unwrap();
-        assert_eq!(round_trip, data);
+            let mut round_trip = Vec::new();
+            pps.encode(&mut BitstreamWriter::new(&mut round_trip)).unwrap();
+            assert_eq!(round_trip, data);
+        }
+
+        {
+            let data = [0xc1, 0x62, 0x4f, 0x08, 0x20, 0x26, 0x4c, 0x90];
+            let mut bs = Bitstream::new(data.iter());
+
+            let pps = PictureParameterSet::decode(&mut bs).unwrap();
+
+            assert_eq!(pps.pps_pic_parameter_set_id.0, 0);
+            assert_eq!(pps.pps_seq_parameter_set_id.0, 0);
+            assert_eq!(pps.dependent_slice_segments_enabled_flag.0, 0);
+            assert_eq!(pps.output_flag_present_flag.0, 0);
+            assert_eq!(pps.num_extra_slice_header_bits.0, 0);
+            assert_eq!(pps.sign_data_hiding_enabled_flag.0, 1);
+            assert_eq!(pps.cabac_init_present_flag.0, 0);
+            assert_eq!(pps.num_ref_idx_l0_default_active_minus1.0, 0);
+            assert_eq!(pps.num_ref_idx_l1_default_active_minus1.0, 0);
+            assert_eq!(pps.init_qp_minus26.0, -4);
+            assert_eq!(pps.constrained_intra_pred_flag.0, 0);
+            assert_eq!(pps.transform_skip_enabled_flag.0, 0);
+            assert_eq!(pps.cu_qp_delta_enabled_flag.0, 1);
+            assert_eq!(pps.diff_cu_qp_delta_depth.0, 0);
+            assert_eq!(pps.pps_cb_qp_offset.0, 0);
+            assert_eq!(pps.pps_cr_qp_offset.0, 0);
+            assert_eq!(pps.pps_slice_chroma_qp_offsets_present_flag.0, 0);
+            assert_eq!(pps.weighted_pred_flag.0, 0);
+            assert_eq!(pps.weighted_bipred_flag.0, 0);
+            assert_eq!(pps.transquant_bypass_enabled_flag.0, 0);
+            assert_eq!(pps.tiles_enabled_flag.0, 1);
+            assert_eq!(pps.entropy_coding_sync_enabled_flag.0, 0);
+            assert_eq!(pps.num_tile_columns_minus1.0, 15);
+            assert_eq!(pps.num_tile_rows_minus1.0, 8);
+            assert_eq!(pps.uniform_spacing_flag.0, 1);
+
+            assert_eq!(bs.next_bits(1), None);
+
+            let mut round_trip = Vec::new();
+            pps.encode(&mut BitstreamWriter::new(&mut round_trip)).unwrap();
+            assert_eq!(round_trip, data);
+        }
     }
 }

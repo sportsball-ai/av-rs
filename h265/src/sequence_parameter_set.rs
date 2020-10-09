@@ -684,5 +684,26 @@ mod test {
             sps.encode(&mut BitstreamWriter::new(&mut round_trip)).unwrap();
             assert_eq!(round_trip, data);
         }
+
+        {
+            let data = vec![
+                0x02, 0x01, 0x60, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0xba, 0x00, 0x00, 0xa0, 0x00, 0xf0, 0x08, 0x00, 0x43, 0x85, 0xde, 0x49,
+                0x32, 0x8c, 0x04, 0x04, 0x00, 0x00, 0x0f, 0xa4, 0x00, 0x01, 0xd4, 0xc0, 0x20,
+            ];
+
+            let mut bs = Bitstream::new(data.iter());
+
+            let sps = SequenceParameterSet::decode(&mut bs).unwrap();
+
+            assert_eq!(0, sps.sps_video_parameter_set_id.0);
+            assert_eq!(7680, sps.pic_width_in_luma_samples.0);
+            assert_eq!(4320, sps.pic_height_in_luma_samples.0);
+
+            assert_eq!(bs.next_bits(1), None);
+
+            let mut round_trip = Vec::new();
+            sps.encode(&mut BitstreamWriter::new(&mut round_trip)).unwrap();
+            assert_eq!(round_trip, data);
+        }
     }
 }
