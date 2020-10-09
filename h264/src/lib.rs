@@ -1,4 +1,8 @@
-use std::{io, iter::Iterator};
+use std::{
+    collections::VecDeque,
+    io::{self, Read},
+    iter::Iterator,
+};
 
 pub mod bitstream;
 pub use bitstream::*;
@@ -93,6 +97,82 @@ impl<'a> Iterator for AnnexBIter<'a> {
     }
 }
 
+pub struct ReadAnnexB<T> {
+    buf: bytes::BytesMut,
+    offset: usize,
+    reader: T,
+    start_codes: VecDeque<(usize, usize)>,
+    zeros: usize,
+}
+
+pub fn read_annex_b<T: Read>(reader: T) -> ReadAnnexB<T> {
+    ReadAnnexB {
+        buf: bytes::BytesMut::new(),
+        offset: 0,
+        reader,
+        start_codes: VecDeque::new(),
+        zeros: 0,
+    }
+}
+
+impl<T: Read> Iterator for ReadAnnexB<T> {
+    type Item = io::Result<bytes::Bytes>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // append to buf until we have 2+ start codes
+        while self.start_codes.len() < 2 {
+            self.buf.resize(self.offset + 1024, 0);
+            let n = match self.reader.read(&mut self.buf[self.offset..]) {
+                Ok(n) => n,
+                Err(e) => return Some(Err(e)),
+            };
+            if n == 0 {
+                break;
+            }
+            for (i, &b) in self.buf[self.offset..self.offset + n].iter().enumerate() {
+                match b {
+                    0 => self.zeros += 1,
+                    1 if self.zeros >= 2 => {
+                        self.start_codes.push_back((self.offset + i - self.zeros, self.zeros + 1));
+                        self.zeros = 0;
+                    }
+                    _ => self.zeros = 0,
+                }
+            }
+            self.offset += n;
+        }
+
+        // return the next nalu
+        match self.start_codes.pop_front() {
+            Some((start_code_offset, start_code_len)) => match self.start_codes.front() {
+                Some(&(next_start_code_offset, _)) => {
+                    // this is not the last nalu. freeze the current buffer and copy the unused
+                    // bits to a new one
+                    let buf = std::mem::take(&mut self.buf).freeze();
+                    let item = Some(Ok(buf.slice(start_code_offset + start_code_len..next_start_code_offset)));
+                    let unused = buf.slice(next_start_code_offset..);
+                    self.buf.extend_from_slice(&unused);
+                    self.offset -= next_start_code_offset;
+                    for (o, _) in self.start_codes.iter_mut() {
+                        *o -= next_start_code_offset;
+                    }
+                    item
+                }
+                None => {
+                    // this is the last nalu
+                    let buf = std::mem::take(&mut self.buf).freeze();
+                    let item = Some(Ok(buf.slice(start_code_offset + start_code_len..self.offset)));
+                    self.offset = 0;
+                    self.zeros = 0;
+                    item
+                }
+            },
+            // no more nalus
+            None => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AccessUnitCounter {
     maybe_start_new_access_unit: bool,
@@ -171,6 +251,13 @@ mod test {
         let data = &[0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x04];
         let expected: Vec<&[u8]> = vec![&[0x01, 0x02, 0x03], &[0x04]];
         assert_eq!(expected, iterate_annex_b(&data).collect::<Vec<&[u8]>>());
+    }
+
+    #[test]
+    fn test_read_annex_b() {
+        let data = &[0u8, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x04];
+        let expected: Vec<bytes::Bytes> = vec![[1u8, 0x02, 0x03].as_ref().into(), [4u8].as_ref().into()];
+        assert_eq!(expected, read_annex_b(data.as_ref()).collect::<io::Result<Vec<bytes::Bytes>>>().unwrap());
     }
 
     #[test]

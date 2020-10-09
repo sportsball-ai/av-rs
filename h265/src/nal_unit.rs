@@ -4,6 +4,7 @@ use std::io;
 
 pub const NAL_UNIT_TYPE_VIDEO_PARAMETER_SET: u8 = 32;
 pub const NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET: u8 = 33;
+pub const NAL_UNIT_TYPE_PICTURE_PARAMETER_SET: u8 = 34;
 
 // ITU-T H.265, 11/2019, 7.3.1.1
 pub struct NALUnit<T> {

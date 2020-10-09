@@ -3,10 +3,13 @@ use std::io;
 pub mod nal_unit;
 pub use nal_unit::*;
 
-pub use h264::decode;
+pub use h264::{decode, encode};
 
 pub use h264::bitstream;
 pub use h264::bitstream::*;
+
+pub mod picture_parameter_set;
+pub use picture_parameter_set::*;
 
 pub mod profile_tier_level;
 pub use profile_tier_level::*;
@@ -23,7 +26,7 @@ pub use video_parameter_set::*;
 pub mod syntax_elements;
 pub use syntax_elements::*;
 
-pub use h264::{iterate_annex_b, iterate_avcc};
+pub use h264::{iterate_annex_b, iterate_avcc, read_annex_b};
 
 #[derive(Clone)]
 pub struct AccessUnitCounter {

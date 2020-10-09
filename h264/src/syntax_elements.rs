@@ -1,4 +1,4 @@
-use super::{Bitstream, Decode};
+use super::{Bitstream, BitstreamWriter, Decode, Encode};
 
 use std::io;
 
@@ -11,6 +11,12 @@ macro_rules! define_syntax_element_u {
         impl Decode for $e {
             fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
                 Ok(Self(bs.read_bits($n)? as _))
+            }
+        }
+
+        impl Encode for $e {
+            fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+                bs.write_bits(self.0 as _, $n)
             }
         }
     };
@@ -45,6 +51,13 @@ impl Decode for UE {
     }
 }
 
+impl Encode for UE {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        let leading_zero_bits = 63 - (self.0 as u64 + 1).leading_zeros() as usize;
+        bs.write_bits(self.0 + 1, 1 | (leading_zero_bits << 1))
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SE(pub i64);
 
@@ -56,6 +69,13 @@ impl Decode for SE {
             value = -value;
         }
         Ok(Self(value))
+    }
+}
+
+impl Encode for SE {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        let non_negative = if self.0 <= 0 { -self.0 << 1 } else { (self.0 << 1) - 1 };
+        UE(non_negative as _).encode(bs)
     }
 }
 
@@ -73,26 +93,46 @@ mod test {
         {
             let mut bs = Bitstream::new(&[0x80]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 0);
+
+            let mut b = Vec::new();
+            UE(0).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x80]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x40]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 1);
+
+            let mut b = Vec::new();
+            UE(1).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x40]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x60]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 2);
+
+            let mut b = Vec::new();
+            UE(2).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x60]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x20]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 3);
+
+            let mut b = Vec::new();
+            UE(3).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x20]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x28]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 4);
+
+            let mut b = Vec::new();
+            UE(4).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x28]);
         }
     }
 
@@ -106,26 +146,46 @@ mod test {
         {
             let mut bs = Bitstream::new(&[0x80]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, 0);
+
+            let mut b = Vec::new();
+            SE(0).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x80]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x40]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, 1);
+
+            let mut b = Vec::new();
+            SE(1).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x40]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x60]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, -1);
+
+            let mut b = Vec::new();
+            SE(-1).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x60]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x20]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, 2);
+
+            let mut b = Vec::new();
+            SE(2).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x20]);
         }
 
         {
             let mut bs = Bitstream::new(&[0x28]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, -2);
+
+            let mut b = Vec::new();
+            SE(-2).encode(&mut BitstreamWriter::new(&mut b)).unwrap();
+            assert_eq!(b, &[0x28]);
         }
     }
 }
