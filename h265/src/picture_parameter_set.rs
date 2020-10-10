@@ -42,6 +42,33 @@ pub struct PictureParameterSet {
     //   }
     pub loop_filter_across_tiles_enabled_flag: U1,
     // }
+    pub pps_loop_filter_across_slices_enabled_flag: U1,
+    pub deblocking_filter_control_present_flag: U1,
+
+    //if( deblocking_filter_control_present_flag ) {
+    pub deblocking_filter_override_enabled_flag: U1,
+    pub pps_deblocking_filter_disabled_flag: U1,
+    //if( !pps_deblocking_filter_disabled_flag ) {
+    pub pps_beta_offset_div2: SE,
+    pub pps_tc_offset_div2: SE,
+    //}
+    //}
+    pub pps_scaling_list_data_present_flag: U1,
+
+    //if( pps_scaling_list_data_present_flag )
+    // TODO: support scaling list?
+    pub lists_modification_present_flag: U1,
+    pub log2_parallel_merge_level_minus2: UE,
+    pub slice_segment_header_extension_present_flag: U1,
+
+    pub pps_extension_present_flag: U1,
+    //if( pps_extension_present_flag ) {
+    pub pps_range_extension_flag: U1,
+    pub pps_multilayer_extension_flag: U1,
+    pub pps_3d_extension_flag: U1,
+    pub pps_scc_extension_flag: U1,
+    pub pps_extension_4bits: U4,
+    //}
 
     // the remaining bits whose fields we don't currently support parsing
     pub remaining_bits: Vec<U1>,
@@ -102,6 +129,47 @@ impl Decode for PictureParameterSet {
             decode!(bs, &mut ret.loop_filter_across_tiles_enabled_flag)?;
         }
 
+        decode!(
+            bs,
+            &mut ret.pps_loop_filter_across_slices_enabled_flag,
+            &mut ret.deblocking_filter_control_present_flag
+        )?;
+
+        if ret.deblocking_filter_control_present_flag.0 != 0 {
+            decode!(
+                bs,
+                &mut ret.deblocking_filter_override_enabled_flag,
+                &mut ret.pps_deblocking_filter_disabled_flag
+            )?;
+            if ret.pps_deblocking_filter_disabled_flag.0 == 0 {
+                decode!(bs, &mut ret.pps_beta_offset_div2, &mut ret.pps_tc_offset_div2)?;
+            }
+        }
+        bs.decode(&mut ret.pps_scaling_list_data_present_flag)?;
+
+        if ret.pps_scaling_list_data_present_flag.0 != 0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "decoding scaling matrices is not supported"));
+        }
+
+        decode!(
+            bs,
+            &mut ret.lists_modification_present_flag,
+            &mut ret.log2_parallel_merge_level_minus2,
+            &mut ret.slice_segment_header_extension_present_flag,
+            &mut ret.pps_extension_present_flag
+        )?;
+
+        if ret.pps_extension_present_flag.0 != 0 {
+            decode!(
+                bs,
+                &mut ret.pps_range_extension_flag,
+                &mut ret.pps_multilayer_extension_flag,
+                &mut ret.pps_3d_extension_flag,
+                &mut ret.pps_scc_extension_flag,
+                &mut ret.pps_extension_4bits
+            )?;
+        }
+
         ret.remaining_bits = bs.bits().map(|b| U1(b as _)).collect();
 
         Ok(ret)
@@ -149,6 +217,43 @@ impl Encode for PictureParameterSet {
                 encode!(bs, &self.column_width_minus1, &self.row_height_minus1)?;
             }
             encode!(bs, &self.loop_filter_across_tiles_enabled_flag)?;
+        }
+
+        encode!(
+            bs,
+            &self.pps_loop_filter_across_slices_enabled_flag,
+            &self.deblocking_filter_control_present_flag
+        )?;
+
+        if self.deblocking_filter_control_present_flag.0 != 0 {
+            encode!(bs, &self.deblocking_filter_override_enabled_flag, &self.pps_deblocking_filter_disabled_flag)?;
+            if self.pps_deblocking_filter_disabled_flag.0 == 0 {
+                encode!(bs, &self.pps_beta_offset_div2, &self.pps_tc_offset_div2)?;
+            }
+        }
+        bs.encode(&self.pps_scaling_list_data_present_flag)?;
+
+        if self.pps_scaling_list_data_present_flag.0 != 0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "decoding scaling matrices is not supported"));
+        }
+
+        encode!(
+            bs,
+            &self.lists_modification_present_flag,
+            &self.log2_parallel_merge_level_minus2,
+            &self.slice_segment_header_extension_present_flag,
+            &self.pps_extension_present_flag
+        )?;
+
+        if self.pps_extension_present_flag.0 != 0 {
+            encode!(
+                bs,
+                &self.pps_range_extension_flag,
+                &self.pps_multilayer_extension_flag,
+                &self.pps_3d_extension_flag,
+                &self.pps_scc_extension_flag,
+                &self.pps_extension_4bits
+            )?;
         }
 
         self.remaining_bits.encode(bs)?;

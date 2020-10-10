@@ -59,8 +59,8 @@ impl AccessUnitCounter {
                     let bs = Bitstream::new(nalu);
                     let mut nalu = NALUnit::decode(bs)?;
                     let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
-                    let slice_segment_header = SliceSegmentHeader::decode(&mut rbsp)?;
-                    if slice_segment_header.first_slice_segment_in_pic_flag.0 != 0 {
+                    let first_slice_segment_in_pic_flag = U1::decode(&mut rbsp)?;
+                    if first_slice_segment_in_pic_flag.0 != 0 {
                         self.count += 1;
                     }
                 }

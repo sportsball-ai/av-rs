@@ -15,6 +15,10 @@ impl<'a, T: Iterator<Item = &'a u8>> Bitstream<T> {
         }
     }
 
+    pub fn byte_aligned(&self) -> bool {
+        self.next_bits_length % 8 == 0
+    }
+
     pub fn advance_bits(&mut self, mut n: usize) -> bool {
         if n > self.next_bits_length {
             n -= self.next_bits_length;
@@ -128,6 +132,14 @@ impl<T: io::Write> BitstreamWriter<T> {
             self.next_bits_length = 0;
         }
         self.inner.flush()
+    }
+
+    pub fn inner(&self) -> &T {
+        &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut T {
+        &mut self.inner
     }
 
     pub fn encode<V: Encode>(&mut self, v: &V) -> io::Result<()> {
