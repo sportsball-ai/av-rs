@@ -208,7 +208,7 @@ impl Stream {
                     let header = h265::NALUnitHeader::decode(&mut bs)?;
 
                     match header.nal_unit_type.0 {
-                        h265::NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
+                        h265::NAL_UNIT_TYPE_SPS_NUT => {
                             let bs = h265::Bitstream::new(nalu);
                             let mut nalu = h265::NALUnit::decode(bs)?;
                             let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
@@ -255,7 +255,7 @@ impl Stream {
                                 },
                             ))
                         }
-                        h265::NAL_UNIT_TYPE_VIDEO_PARAMETER_SET => {
+                        h265::NAL_UNIT_TYPE_VPS_NUT => {
                             let bs = h265::Bitstream::new(nalu);
                             let mut nalu = h265::NALUnit::decode(bs)?;
                             let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
