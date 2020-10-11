@@ -79,6 +79,32 @@ impl Encode for SE {
     }
 }
 
+pub struct ByteAlignment;
+
+impl Decode for ByteAlignment {
+    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+        if bs.read_bits(1)? != 1 {
+            return Err(io::Error::new(io::ErrorKind::Other, "expected byte alignment bit equal to 1"));
+        }
+        while !bs.byte_aligned() {
+            if bs.read_bits(1)? != 0 {
+                return Err(io::Error::new(io::ErrorKind::Other, "expected byte alignment bit equal to 0"));
+            }
+        }
+        Ok(Self)
+    }
+}
+
+impl Encode for ByteAlignment {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        bs.write_bits(1, 1)?;
+        while !bs.byte_aligned() {
+            bs.write_bits(0, 1)?;
+        }
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

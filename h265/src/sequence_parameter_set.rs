@@ -30,9 +30,12 @@ impl Encode for SequenceParameterSetSubLayerOrderingInfo {
 }
 
 #[derive(Debug, Default)]
-pub struct SequenceParameterSetShortTermRefPicSet {
+pub struct ShortTermRefPicSet {
     // if( stRpsIdx != 0 )
     pub inter_ref_pic_set_prediction_flag: U1,
+
+    pub num_negative_pics: UE,
+    pub num_positive_pics: UE,
 
     pub delta_poc_s0_minus1: Vec<UE>,
     pub used_by_curr_pic_s0_flag: Vec<U1>,
@@ -41,7 +44,8 @@ pub struct SequenceParameterSetShortTermRefPicSet {
     pub used_by_curr_pic_s1_flag: Vec<U1>,
 }
 
-impl SequenceParameterSetShortTermRefPicSet {
+#[allow(non_snake_case)]
+impl ShortTermRefPicSet {
     pub fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>, st_rps_idx: u64) -> io::Result<Self> {
         let mut ret = Self::default();
 
@@ -55,13 +59,12 @@ impl SequenceParameterSetShortTermRefPicSet {
                 "short term ref picture set source candidates are not supported",
             ));
         } else {
-            let num_negative_pics = UE::decode(bs)?;
-            let num_positive_pics = UE::decode(bs)?;
-            for _ in 0..num_negative_pics.0 {
+            decode!(bs, &mut ret.num_negative_pics, &mut ret.num_positive_pics)?;
+            for _ in 0..ret.num_negative_pics.0 {
                 ret.delta_poc_s0_minus1.push(UE::decode(bs)?);
                 ret.used_by_curr_pic_s0_flag.push(U1::decode(bs)?);
             }
-            for _ in 0..num_positive_pics.0 {
+            for _ in 0..ret.num_positive_pics.0 {
                 ret.delta_poc_s1_minus1.push(UE::decode(bs)?);
                 ret.used_by_curr_pic_s1_flag.push(U1::decode(bs)?);
             }
@@ -70,7 +73,7 @@ impl SequenceParameterSetShortTermRefPicSet {
         Ok(ret)
     }
 
-    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>, st_rps_idx: u64) -> io::Result<()> {
+    pub fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>, st_rps_idx: u64) -> io::Result<()> {
         if st_rps_idx != 0 {
             encode!(bs, &self.inter_ref_pic_set_prediction_flag)?;
         }
@@ -81,8 +84,7 @@ impl SequenceParameterSetShortTermRefPicSet {
                 "short term ref picture set source candidates are not supported",
             ));
         } else {
-            UE(self.delta_poc_s0_minus1.len() as _).encode(bs)?;
-            UE(self.delta_poc_s1_minus1.len() as _).encode(bs)?;
+            encode!(bs, &self.num_negative_pics, &self.num_positive_pics)?;
             for i in 0..self.delta_poc_s0_minus1.len() {
                 encode!(bs, &self.delta_poc_s0_minus1[i], &self.used_by_curr_pic_s0_flag[i])?;
             }
@@ -92,6 +94,22 @@ impl SequenceParameterSetShortTermRefPicSet {
         }
 
         Ok(())
+    }
+
+    pub fn NumNegativePics(&self, _stRpsIdx: usize) -> u64 {
+        self.num_negative_pics.0
+    }
+
+    pub fn NumPositivePics(&self, _stRpsIdx: usize) -> u64 {
+        self.num_positive_pics.0
+    }
+
+    pub fn UsedByCurrPicS0(&self, _stRpsIdx: usize, i: usize) -> bool {
+        self.used_by_curr_pic_s0_flag[i].0 != 0
+    }
+
+    pub fn UsedByCurrPicS1(&self, _stRpsIdx: usize, i: usize) -> bool {
+        self.used_by_curr_pic_s1_flag[i].0 != 0
     }
 }
 
@@ -153,7 +171,7 @@ pub struct SequenceParameterSet {
     pub num_short_term_ref_pic_sets: UE,
 
     // for( i = 0; i < num_short_term_ref_pic_sets; i++)
-    pub st_ref_pic_set: Vec<SequenceParameterSetShortTermRefPicSet>,
+    pub st_ref_pic_set: Vec<ShortTermRefPicSet>,
 
     pub long_term_ref_pics_present_flag: U1,
 
@@ -173,6 +191,59 @@ pub struct SequenceParameterSet {
 
     // XXX: VUIParameters does not yet parse all fields. extensions cannot be added until it's completed
     pub remaining_bits: Vec<U1>,
+}
+
+// These function names follow the naming conventions in the standard.
+#[allow(non_snake_case)]
+impl SequenceParameterSet {
+    pub fn MinCbLog2SizeY(&self) -> u64 {
+        self.log2_min_luma_coding_block_size_minus3.0 + 3
+    }
+
+    pub fn CtbLog2SizeY(&self) -> u64 {
+        self.MinCbLog2SizeY() + self.log2_diff_max_min_luma_coding_block_size.0
+    }
+
+    pub fn MinCbSizeY(&self) -> u64 {
+        1 << self.MinCbLog2SizeY()
+    }
+
+    pub fn CtbSizeY(&self) -> u64 {
+        1 << self.CtbLog2SizeY()
+    }
+
+    pub fn PicWidthInMinCbsY(&self) -> u64 {
+        self.pic_width_in_luma_samples.0 / self.MinCbSizeY()
+    }
+
+    pub fn PicWidthInCtbsY(&self) -> u64 {
+        let ctb_size_y = self.CtbSizeY();
+        (self.pic_width_in_luma_samples.0 + ctb_size_y - 1) / ctb_size_y
+    }
+
+    pub fn PicHeightInMinCbsY(&self) -> u64 {
+        self.pic_height_in_luma_samples.0 / self.MinCbSizeY()
+    }
+
+    pub fn PicHeightInCtbsY(&self) -> u64 {
+        let ctb_size_y = self.CtbSizeY();
+        (self.pic_height_in_luma_samples.0 + ctb_size_y - 1) / ctb_size_y
+    }
+
+    pub fn PicSizeInMinCbsY(&self) -> u64 {
+        self.PicWidthInMinCbsY() * self.PicHeightInMinCbsY()
+    }
+
+    pub fn PicSizeInCtbsY(&self) -> u64 {
+        self.PicWidthInCtbsY() * self.PicHeightInCtbsY()
+    }
+
+    pub fn ChromaArrayType(&self) -> u64 {
+        match self.separate_colour_plane_flag.0 {
+            0 => self.chroma_format_idc.0,
+            _ => 0,
+        }
+    }
 }
 
 impl Decode for SequenceParameterSet {
@@ -267,7 +338,7 @@ impl Decode for SequenceParameterSet {
         decode!(bs, &mut ret.num_short_term_ref_pic_sets)?;
 
         for i in 0..ret.num_short_term_ref_pic_sets.0 {
-            ret.st_ref_pic_set.push(SequenceParameterSetShortTermRefPicSet::decode(bs, i)?);
+            ret.st_ref_pic_set.push(ShortTermRefPicSet::decode(bs, i)?);
         }
 
         decode!(bs, &mut ret.long_term_ref_pics_present_flag)?;

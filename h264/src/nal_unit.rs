@@ -27,6 +27,10 @@ impl<T> RBSP<T> {
     pub fn new(inner: T) -> Self {
         Self { inner, zeros: 0 }
     }
+
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
 }
 
 impl<'a, T: Iterator<Item = &'a u8>> Iterator for &mut RBSP<T> {
@@ -53,6 +57,67 @@ impl<'a, T: Iterator<Item = &'a u8>> Iterator for &mut RBSP<T> {
     }
 }
 
+/// Adds emulation prevention to RBSP data.
+pub struct EmulationPrevention<T> {
+    inner: T,
+    next: Option<u8>,
+    zeros: usize,
+}
+
+impl<T: Iterator<Item = u8>> EmulationPrevention<T> {
+    pub fn new<U: IntoIterator<Item = u8, IntoIter = T>>(inner: U) -> Self {
+        Self {
+            inner: inner.into_iter(),
+            next: None,
+            zeros: 0,
+        }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+impl<'a, T: Iterator<Item = u8>> Iterator for &mut EmulationPrevention<T> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.next.take() {
+            Some(b) => {
+                if b == 0 {
+                    self.zeros += 1;
+                }
+                Some(b)
+            }
+            None => match self.inner.next() {
+                next @ Some(0..=3) if self.zeros == 2 => {
+                    // insert an emulation prevention byte
+                    self.next = next;
+                    self.zeros = 0;
+                    Some(3)
+                }
+                Some(0) => {
+                    self.zeros += 1;
+                    Some(0)
+                }
+                next @ Some(_) => {
+                    self.zeros = 0;
+                    next
+                }
+                None => {
+                    if self.zeros > 0 {
+                        // the rbsp cannot end with a zero
+                        self.zeros = 0;
+                        Some(3)
+                    } else {
+                        None
+                    }
+                }
+            },
+        }
+    }
+}
+
 impl<'a, T: Iterator<Item = &'a u8>> NALUnit<T> {
     pub fn decode(mut bs: Bitstream<T>) -> io::Result<Self> {
         let mut forbidden_zero_bit = F1::default();
@@ -75,5 +140,19 @@ impl<'a, T: Iterator<Item = &'a u8>> NALUnit<T> {
             nal_unit_type,
             rbsp_byte: RBSP::new(bs.into_inner()),
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_emulation_prevention() {
+        let out = EmulationPrevention::new(vec![0, 0, 0, 1]).collect::<Vec<_>>();
+        assert_eq!(out, vec![0, 0, 3, 0, 1]);
+
+        let out = EmulationPrevention::new(vec![0, 0, 0, 0]).collect::<Vec<_>>();
+        assert_eq!(out, vec![0, 0, 3, 0, 0, 3]);
     }
 }
