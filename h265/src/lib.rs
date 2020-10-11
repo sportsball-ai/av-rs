@@ -26,7 +26,7 @@ pub use video_parameter_set::*;
 pub mod syntax_elements;
 pub use syntax_elements::*;
 
-pub use h264::{iterate_annex_b, iterate_avcc, read_annex_b};
+pub use h264::{iterate_annex_b, iterate_avcc, read_annex_b, ReadAnnexB};
 
 #[derive(Clone)]
 pub struct AccessUnitCounter {
