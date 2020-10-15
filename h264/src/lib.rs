@@ -19,6 +19,9 @@ pub use slice_header::*;
 pub mod syntax_elements;
 pub use syntax_elements::*;
 
+pub mod sei;
+pub use sei::*;
+
 pub struct AVCCIter<'a> {
     buf: &'a [u8],
     nalu_length_size: usize,
