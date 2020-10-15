@@ -32,6 +32,15 @@ pub struct NALUnit<RBSP> {
     pub rbsp_byte: RBSP,
 }
 
+impl<RBSP: Clone> Clone for NALUnit<RBSP> {
+    fn clone(&self) -> Self {
+        Self {
+            nal_unit_header: self.nal_unit_header.clone(),
+            rbsp_byte: self.rbsp_byte.clone(),
+        }
+    }
+}
+
 impl<'a, T: Iterator<Item = &'a u8>> NALUnit<RBSP<T>> {
     pub fn decode(mut bs: Bitstream<T>) -> io::Result<Self> {
         Ok(Self {
@@ -51,7 +60,7 @@ impl<RBSP: IntoIterator<Item = u8>> NALUnit<RBSP> {
 }
 
 // ITU-T H.265, 11/2019, 7.3.1.1
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct NALUnitHeader {
     pub forbidden_zero_bit: F1,
     pub nal_unit_type: U6,
