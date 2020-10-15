@@ -18,6 +18,17 @@ pub struct NALUnit<T> {
     pub rbsp_byte: RBSP<T>,
 }
 
+impl<T: Clone> Clone for NALUnit<T> {
+    fn clone(&self) -> Self {
+        Self {
+            forbidden_zero_bit: self.forbidden_zero_bit.clone(),
+            nal_ref_idc: self.nal_ref_idc.clone(),
+            nal_unit_type: self.nal_unit_type.clone(),
+            rbsp_byte: self.rbsp_byte.clone(),
+        }
+    }
+}
+
 pub struct RBSP<T> {
     inner: T,
     zeros: usize,
@@ -30,6 +41,15 @@ impl<T> RBSP<T> {
 
     pub fn into_inner(self) -> T {
         self.inner
+    }
+}
+
+impl<T: Clone> Clone for RBSP<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            zeros: self.zeros,
+        }
     }
 }
 
