@@ -10,10 +10,16 @@ jobs:
         os: [ubuntu-18.04, macos-10.15]
     steps:
     - uses: actions/checkout@v1
-    - name: Configure
+    - name: Set Up Linux
+      if: startsWith(matrix.os, 'ubuntu-')
+      run: |
+        git clone https://github.com/ultravideo/kvazaar.git
+        (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure && make -j && sudo make install)
+    - name: Set Up macOS
       if: startsWith(matrix.os, 'macos-')
       run: |
         echo "::set-env name=LIBCLANG_PATH::/Library/Developer/CommandLineTools/usr/lib/libclang.dylib"
+        brew install kvazaar
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
