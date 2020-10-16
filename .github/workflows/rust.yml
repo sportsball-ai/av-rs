@@ -13,8 +13,8 @@ jobs:
     - name: Set Up Linux
       if: startsWith(matrix.os, 'ubuntu-')
       run: |
-        apt-get update
-        apt-get install automake autoconf libtool m4 build-essential yasm
+        sudo apt-get update
+        sudo apt-get install automake autoconf libtool m4 build-essential yasm
         git clone https://github.com/ultravideo/kvazaar.git
         (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure --disabled-shared && make -j && make install)
     - name: Set Up macOS
