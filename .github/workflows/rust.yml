@@ -14,7 +14,7 @@ jobs:
       if: startsWith(matrix.os, 'ubuntu-')
       run: |
         git clone https://github.com/ultravideo/kvazaar.git
-        (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure --disabled-shared && make -j && make install)
+        (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure && make -j && make install)
     - name: Set Up macOS
       if: startsWith(matrix.os, 'macos-')
       run: |
