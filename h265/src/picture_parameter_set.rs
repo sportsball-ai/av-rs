@@ -74,6 +74,30 @@ pub struct PictureParameterSet {
     pub remaining_bits: Vec<U1>,
 }
 
+// These function names follow the naming conventions in the standard.
+#[allow(non_snake_case)]
+impl PictureParameterSet {
+    /// Specifies the width of the i-th tile column in units of CTBs.
+    pub fn colWidth(&self, i: usize, PicWidthInCtbsY: u64) -> u64 {
+        match self.uniform_spacing_flag.0 {
+            0 if i as u64 == self.num_tile_columns_minus1.0 => PicWidthInCtbsY - self.column_width_minus1.iter().map(|se| se.0 + 1).sum::<u64>(),
+            0 => self.column_width_minus1[i].0 + 1,
+            _ => {
+                ((i as u64 + 1) * PicWidthInCtbsY) / (self.num_tile_columns_minus1.0 + 1) - (i as u64 * PicWidthInCtbsY) / (self.num_tile_columns_minus1.0 + 1)
+            }
+        }
+    }
+
+    /// Specifies the height of the j-th tile row in units of CTBs.
+    pub fn rowHeight(&self, j: usize, PicHeightInCtbsY: u64) -> u64 {
+        match self.uniform_spacing_flag.0 {
+            0 if j as u64 == self.num_tile_rows_minus1.0 => PicHeightInCtbsY - self.row_height_minus1.iter().map(|se| se.0 + 1).sum::<u64>(),
+            0 => self.row_height_minus1[j].0 + 1,
+            _ => ((j as u64 + 1) * PicHeightInCtbsY) / (self.num_tile_rows_minus1.0 + 1) - (j as u64 * PicHeightInCtbsY) / (self.num_tile_rows_minus1.0 + 1),
+        }
+    }
+}
+
 impl Decode for PictureParameterSet {
     fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
@@ -338,6 +362,11 @@ mod test {
             assert_eq!(pps.num_tile_columns_minus1.0, 15);
             assert_eq!(pps.num_tile_rows_minus1.0, 8);
             assert_eq!(pps.uniform_spacing_flag.0, 1);
+
+            assert_eq!(pps.colWidth(0, 120), 7);
+            assert_eq!(pps.colWidth(1, 120), 8);
+            assert_eq!(pps.rowHeight(0, 64), 7);
+            assert_eq!(pps.rowHeight(1, 64), 7);
 
             assert_eq!(bs.next_bits(1), None);
 

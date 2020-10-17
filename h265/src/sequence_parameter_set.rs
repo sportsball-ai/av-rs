@@ -769,6 +769,8 @@ mod test {
             assert_eq!(0, sps.sps_video_parameter_set_id.0);
             assert_eq!(7680, sps.pic_width_in_luma_samples.0);
             assert_eq!(4320, sps.pic_height_in_luma_samples.0);
+            assert_eq!(68, sps.PicHeightInCtbsY());
+            assert_eq!(120, sps.PicWidthInCtbsY());
 
             assert_eq!(bs.next_bits(1), None);
 
