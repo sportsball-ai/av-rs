@@ -89,7 +89,7 @@ impl PictureParameterSet {
     }
 
     /// Specifies the height of the j-th tile row in units of CTBs.
-    pub fn colHeight(&self, j: usize, PicHeightInCtbsY: u64) -> u64 {
+    pub fn rowHeight(&self, j: usize, PicHeightInCtbsY: u64) -> u64 {
         match self.uniform_spacing_flag.0 {
             0 => ((j as u64 + 1) * PicHeightInCtbsY) / (self.num_tile_rows_minus1.0 + 1) - (j as u64 * PicHeightInCtbsY) / (self.num_tile_rows_minus1.0 + 1),
             _ if j as u64 == self.num_tile_rows_minus1.0 => PicHeightInCtbsY - self.row_height_minus1.iter().map(|se| se.0 + 1).sum::<u64>(),
