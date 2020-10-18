@@ -205,7 +205,7 @@ impl AccessUnitCounter {
             1 | 2 => {
                 if self.maybe_start_new_access_unit {
                     if let Some(sps) = &self.sps {
-                        let bs = Bitstream::new(nalu);
+                        let bs = Bitstream::new(nalu.iter().copied());
                         let mut nalu = NALUnit::decode(bs)?;
                         let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
                         let slice_header = SliceHeader::decode(&mut rbsp, sps)?;
@@ -229,7 +229,7 @@ impl AccessUnitCounter {
 
         match nalu_type {
             NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
-                let bs = Bitstream::new(nalu);
+                let bs = Bitstream::new(nalu.iter().copied());
                 let mut nalu = NALUnit::decode(bs)?;
                 let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
                 let sps = SequenceParameterSet::decode(&mut rbsp)?;

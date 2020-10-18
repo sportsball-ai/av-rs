@@ -9,7 +9,7 @@ pub struct SequenceParameterSetSubLayerOrderingInfo {
 }
 
 impl Decode for SequenceParameterSetSubLayerOrderingInfo {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         Ok(Self {
             sps_max_dec_pic_buffering_minus1: UE::decode(bs)?,
             sps_max_num_reorder_pics: UE::decode(bs)?,
@@ -46,7 +46,7 @@ pub struct ShortTermRefPicSet {
 
 #[allow(non_snake_case)]
 impl ShortTermRefPicSet {
-    pub fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>, st_rps_idx: u64) -> io::Result<Self> {
+    pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, st_rps_idx: u64) -> io::Result<Self> {
         let mut ret = Self::default();
 
         if st_rps_idx != 0 {
@@ -247,7 +247,7 @@ impl SequenceParameterSet {
 }
 
 impl Decode for SequenceParameterSet {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(
@@ -542,7 +542,7 @@ pub struct VUIParameters {
 pub const ASPECT_RATIO_IDC_EXTENDED_SAR: u8 = 255;
 
 impl Decode for VUIParameters {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(bs, &mut ret.aspect_ratio_info_present_flag)?;
@@ -683,7 +683,7 @@ mod test {
                 0x01, 0x01, 0x60, 0x00, 0x00, 0x00, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x96, 0xa0, 0x02, 0x80, 0x80, 0x2d, 0x16, 0x20, 0x5e, 0xe4, 0x59, 0x14,
                 0xbf, 0xf2, 0xe7, 0xf1, 0x3f, 0xac, 0x05, 0xa8, 0x10, 0x10, 0x10, 0x04,
             ];
-            let mut bs = Bitstream::new(data.iter());
+            let mut bs = Bitstream::new(data.iter().copied());
 
             let sps = SequenceParameterSet::decode(&mut bs).unwrap();
 
@@ -721,7 +721,7 @@ mod test {
                 0x01, 0x04, 0x08, 0x00, 0x00, 0x00, 0x9d, 0x08, 0x00, 0x00, 0x00, 0x00, 0x78, 0xb0, 0x02, 0x80, 0x80, 0x2d, 0x13, 0x65, 0x95, 0x9a, 0x49, 0x32,
                 0xbc, 0x05, 0xa0, 0x20, 0x00, 0x00, 0x7d, 0x20, 0x00, 0x1d, 0x4c, 0x01,
             ];
-            let mut bs = Bitstream::new(data.iter());
+            let mut bs = Bitstream::new(data.iter().copied());
 
             let sps = SequenceParameterSet::decode(&mut bs).unwrap();
 
@@ -762,7 +762,7 @@ mod test {
                 0x32, 0x8c, 0x04, 0x04, 0x00, 0x00, 0x0f, 0xa4, 0x00, 0x01, 0xd4, 0xc0, 0x20,
             ];
 
-            let mut bs = Bitstream::new(data.iter());
+            let mut bs = Bitstream::new(data.iter().copied());
 
             let sps = SequenceParameterSet::decode(&mut bs).unwrap();
 

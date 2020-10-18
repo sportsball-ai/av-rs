@@ -37,18 +37,18 @@ impl<T: Iterator<Item = Result<Bytes>>> H265TileMuxerInput<T> {
     }
 
     fn inspect_nalu(&mut self, b: &Bytes) -> Result<NALUnitHeader> {
-        let mut bs = Bitstream::new(b);
+        let mut bs = Bitstream::new(b.iter().copied());
         let nalu_header = NALUnitHeader::decode(&mut bs)?;
         match nalu_header.nal_unit_type.0 {
             h265::NAL_UNIT_TYPE_PPS_NUT => {
-                let bs = Bitstream::new(b);
+                let bs = Bitstream::new(b.iter().copied());
                 let mut nalu = NALUnit::decode(bs)?;
                 let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
                 let pps = PictureParameterSet::decode(&mut rbsp)?;
                 self.pps = Some(pps);
             }
             h265::NAL_UNIT_TYPE_SPS_NUT => {
-                let bs = Bitstream::new(b);
+                let bs = Bitstream::new(b.iter().copied());
                 let mut nalu = NALUnit::decode(bs)?;
                 let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
                 let sps = SequenceParameterSet::decode(&mut rbsp)?;
@@ -82,7 +82,7 @@ impl<R: Read> H265TileMuxer<R> {
 
     pub fn mux<W: Write>(mut self, mut output: W) -> Result<()> {
         while let Some(nalu) = self.inputs[0].next_nalu().transpose()? {
-            let mut bs = Bitstream::new(&nalu);
+            let mut bs = Bitstream::new(nalu.iter().copied());
             let nalu_header = NALUnitHeader::decode(&mut bs)?;
             match nalu_header.nal_unit_type.0 {
                 1..=9 | 16..=21 => {
@@ -126,10 +126,10 @@ impl<R: Read> H265TileMuxer<R> {
                             };
 
                             // parse the header
-                            let bs = Bitstream::new(&nalu);
+                            let bs = Bitstream::new(nalu);
                             let mut nalu = NALUnit::decode(bs)?;
                             let header = SliceSegmentHeader::decode(&mut Bitstream::new(&mut nalu.rbsp_byte), nalu_header.nal_unit_type.0, sps, pps)?;
-                            let mut tile_data = nalu.rbsp_byte.into_inner().copied().collect::<Vec<u8>>();
+                            let mut tile_data = nalu.rbsp_byte.into_inner().collect::<Vec<u8>>();
 
                             // drop any cabac_zero_words
                             while tile_data.ends_with(&[0, 0, 3]) {

@@ -114,7 +114,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                         Some(analyzer::Stream::HEVCVideo { .. }) => {
                                             use h264::Decode;
                                             for nalu in h265::iterate_annex_b(&payload) {
-                                                let mut bs = h265::Bitstream::new(nalu);
+                                                let mut bs = h265::Bitstream::new(nalu.iter().copied());
                                                 let header = h265::NALUnitHeader::decode(&mut bs)?;
                                                 if header.nuh_layer_id.0 == 0 {
                                                     match header.nal_unit_type.0 {

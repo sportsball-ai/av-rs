@@ -1,4 +1,4 @@
-pub fn codec_from_h264_nalu<'a, T: Iterator<Item = &'a u8>>(mut nalu: h264::NALUnit<T>) -> Option<String> {
+pub fn codec_from_h264_nalu<T: Iterator<Item = u8>>(mut nalu: h264::NALUnit<T>) -> Option<String> {
     if nalu.nal_unit_type.0 == h264::NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET {
         let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
         let leading_bytes = rbsp.next_bits(24)?;
@@ -12,7 +12,7 @@ pub fn codec_from_h264_nalu<'a, T: Iterator<Item = &'a u8>>(mut nalu: h264::NALU
     None
 }
 
-pub fn codec_from_h265_nalu<'a, T: Iterator<Item = &'a u8>>(mut nalu: h265::NALUnit<h265::RBSP<T>>) -> Option<String> {
+pub fn codec_from_h265_nalu<T: Iterator<Item = u8>>(mut nalu: h265::NALUnit<h265::RBSP<T>>) -> Option<String> {
     use h265::Decode;
     if nalu.nal_unit_header.nal_unit_type.0 == h265::NAL_UNIT_TYPE_SPS_NUT {
         let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
