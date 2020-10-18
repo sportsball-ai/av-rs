@@ -3,7 +3,8 @@ use h265::{
 };
 use std::io::{self, Write};
 
-/// Given an iterator for slice NALUs that are known to correspond to the same frame, writes out the muxed slice NALU.
+/// Given an iterator for slice NALUs that are known to correspond to the same frame, writes out
+/// the muxed slice NALU. The output will not contain a length prefix or start code.
 pub fn mux_slices<I, T, O>(nalus: I, selection: &[usize], mut output: O, sps: &SequenceParameterSet, pps: &PictureParameterSet) -> io::Result<()>
 where
     I: IntoIterator<Item = T>,
@@ -58,7 +59,6 @@ where
     }
 
     // write out the new nalu
-    output.write_all(&[0, 0, 0, 1])?;
     let nalu_header = &segments[0].nalu_header;
     nalu_header.encode(&mut BitstreamWriter::new(&mut output))?;
     let mut buf = Vec::new();
@@ -76,8 +76,8 @@ where
     Ok(())
 }
 
-/// Given iterators over results of AsRef<[u8]>, this function writes muxed tiles to the given
-/// output.
+/// Given iterators over results of AsRef<[u8]>, this function writes muxed tiles with start code
+/// prefixes to the given output.
 pub fn mux<I, II, T, E, Iter, O>(inputs: II, selection: &[usize], mut output: O) -> Result<(), E>
 where
     E: From<io::Error>,
@@ -117,6 +117,7 @@ where
                 let mut nalus = vec![nalu.as_ref()];
                 nalus.extend(secondary_nalus.iter().map(|nalu| nalu.as_ref()));
 
+                output.write_all(&[0, 0, 0, 1])?;
                 mux_slices(nalus, selection, &mut output, inputs[0].sps.as_ref().unwrap(), inputs[0].pps.as_ref().unwrap())?;
             }
             _ => {
@@ -125,8 +126,6 @@ where
             }
         }
     }
-
-    output.flush()?;
 
     Ok(())
 }
