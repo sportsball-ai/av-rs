@@ -99,7 +99,7 @@ impl PictureParameterSet {
 }
 
 impl Decode for PictureParameterSet {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(
@@ -293,8 +293,8 @@ mod test {
     #[test]
     fn test_picture_parameter_set() {
         {
-            let data = [0xc0, 0xf2, 0xc6, 0x8d, 0x09, 0xc0, 0xa0, 0x14, 0x7b, 0x24];
-            let mut bs = Bitstream::new(data.iter());
+            let data = vec![0xc0, 0xf2, 0xc6, 0x8d, 0x09, 0xc0, 0xa0, 0x14, 0x7b, 0x24];
+            let mut bs = Bitstream::new(data.iter().copied());
 
             let pps = PictureParameterSet::decode(&mut bs).unwrap();
 
@@ -332,8 +332,8 @@ mod test {
         }
 
         {
-            let data = [0xc1, 0x62, 0x4f, 0x08, 0x20, 0x26, 0x4c, 0x90];
-            let mut bs = Bitstream::new(data.iter());
+            let data = vec![0xc1, 0x62, 0x4f, 0x08, 0x20, 0x26, 0x4c, 0x90];
+            let mut bs = Bitstream::new(data.iter().copied());
 
             let pps = PictureParameterSet::decode(&mut bs).unwrap();
 

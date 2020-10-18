@@ -53,8 +53,8 @@ impl<T: Clone> Clone for RBSP<T> {
     }
 }
 
-impl<'a, T: Iterator<Item = &'a u8>> Iterator for &mut RBSP<T> {
-    type Item = &'a u8;
+impl<T: Iterator<Item = u8>> Iterator for &mut RBSP<T> {
+    type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -138,7 +138,7 @@ impl<'a, T: Iterator<Item = u8>> Iterator for &mut EmulationPrevention<T> {
     }
 }
 
-impl<'a, T: Iterator<Item = &'a u8>> NALUnit<T> {
+impl<T: Iterator<Item = u8>> NALUnit<T> {
     pub fn decode(mut bs: Bitstream<T>) -> io::Result<Self> {
         let mut forbidden_zero_bit = F1::default();
         let mut nal_ref_idc = U2::default();

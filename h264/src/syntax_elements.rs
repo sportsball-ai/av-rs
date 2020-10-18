@@ -9,7 +9,7 @@ macro_rules! define_syntax_element_u {
         pub struct $e(pub $t);
 
         impl Decode for $e {
-            fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+            fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
                 Ok(Self(bs.read_bits($n)? as _))
             }
         }
@@ -42,7 +42,7 @@ define_syntax_element_u!(F1, u8, 1);
 pub struct UE(pub u64);
 
 impl Decode for UE {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut leading_zero_bits = 0;
         while bs.read_bits(1)? == 0 {
             leading_zero_bits += 1;
@@ -62,7 +62,7 @@ impl Encode for UE {
 pub struct SE(pub i64);
 
 impl Decode for SE {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let ue = UE::decode(bs)?;
         let mut value = ((ue.0 + 1) >> 1) as i64;
         if (ue.0 & 1) == 0 {
@@ -82,7 +82,7 @@ impl Encode for SE {
 pub struct ByteAlignment;
 
 impl Decode for ByteAlignment {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         if bs.read_bits(1)? != 1 {
             return Err(io::Error::new(io::ErrorKind::Other, "expected byte alignment bit equal to 1"));
         }
@@ -112,12 +112,12 @@ mod test {
     #[test]
     fn test_ue() {
         {
-            let mut bs = Bitstream::new(&[0x00]);
+            let mut bs = Bitstream::new(vec![0x00]);
             assert_eq!(UE::decode(&mut bs).is_err(), true);
         }
 
         {
-            let mut bs = Bitstream::new(&[0x80]);
+            let mut bs = Bitstream::new(vec![0x80]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 0);
 
             let mut b = Vec::new();
@@ -126,7 +126,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x40]);
+            let mut bs = Bitstream::new(vec![0x40]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 1);
 
             let mut b = Vec::new();
@@ -135,7 +135,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x60]);
+            let mut bs = Bitstream::new(vec![0x60]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 2);
 
             let mut b = Vec::new();
@@ -144,7 +144,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x20]);
+            let mut bs = Bitstream::new(vec![0x20]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 3);
 
             let mut b = Vec::new();
@@ -153,7 +153,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x28]);
+            let mut bs = Bitstream::new(vec![0x28]);
             assert_eq!(UE::decode(&mut bs).unwrap().0, 4);
 
             let mut b = Vec::new();
@@ -165,12 +165,12 @@ mod test {
     #[test]
     fn test_se() {
         {
-            let mut bs = Bitstream::new(&[0x00]);
+            let mut bs = Bitstream::new(vec![0x00]);
             assert_eq!(SE::decode(&mut bs).is_err(), true);
         }
 
         {
-            let mut bs = Bitstream::new(&[0x80]);
+            let mut bs = Bitstream::new(vec![0x80]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, 0);
 
             let mut b = Vec::new();
@@ -179,7 +179,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x40]);
+            let mut bs = Bitstream::new(vec![0x40]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, 1);
 
             let mut b = Vec::new();
@@ -188,7 +188,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x60]);
+            let mut bs = Bitstream::new(vec![0x60]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, -1);
 
             let mut b = Vec::new();
@@ -197,7 +197,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x20]);
+            let mut bs = Bitstream::new(vec![0x20]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, 2);
 
             let mut b = Vec::new();
@@ -206,7 +206,7 @@ mod test {
         }
 
         {
-            let mut bs = Bitstream::new(&[0x28]);
+            let mut bs = Bitstream::new(vec![0x28]);
             assert_eq!(SE::decode(&mut bs).unwrap().0, -2);
 
             let mut b = Vec::new();
