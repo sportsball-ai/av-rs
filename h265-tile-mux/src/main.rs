@@ -1,6 +1,7 @@
 use std::fs::File;
 
-mod h265_tile_muxer;
+mod lib;
+use lib::*;
 
 type BoxError = Box<dyn std::error::Error + Sync + Send>;
 
@@ -57,7 +58,7 @@ fn main() -> Result<(), BoxError> {
 
     let output = File::create(matches.value_of("output").unwrap())?;
 
-    h265_tile_muxer::H265TileMuxer::new(inputs, selection).mux(output)?;
+    mux(inputs.into_iter().map(|f| h265::read_annex_b(f)), &selection, output)?;
 
     Ok(())
 }
