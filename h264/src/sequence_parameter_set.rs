@@ -163,7 +163,7 @@ impl SequenceParameterSet {
 }
 
 impl Decode for SequenceParameterSet {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(
@@ -316,7 +316,7 @@ pub struct VUIParameters {
 pub const ASPECT_RATIO_IDC_EXTENDED_SAR: u8 = 255;
 
 impl Decode for VUIParameters {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(bs, &mut ret.aspect_ratio_info_present_flag)?;
@@ -372,7 +372,7 @@ mod test {
 
     #[test]
     fn test_sequence_parameter_set() {
-        let mut bs = Bitstream::new(&[
+        let mut bs = Bitstream::new(vec![
             0x4d, 0x40, 0x1f, 0xec, 0xa0, 0x28, 0x02, 0xdd, 0x80, 0xb5, 0x01, 0x01, 0x01, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x05, 0xdc, 0x03, 0xc6, 0x0c,
             0x65, 0x80,
         ]);

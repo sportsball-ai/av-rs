@@ -161,10 +161,10 @@ impl Stream {
                     let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
                     match nalu_type {
                         h264::NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
-                            let bs = h264::Bitstream::new(nalu);
+                            let bs = h264::Bitstream::new(nalu.iter().copied());
                             let mut nalu = h264::NALUnit::decode(bs)?;
+                            *rfc6381_codec = rfc6381::codec_from_h264_nalu(nalu.clone());
                             let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
-                            let leading_bytes = require_with!(rbsp.next_bits(24), "unable to get leading SPS RBSP bytes");
                             let sps = h264::SequenceParameterSet::decode(&mut rbsp)?;
                             *is_interlaced = sps.frame_mbs_only_flag.0 == 0;
                             *width = sps.frame_cropping_rectangle_width() as _;
@@ -176,12 +176,6 @@ impl Stream {
                                 0 => 0.0,
                                 num_units_in_tick @ _ => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
                             };
-                            *rfc6381_codec = Some(format!(
-                                "avc1.{:02x}{:02x}{:02x}",
-                                (leading_bytes >> 16) as u8,
-                                (leading_bytes >> 8) as u8,
-                                leading_bytes as u8,
-                            ))
                         }
                         _ => {}
                     }
@@ -204,13 +198,14 @@ impl Stream {
 
                     access_unit_counter.count_nalu(&nalu)?;
 
-                    let mut bs = h265::Bitstream::new(nalu);
+                    let mut bs = h265::Bitstream::new(nalu.iter().copied());
                     let header = h265::NALUnitHeader::decode(&mut bs)?;
 
                     match header.nal_unit_type.0 {
                         h265::NAL_UNIT_TYPE_SPS_NUT => {
-                            let bs = h265::Bitstream::new(nalu);
+                            let bs = h265::Bitstream::new(nalu.iter().copied());
                             let mut nalu = h265::NALUnit::decode(bs)?;
+                            *rfc6381_codec = rfc6381::codec_from_h265_nalu(nalu.clone());
                             let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
                             let sps = h265::SequenceParameterSet::decode(&mut rbsp)?;
                             *width = sps.pic_width_in_luma_samples.0 as _;
@@ -224,39 +219,9 @@ impl Stream {
                                     num_units_in_tick @ _ => (sps.vui_parameters.vui_time_scale.0 as f64 / num_units_in_tick as f64 * 100.0).round() / 100.0,
                                 };
                             }
-                            let ptl = &sps.profile_tier_level;
-                            *rfc6381_codec = Some(format!(
-                                "hvc1.{}{}.{:X}.{}{}.{}",
-                                if ptl.general_profile_space.0 > 0 {
-                                    (('A' as u8 + (ptl.general_profile_space.0 - 1)) as char).to_string()
-                                } else {
-                                    "".to_string()
-                                },
-                                ptl.general_profile_idc.0,
-                                ptl.general_profile_compatibility_flags.0.reverse_bits(),
-                                match ptl.general_tier_flag.0 {
-                                    0 => 'L',
-                                    _ => 'H',
-                                },
-                                ptl.general_level_idc.0,
-                                {
-                                    let mut constraint_bytes = vec![
-                                        (ptl.general_constraint_flags.0 >> 40) as u8,
-                                        (ptl.general_constraint_flags.0 >> 32) as u8,
-                                        (ptl.general_constraint_flags.0 >> 24) as u8,
-                                        (ptl.general_constraint_flags.0 >> 16) as u8,
-                                        (ptl.general_constraint_flags.0 >> 8) as u8,
-                                        (ptl.general_constraint_flags.0 >> 0) as u8,
-                                    ];
-                                    while constraint_bytes.len() > 1 && constraint_bytes.last().copied() == Some(0) {
-                                        constraint_bytes.pop();
-                                    }
-                                    constraint_bytes.into_iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(".")
-                                },
-                            ))
                         }
                         h265::NAL_UNIT_TYPE_VPS_NUT => {
-                            let bs = h265::Bitstream::new(nalu);
+                            let bs = h265::Bitstream::new(nalu.iter().copied());
                             let mut nalu = h265::NALUnit::decode(bs)?;
                             let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
                             let vps = h265::VideoParameterSet::decode(&mut rbsp)?;

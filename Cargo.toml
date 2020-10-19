@@ -15,4 +15,6 @@ members = [
     "mpeg4",
     "qtff",
     "utils"
+    "rfc6381",
+    "kvazaar-sys"
 ]

@@ -6,8 +6,8 @@ pub struct Bitstream<T> {
     next_bits_length: usize,
 }
 
-impl<'a, T: Iterator<Item = &'a u8>> Bitstream<T> {
-    pub fn new<U: IntoIterator<Item = &'a u8, IntoIter = T>>(inner: U) -> Self {
+impl<T: Iterator<Item = u8>> Bitstream<T> {
+    pub fn new<U: IntoIterator<Item = u8, IntoIter = T>>(inner: U) -> Self {
         Self {
             inner: inner.into_iter(),
             next_bits: 0,
@@ -31,7 +31,7 @@ impl<'a, T: Iterator<Item = &'a u8>> Bitstream<T> {
             n = n % 8;
             if n > 0 {
                 self.next_bits = match self.inner.next() {
-                    Some(b) => *b as u128,
+                    Some(b) => b as u128,
                     None => return false,
                 };
                 self.next_bits_length = 8 - n;
@@ -48,7 +48,7 @@ impl<'a, T: Iterator<Item = &'a u8>> Bitstream<T> {
 
     pub fn next_bits(&mut self, n: usize) -> Option<u64> {
         while self.next_bits_length < n {
-            let b = *self.inner.next()? as u128;
+            let b = self.inner.next()? as u128;
             self.next_bits = (self.next_bits << 8) | b;
             self.next_bits_length += 8;
         }
@@ -79,7 +79,7 @@ pub struct BitstreamBits<'a, T> {
     bs: &'a mut Bitstream<T>,
 }
 
-impl<'a, 'b: 'a, T: Iterator<Item = &'b u8>> Iterator for BitstreamBits<'a, T> {
+impl<'a, T: Iterator<Item = u8>> Iterator for BitstreamBits<'a, T> {
     type Item = bool;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -88,7 +88,7 @@ impl<'a, 'b: 'a, T: Iterator<Item = &'b u8>> Iterator for BitstreamBits<'a, T> {
 }
 
 pub trait Decode: Sized {
-    fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self>;
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self>;
 }
 
 pub struct BitstreamWriter<T: io::Write> {
@@ -193,7 +193,7 @@ mod test {
 
     #[test]
     fn test_decode() {
-        let mut bs = Bitstream::new(&[0x90]);
+        let mut bs = Bitstream::new(vec![0x90]);
         let mut a = U2::default();
         let mut b = U2::default();
         decode!(bs, &mut a, &mut b).unwrap();

@@ -14,7 +14,7 @@ pub struct SliceHeader {
 }
 
 impl SliceHeader {
-    pub fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>, sps: &SequenceParameterSet) -> io::Result<Self> {
+    pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, sps: &SequenceParameterSet) -> io::Result<Self> {
         let mut ret = Self::default();
 
         decode!(bs, &mut ret.first_mb_in_slice, &mut ret.slice_type, &mut ret.pic_parameter_set_id)?;

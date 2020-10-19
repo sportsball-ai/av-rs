@@ -49,14 +49,14 @@ impl AccessUnitCounter {
     pub fn count_nalu<T: AsRef<[u8]>>(&mut self, nalu: T) -> io::Result<()> {
         let nalu = nalu.as_ref();
 
-        let mut bs = Bitstream::new(nalu);
+        let mut bs = Bitstream::new(nalu.iter().copied());
         let header = NALUnitHeader::decode(&mut bs)?;
 
         // ITU-T H.265, 11/2019, 7.4.2.4.4
         match header.nal_unit_type.0 {
             0..=9 | 16..=21 => {
                 if self.maybe_start_new_access_unit {
-                    let bs = Bitstream::new(nalu);
+                    let bs = Bitstream::new(nalu.iter().copied());
                     let mut nalu = NALUnit::decode(bs)?;
                     let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
                     let first_slice_segment_in_pic_flag = U1::decode(&mut rbsp)?;

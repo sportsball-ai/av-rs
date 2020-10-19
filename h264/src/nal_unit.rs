@@ -19,6 +19,17 @@ pub struct NALUnit<T> {
     pub rbsp_byte: RBSP<T>,
 }
 
+impl<T: Clone> Clone for NALUnit<T> {
+    fn clone(&self) -> Self {
+        Self {
+            forbidden_zero_bit: self.forbidden_zero_bit.clone(),
+            nal_ref_idc: self.nal_ref_idc.clone(),
+            nal_unit_type: self.nal_unit_type.clone(),
+            rbsp_byte: self.rbsp_byte.clone(),
+        }
+    }
+}
+
 pub struct RBSP<T> {
     inner: T,
     zeros: usize,
@@ -34,8 +45,17 @@ impl<T> RBSP<T> {
     }
 }
 
-impl<'a, T: Iterator<Item = &'a u8>> Iterator for &mut RBSP<T> {
-    type Item = &'a u8;
+impl<T: Clone> Clone for RBSP<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            zeros: self.zeros,
+        }
+    }
+}
+
+impl<T: Iterator<Item = u8>> Iterator for &mut RBSP<T> {
+    type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -119,7 +139,7 @@ impl<'a, T: Iterator<Item = u8>> Iterator for &mut EmulationPrevention<T> {
     }
 }
 
-impl<'a, T: Iterator<Item = &'a u8>> NALUnit<T> {
+impl<T: Iterator<Item = u8>> NALUnit<T> {
     pub fn decode(mut bs: Bitstream<T>) -> io::Result<Self> {
         let mut forbidden_zero_bit = F1::default();
         let mut nal_ref_idc = U2::default();

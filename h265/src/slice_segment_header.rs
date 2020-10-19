@@ -24,7 +24,7 @@ pub struct RefPicListsModification {
 }
 
 impl RefPicListsModification {
-    pub fn decode<'a, T: Iterator<Item = &'a u8>>(
+    pub fn decode<T: Iterator<Item = u8>>(
         bs: &mut Bitstream<T>,
         slice_type: u64,
         #[allow(non_snake_case)] NumPicTotalCurr: u64,
@@ -200,12 +200,7 @@ pub struct SliceSegmentHeader {
 #[allow(non_snake_case)]
 impl SliceSegmentHeader {
     // TODO: pps should probably be a map so we can find the correct pps based on slice_pic_parameter_set_id
-    pub fn decode<'a, T: Iterator<Item = &'a u8>>(
-        bs: &mut Bitstream<T>,
-        nal_unit_type: u8,
-        sps: &SequenceParameterSet,
-        pps: &PictureParameterSet,
-    ) -> io::Result<Self> {
+    pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, nal_unit_type: u8, sps: &SequenceParameterSet, pps: &PictureParameterSet) -> io::Result<Self> {
         if pps.pps_range_extension_flag.0 != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "the pps range extension is not supported"));
         }
@@ -623,10 +618,10 @@ mod test {
                 0x02, 0x01, 0x60, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0xba, 0x00, 0x00, 0xa0, 0x00, 0xf0, 0x08, 0x00, 0x43, 0x85, 0xde, 0x49,
                 0x32, 0x8c, 0x04, 0x04, 0x00, 0x00, 0x0f, 0xa4, 0x00, 0x01, 0xd4, 0xc0, 0x20,
             ];
-            let sps = SequenceParameterSet::decode(&mut Bitstream::new(sps_data.iter())).unwrap();
+            let sps = SequenceParameterSet::decode(&mut Bitstream::new(sps_data)).unwrap();
 
             let pps_data = vec![0xc1, 0x62, 0x4f, 0x08, 0x20, 0x26, 0x4c, 0x90];
-            let pps = PictureParameterSet::decode(&mut Bitstream::new(pps_data.iter())).unwrap();
+            let pps = PictureParameterSet::decode(&mut Bitstream::new(pps_data)).unwrap();
 
             let data = vec![
                 0xd0, 0x97, 0xfa, 0x01, 0x20, 0x34, 0x2b, 0x82, 0x0d, 0x13, 0x80, 0x69, 0x46, 0x92, 0x20, 0xb0, 0xc0, 0x86, 0xec, 0x4f, 0xe1, 0x82, 0x08, 0x19,
@@ -640,7 +635,7 @@ mod test {
                 0xc0, 0x48, 0x42, 0x62, 0x16, 0x50, 0x8d, 0x86, 0x98, 0x24, 0x21, 0x4d, 0x0b, 0xc8, 0x69, 0x82, 0x7a, 0x17, 0xc0, 0x6e, 0x03, 0xc0, 0x13, 0x60,
                 0xc4, 0x08, 0xe8, 0x35, 0x01, 0xa0, 0x13, 0x40, 0x72, 0x05, 0x18, 0x21, 0x61, 0x85, 0x0a, 0x28, 0x4a, 0xc1, 0xd8, 0x11, 0xf0, 0x46, 0xc0,
             ];
-            let mut bs = Bitstream::new(data.iter());
+            let mut bs = Bitstream::new(data.iter().copied());
             let ssh = SliceSegmentHeader::decode(&mut bs, 1, &sps, &pps).unwrap();
 
             assert_eq!(ssh.num_entry_point_offsets.0, 143);
