@@ -1,4 +1,4 @@
-use super::{decode, syntax_elements::*, Bitstream, Decode};
+use super::{decode, sequence_parameter_set::VUIParameters, syntax_elements::*, Bitstream};
 
 use std::io;
 
@@ -19,8 +19,8 @@ pub struct PicTiming {
   pub seconds: u8,
 }
 
-impl Decode for SEI {
-  fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+impl SEI {
+  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
     let mut ret = Self::default();
 
     let mut payload_type = 0;
@@ -42,26 +42,30 @@ impl Decode for SEI {
     ret.payload_size = payload_size;
 
     if payload_type == SEI_PAYLOAD_TYPE_PIC_TIMING {
-      ret.pic_timing = Some(PicTiming::decode(bs)?);
+      ret.pic_timing = Some(PicTiming::decode(bs, vui_params)?);
     }
 
     Ok(ret)
   }
 }
 
-impl Decode for PicTiming {
-  fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+impl PicTiming {
+  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
     let mut ret = Self::default();
-    // if CpbDpbDelaysPresentFlag {
-    //   TODO: read delays
-    // }
+    if vui_params.nal_hrd_parameters_present_flag.0 != 0 || vui_params.vcl_hrd_parameters_present_flag.0 != 0 {
+      // TODO: read delays
+    }
 
-    // if pic_struct_present_flag {
-    //   return Ok(ret);
-    // }
+    if vui_params.pic_struct_present_flag.0 == 0 {
+      return Ok(ret);
+    }
 
-    let _pic_struct = bs.read_bits(4)?;
-    let num_clock_ts = 1; //TODO: derive from pic_struct
+    let pic_struct = bs.read_bits(4)?;
+    let num_clock_ts = match pic_struct {
+      0..=2 => 1,
+      3..=6 => 2,
+      _ => 3,
+    };
 
     for _ in 0..num_clock_ts {
       // Checking for clock timestamp flag

@@ -311,6 +311,11 @@ pub struct VUIParameters {
     pub time_scale: U32,
     pub fixed_frame_rate_flag: U1,
     // }
+
+    pub nal_hrd_parameters_present_flag: U1,
+    pub vcl_hrd_parameters_present_flag: U1,
+    pub low_delay_hrd_flag: U1,
+    pub pic_struct_present_flag: U1,
 }
 
 pub const ASPECT_RATIO_IDC_EXTENDED_SAR: u8 = 255;
@@ -361,6 +366,22 @@ impl Decode for VUIParameters {
         if ret.timing_info_present_flag.0 != 0 {
             decode!(bs, &mut ret.num_units_in_tick, &mut ret.time_scale, &mut ret.fixed_frame_rate_flag)?;
         }
+
+        decode!(bs, &mut ret.nal_hrd_parameters_present_flag)?;
+        if ret.nal_hrd_parameters_present_flag.0 != 0 {
+            //TODO: decode hrd parameters
+        }
+
+        decode!(bs, &mut ret.vcl_hrd_parameters_present_flag)?;
+        if ret.vcl_hrd_parameters_present_flag.0 != 0 {
+            //TODO: decode hrd parameters
+        }
+
+        if ret.nal_hrd_parameters_present_flag.0 != 0 || ret.vcl_hrd_parameters_present_flag.0 != 0 {
+            decode!(bs, &mut ret.low_delay_hrd_flag)?;
+        }
+
+        decode!(bs, &mut ret.pic_struct_present_flag)?;
 
         Ok(ret)
     }

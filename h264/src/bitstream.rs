@@ -117,7 +117,7 @@ impl<T: io::Write> BitstreamWriter<T> {
         self.next_bits_length += len;
         while self.next_bits_length >= 8 {
             let next_byte = (self.next_bits >> (self.next_bits_length - 8)) as u8;
-            self.inner.write(&[next_byte])?;
+            self.inner.write_all(&[next_byte])?;
             self.next_bits_length -= 8;
         }
         Ok(())
@@ -128,7 +128,7 @@ impl<T: io::Write> BitstreamWriter<T> {
     pub fn flush(&mut self) -> io::Result<()> {
         if self.next_bits_length > 0 {
             let next_byte = (self.next_bits << (8 - self.next_bits_length)) as u8;
-            self.inner.write(&[next_byte])?;
+            self.inner.write_all(&[next_byte])?;
             self.next_bits_length = 0;
         }
         self.inner.flush()
