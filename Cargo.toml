@@ -14,7 +14,7 @@ members = [
     "mpegts-segmenter",
     "mpeg4",
     "qtff",
-    "utils"
+    "utils",
     "rfc6381",
     "kvazaar-sys"
 ]

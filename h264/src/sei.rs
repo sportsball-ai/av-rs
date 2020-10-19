@@ -20,7 +20,7 @@ pub struct PicTiming {
 }
 
 impl Decode for SEI {
-  fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+  fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
     let mut ret = Self::default();
 
     let mut payload_type = 0;
@@ -50,7 +50,7 @@ impl Decode for SEI {
 }
 
 impl Decode for PicTiming {
-  fn decode<'a, T: Iterator<Item = &'a u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+  fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
     let mut ret = Self::default();
     // if CpbDpbDelaysPresentFlag {
     //   TODO: read delays
