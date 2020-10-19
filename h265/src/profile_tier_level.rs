@@ -7,9 +7,9 @@ pub struct ProfileTierLevel {
     pub general_profile_space: U2,
     pub general_tier_flag: U1,
     pub general_profile_idc: U5,
-    // }
     pub general_profile_compatibility_flags: U32,
     pub general_constraint_flags: U48,
+    // }
     pub general_level_idc: U8,
 
     pub sub_layer_profile_present_flag: Vec<U1>,
@@ -24,15 +24,17 @@ impl ProfileTierLevel {
         let mut ret = Self::default();
 
         if profile_present_flag != 0 {
-            decode!(bs, &mut ret.general_profile_space, &mut ret.general_tier_flag, &mut ret.general_profile_idc)?;
+            decode!(
+                bs,
+                &mut ret.general_profile_space,
+                &mut ret.general_tier_flag,
+                &mut ret.general_profile_idc,
+                &mut ret.general_profile_compatibility_flags,
+                &mut ret.general_constraint_flags
+            )?;
         }
 
-        decode!(
-            bs,
-            &mut ret.general_profile_compatibility_flags,
-            &mut ret.general_constraint_flags,
-            &mut ret.general_level_idc
-        )?;
+        decode!(bs, &mut ret.general_level_idc)?;
 
         for _ in 0..max_num_sub_layers_minus1 {
             ret.sub_layer_profile_present_flag.push(U1::decode(bs)?);
