@@ -311,11 +311,13 @@ pub struct VUIParameters {
     pub time_scale: U32,
     pub fixed_frame_rate_flag: U1,
     // }
-
     pub nal_hrd_parameters_present_flag: U1,
     pub vcl_hrd_parameters_present_flag: U1,
     pub low_delay_hrd_flag: U1,
     pub pic_struct_present_flag: U1,
+
+    pub nal_hrd_parameters: Option<HRDParameters>,
+    pub vcl_hrd_parameters: Option<HRDParameters>,
 }
 
 pub const ASPECT_RATIO_IDC_EXTENDED_SAR: u8 = 255;
@@ -369,12 +371,12 @@ impl Decode for VUIParameters {
 
         decode!(bs, &mut ret.nal_hrd_parameters_present_flag)?;
         if ret.nal_hrd_parameters_present_flag.0 != 0 {
-            //TODO: decode hrd parameters
+            ret.nal_hrd_parameters = Some(HRDParameters::decode(bs)?);
         }
 
         decode!(bs, &mut ret.vcl_hrd_parameters_present_flag)?;
         if ret.vcl_hrd_parameters_present_flag.0 != 0 {
-            //TODO: decode hrd parameters
+            ret.vcl_hrd_parameters = Some(HRDParameters::decode(bs)?);
         }
 
         if ret.nal_hrd_parameters_present_flag.0 != 0 || ret.vcl_hrd_parameters_present_flag.0 != 0 {
@@ -383,6 +385,55 @@ impl Decode for VUIParameters {
 
         decode!(bs, &mut ret.pic_struct_present_flag)?;
 
+        Ok(ret)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct HRDParameters {
+    pub cpb_cnt_minus1: UE,
+    pub bit_rate_scale: U4,
+    pub cpb_size_scale: U4,
+    pub initial_cpb_removal_delay_length_minus1: U5,
+    pub cpb_removal_delay_length_minus1: U5,
+    pub dpb_output_delay_delay_length_minus1: U5,
+    pub time_offset_length: U5,
+    pub sei_scheds: Vec<SEISched>,
+}
+
+impl Decode for HRDParameters {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+        let mut ret = Self::default();
+
+        decode!(bs, &mut ret.cpb_cnt_minus1, &mut ret.bit_rate_scale, &mut ret.cpb_size_scale)?;
+
+        for _ in 0..=ret.cpb_cnt_minus1.0 {
+            ret.sei_scheds.push(SEISched::decode(bs)?);
+        }
+
+        decode!(
+            bs,
+            &mut ret.initial_cpb_removal_delay_length_minus1,
+            &mut ret.cpb_removal_delay_length_minus1,
+            &mut ret.dpb_output_delay_delay_length_minus1,
+            &mut ret.time_offset_length
+        )?;
+
+        Ok(ret)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SEISched {
+    pub bit_rate_value_minus1: UE,
+    pub cpb_size_value_minus1: UE,
+    pub cbr_flag: U1,
+}
+
+impl Decode for SEISched {
+    fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+        let mut ret = Self::default();
+        decode!(bs, &mut ret.bit_rate_value_minus1, &mut ret.cpb_size_value_minus1, &mut ret.cbr_flag)?;
         Ok(ret)
     }
 }
