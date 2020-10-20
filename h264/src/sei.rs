@@ -53,7 +53,19 @@ impl PicTiming {
   pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
     let mut ret = Self::default();
     if vui_params.nal_hrd_parameters_present_flag.0 != 0 || vui_params.vcl_hrd_parameters_present_flag.0 != 0 {
-      // TODO: read delays
+      // Reading delays
+      let hrd_params = match (&vui_params.nal_hrd_parameters, &vui_params.vcl_hrd_parameters) {
+        (Some(params), _) => Some(params),
+        (_, Some(params)) => Some(params),
+        _ => None,
+      };
+
+      if let Some(hrd_params) = hrd_params {
+        // Reading cpb_removal_delay
+        bs.read_bits(hrd_params.cpb_removal_delay_length_minus1.0 as usize + 1)?;
+        // Reading dpb_output_delay
+        bs.read_bits(hrd_params.dpb_output_delay_length_minus1.0 as usize + 1)?;
+      }
     }
 
     if vui_params.pic_struct_present_flag.0 == 0 {

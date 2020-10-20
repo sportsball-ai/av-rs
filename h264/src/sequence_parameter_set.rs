@@ -396,7 +396,7 @@ pub struct HRDParameters {
     pub cpb_size_scale: U4,
     pub initial_cpb_removal_delay_length_minus1: U5,
     pub cpb_removal_delay_length_minus1: U5,
-    pub dpb_output_delay_delay_length_minus1: U5,
+    pub dpb_output_delay_length_minus1: U5,
     pub time_offset_length: U5,
     pub sei_scheds: Vec<SEISched>,
 }
@@ -415,7 +415,7 @@ impl Decode for HRDParameters {
             bs,
             &mut ret.initial_cpb_removal_delay_length_minus1,
             &mut ret.cpb_removal_delay_length_minus1,
-            &mut ret.dpb_output_delay_delay_length_minus1,
+            &mut ret.dpb_output_delay_length_minus1,
             &mut ret.time_offset_length
         )?;
 
