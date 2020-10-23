@@ -9,7 +9,7 @@ pub trait CFType {
     fn description(&self) -> Option<String> {
         unsafe {
             let desc = sys::CFCopyDescription(self.cf_type_ref());
-            let ptr = sys::CFStringGetCStringPtr(desc, 0x8000100);
+            let ptr = sys::CFStringGetCStringPtr(desc, sys::kCFStringEncodingUTF8);
             let ret = CStr::from_ptr(ptr).to_str().ok().map(|s| s.to_string());
             sys::CFRelease(desc as _);
             ret
