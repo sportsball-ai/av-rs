@@ -653,38 +653,34 @@ mod tests {
         assert_eq!(movie_data.tracks.len(), 2);
 
         for track in movie_data.tracks.iter() {
-            match track.media.information.as_ref().unwrap() {
-                data::MediaInformationData::Sound(minf) => {
-                    let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
-                    assert_eq!(
-                        &data::SoundSampleDescriptionDataEntry {
-                            data_format: 1836069985,
-                            reserved: [0, 0, 0, 0, 0, 0],
-                            data_reference_index: 1,
-                            version: data::SoundSampleDescriptionDataEntryVersion::V0(data::SoundSampleDescriptionDataEntryV0 {
-                                revision_level: 0,
-                                vendor: 0,
-                                number_of_channels: 2,
-                                sample_size: 16,
-                                compression_id: 0,
-                                packet_size: 0,
-                                sample_rate: 48000.0.into(),
-                                extensions: data::SoundSampleDescriptionDataEntryExtensions {
-                                    elementary_stream_descriptor: Some(data::ElementaryStreamDescriptorData {
-                                        version: 0,
-                                        descriptor: vec![
-                                            0x03, 0x80, 0x80, 0x80, 0x22, 0x00, 0x02, 0x00, 0x04, 0x80, 0x80, 0x80, 0x14, 0x40, 0x15, 0x00, 0x00, 0x00, 0x00,
-                                            0x02, 0xe3, 0xbf, 0x00, 0x02, 0xe3, 0xbf, 0x05, 0x80, 0x80, 0x80, 0x02, 0x11, 0x90, 0x06, 0x80, 0x80, 0x80, 0x01,
-                                            0x02,
-                                        ],
-                                    }),
-                                },
-                            }),
-                        },
-                        desc
-                    );
-                }
-                _ => {}
+            if let data::MediaInformationData::Sound(minf) = track.media.information.as_ref().unwrap() {
+                let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
+                assert_eq!(
+                    &data::SoundSampleDescriptionDataEntry {
+                        data_format: 1836069985,
+                        reserved: [0, 0, 0, 0, 0, 0],
+                        data_reference_index: 1,
+                        version: data::SoundSampleDescriptionDataEntryVersion::V0(data::SoundSampleDescriptionDataEntryV0 {
+                            revision_level: 0,
+                            vendor: 0,
+                            number_of_channels: 2,
+                            sample_size: 16,
+                            compression_id: 0,
+                            packet_size: 0,
+                            sample_rate: 48000.0.into(),
+                            extensions: data::SoundSampleDescriptionDataEntryExtensions {
+                                elementary_stream_descriptor: Some(data::ElementaryStreamDescriptorData {
+                                    version: 0,
+                                    descriptor: vec![
+                                        0x03, 0x80, 0x80, 0x80, 0x22, 0x00, 0x02, 0x00, 0x04, 0x80, 0x80, 0x80, 0x14, 0x40, 0x15, 0x00, 0x00, 0x00, 0x00, 0x02,
+                                        0xe3, 0xbf, 0x00, 0x02, 0xe3, 0xbf, 0x05, 0x80, 0x80, 0x80, 0x02, 0x11, 0x90, 0x06, 0x80, 0x80, 0x80, 0x01, 0x02,
+                                    ],
+                                }),
+                            },
+                        }),
+                    },
+                    desc
+                );
             }
         }
     }
@@ -692,16 +688,13 @@ mod tests {
     #[test]
     fn test_file_h265_mp4() {
         let mut f = File::open("src/testdata/h265.mp4").unwrap();
-        
         let movie_data = f.get_movie_data().unwrap();
-        println!("movie_data: {:?}", movie_data.tracks[0].media.information.as_ref().unwrap());
         assert_eq!(movie_data.tracks.len(), 2);
     }
 
     #[test]
     fn test_file_empty_mov() {
         let mut f = File::open("src/testdata/empty.mov").unwrap();
-
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
     }
