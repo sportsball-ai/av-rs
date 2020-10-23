@@ -144,7 +144,7 @@ pub fn read_first_sei_pic_timing<T: Read>(reader: T) -> io::Result<PicTiming> {
             _ => {}
         }
     }
-    Err(Error::new(ErrorKind::Other, "oh no!"))
+    Err(Error::new(ErrorKind::Other, "SEI with PicTiming not found"))
 }
 
 impl<T: Read> Iterator for ReadAnnexB<T> {
