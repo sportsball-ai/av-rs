@@ -1,8 +1,0 @@
-[package]
-name = "utils"
-version = "0.0.0"
-edition = "2018"
-
-[dependencies]
-h264 = { path = "../h264" }
-
