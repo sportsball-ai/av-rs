@@ -77,7 +77,7 @@ impl Stream {
                     access_unit_counter.count()
                 },
                 rfc6381_codec: rfc6381_codec.clone(),
-                timecode: timecode.as_ref().map(|timing| StreamTiming {
+                timecode: timecode.as_ref().map(|timing| StreamTimecode {
                     hours: timing.hours,
                     minutes: timing.minutes,
                     seconds: timing.seconds,
@@ -307,16 +307,16 @@ pub enum StreamInfo {
         frame_rate: f64,
         frame_count: u64,
         rfc6381_codec: Option<String>,
-        timecode: Option<StreamTiming>,
+        timecode: Option<StreamTimecode>,
     },
     Other,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct StreamTiming {
-    pub hours: u8,
-    pub minutes: u8,
-    pub seconds: u8,
+pub struct StreamTimecode {
+    pub hours: Option<u8>,
+    pub minutes: Option<u8>,
+    pub seconds: Option<u8>,
 }
 
 #[derive(Clone)]
@@ -624,7 +624,11 @@ mod test {
                     frame_rate: 29.97,
                     frame_count: 152,
                     rfc6381_codec: Some("avc1.4d4028".to_string()),
-                    timecode: Some(StreamTiming { hours: 18, minutes: 57, seconds: 30 }) ,
+                    timecode: Some(StreamTimecode {
+                        hours: Some(18),
+                        minutes: Some(57),
+                        seconds: Some(30)
+                    }),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,

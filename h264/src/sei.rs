@@ -14,9 +14,9 @@ pub struct SEIMessage {
 
 #[derive(Clone, Debug, Default)]
 pub struct PicTiming {
-  pub hours: u8,
-  pub minutes: u8,
-  pub seconds: u8,
+  pub hours: Option<u8>,
+  pub minutes: Option<u8>,
+  pub seconds: Option<u8>,
 }
 
 impl SEIMessage {
@@ -105,19 +105,19 @@ impl PicTiming {
       )?;
 
       if full_timestamp_flag.0 == 1 {
-        ret.seconds = bs.read_bits(6)? as u8;
-        ret.minutes = bs.read_bits(6)? as u8;
-        ret.hours = bs.read_bits(5)? as u8;
+        ret.seconds = Some(bs.read_bits(6)? as u8);
+        ret.minutes = Some(bs.read_bits(6)? as u8);
+        ret.hours = Some(bs.read_bits(5)? as u8);
       } else {
         // Seconds flag
         if bs.read_bits(1)? == 1 {
-          ret.seconds = bs.read_bits(6)? as u8;
+          ret.seconds = Some(bs.read_bits(6)? as u8);
           // Minutes flag
           if bs.read_bits(1)? == 1 {
-            ret.minutes = bs.read_bits(6)? as u8;
+            ret.minutes = Some(bs.read_bits(6)? as u8);
             // Hours flag
             if bs.read_bits(1)? == 1 {
-              ret.hours = bs.read_bits(5)? as u8;
+              ret.hours = Some(bs.read_bits(5)? as u8);
             }
           }
         }
