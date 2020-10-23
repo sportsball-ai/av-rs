@@ -1,6 +1,6 @@
 use std::{
     collections::VecDeque,
-    io::{self, Read},
+    io::{self, Error, ErrorKind, Read},
     iter::Iterator,
 };
 
@@ -118,8 +118,7 @@ pub fn read_annex_b<T: Read>(reader: T) -> ReadAnnexB<T> {
     }
 }
 
-pub fn read_sei_timings<T: Read>(reader: T) -> io::Result<Vec<PicTiming>> {
-    let mut ret = vec![];
+pub fn read_first_sei_pic_timing<T: Read>(reader: T) -> io::Result<PicTiming> {
     let mut last_vui_parameters: Option<VUIParameters> = None;
 
     for bytes in read_annex_b(reader) {
@@ -138,14 +137,14 @@ pub fn read_sei_timings<T: Read>(reader: T) -> io::Result<Vec<PicTiming>> {
                 if let Some(vui_params) = &last_vui_parameters {
                     let sei = SEI::decode(&mut bs, &vui_params)?;
                     if let Some(timings) = sei.pic_timing {
-                        ret.push(timings);
+                        return Ok(timings);
                     }
                 }
             }
             _ => {}
         }
     }
-    Ok(ret)
+    Err(Error::new(ErrorKind::Other, "oh no!"))
 }
 
 impl<T: Read> Iterator for ReadAnnexB<T> {
