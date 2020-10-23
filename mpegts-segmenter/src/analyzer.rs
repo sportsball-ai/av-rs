@@ -22,6 +22,7 @@ pub enum Stream {
         rfc6381_codec: Option<String>,
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
+        pic_timing: Option<h264::PicTiming>,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -147,9 +148,12 @@ impl Stream {
                 rfc6381_codec,
                 is_interlaced,
                 access_unit_counter,
+                pic_timing,
                 ..
             } => {
                 use h264::Decode;
+
+                let mut last_vui_parameters: Option<h264::VUIParameters> = None;
 
                 for nalu in h264::iterate_annex_b(&data) {
                     if nalu.len() == 0 {
@@ -176,6 +180,19 @@ impl Stream {
                                 0 => 0.0,
                                 num_units_in_tick @ _ => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
                             };
+                            last_vui_parameters = Some(sps.vui_parameters);
+                        }
+                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
+                            let bs = h264::Bitstream::new(nalu.iter().copied());
+                            let mut nalu = h264::NALUnit::decode(bs)?;
+
+                            if let Some(vui_params) = &last_vui_parameters {
+                                let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
+                                let sei = h264::SEI::decode(&mut rbsp, &vui_params)?;
+                                if let Some(sei_timing) = sei.pic_timing {
+                                    *pic_timing = Some(sei_timing)
+                                }
+                            }
                         }
                         _ => {}
                     }
@@ -391,6 +408,7 @@ impl Analyzer {
                                         is_interlaced: false,
                                         access_unit_counter: h264::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
+                                        pic_timing: None,
                                     },
                                     0x24 => Stream::HEVCVideo {
                                         pes: pes::Stream::new(),

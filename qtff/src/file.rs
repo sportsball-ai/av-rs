@@ -691,10 +691,12 @@ mod tests {
 
     #[test]
     fn test_file_h265_mp4() {
-        let mut f = File::open("src/testdata/h265.mp4").unwrap();
+        //let mut f = File::open("src/testdata/h265.mp4").unwrap();
+        let mut f = File::open("/Users/vitaly/projects/video/00000012.mp4").unwrap();
 
         let movie_data = f.get_movie_data().unwrap();
-        assert_eq!(movie_data.tracks.len(), 2);
+        //println!("movie_data: {:?}", movie_data.tracks[0].media.information.as_ref().unwrap());
+        //assert_eq!(movie_data.tracks.len(), 2);
     }
 
     #[test]

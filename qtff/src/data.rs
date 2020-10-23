@@ -14,7 +14,11 @@ use serde::{de, ser};
 pub fn read_one<T: AtomData, R: Read + Seek>(mut reader: R) -> Result<Option<T>> {
     reader.seek(SeekFrom::Start(0))?;
     match AtomReader::new(&mut reader).find(|a| match a {
-        Ok(a) => a.typ == T::TYPE,
+        Ok(a) => {
+            let x = unsafe { std::mem::transmute::<u32, [u8; 4]>((a.typ.0 as u32).to_le()) };
+            println!("{:x?} {:x?} {} {}", a.typ, T::TYPE, a.typ == T::TYPE, String::from_utf8(x.to_vec()).unwrap());
+            a.typ == T::TYPE
+        }
         Err(_) => true,
     }) {
         Some(Ok(a)) => Ok(Some(T::read(a.data(&mut reader))?)),
@@ -27,7 +31,11 @@ pub fn read_all<T: AtomData, R: Read + Seek>(mut reader: R) -> Result<Vec<T>> {
     reader.seek(SeekFrom::Start(0))?;
     let atoms = AtomReader::new(&mut reader)
         .filter(|a| match a {
-            Ok(a) => a.typ == T::TYPE,
+            Ok(a) => {
+                let x = unsafe { std::mem::transmute::<u32, [u8; 4]>((a.typ.0 as u32).to_le()) };
+                println!("read_all {:x?} {:x?} {} {}", a.typ, T::TYPE, a.typ == T::TYPE, String::from_utf8(x.to_vec()).unwrap());
+                a.typ == T::TYPE
+            }
             Err(_) => true,
         })
         .map(|r| r.map_err(|e| e.into()))
