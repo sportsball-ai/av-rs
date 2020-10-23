@@ -118,6 +118,36 @@ pub fn read_annex_b<T: Read>(reader: T) -> ReadAnnexB<T> {
     }
 }
 
+pub fn read_sei_timings<T: Read>(reader: T) -> io::Result<Vec<PicTiming>> {
+    let mut ret = vec![];
+    let mut last_vui_parameters: Option<VUIParameters> = None;
+
+    for bytes in read_annex_b(reader) {
+        let bytes = bytes?;
+        let bs = Bitstream::new(bytes);
+        let nalu = NALUnit::decode(bs)?;
+
+        match nalu.nal_unit_type.0 {
+            NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
+                let mut bs = Bitstream::new(nalu.rbsp_byte.into_inner());
+                let sps = SequenceParameterSet::decode(&mut bs)?;
+                last_vui_parameters = Some(sps.vui_parameters);
+            }
+            NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION if nalu.nal_ref_idc.0 == 0 => {
+                let mut bs = Bitstream::new(nalu.rbsp_byte.into_inner());
+                if let Some(vui_params) = &last_vui_parameters {
+                    let sei = SEI::decode(&mut bs, &vui_params)?;
+                    if let Some(timings) = sei.pic_timing {
+                        ret.push(timings);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(ret)
+}
+
 impl<T: Read> Iterator for ReadAnnexB<T> {
     type Item = io::Result<bytes::Bytes>;
 
