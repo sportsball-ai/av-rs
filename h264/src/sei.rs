@@ -6,7 +6,7 @@ pub const SEI_PAYLOAD_TYPE_PIC_TIMING: u64 = 1;
 
 // ITU-T H.264, 04/2017, 7.3.2.3.1
 #[derive(Clone, Debug, Default)]
-pub struct SEI {
+pub struct SEIMessage {
   pub payload_type: u64,
   pub payload_size: u64,
   pub pic_timing: Option<PicTiming>,
@@ -19,7 +19,7 @@ pub struct PicTiming {
   pub seconds: u8,
 }
 
-impl SEI {
+impl SEIMessage {
   pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
     let mut ret = Self::default();
 
