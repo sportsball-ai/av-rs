@@ -697,12 +697,5 @@ mod tests {
         let mut f = File::open("src/testdata/empty.mov").unwrap();
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
-    }
-
-    #[test]
-    fn test_file_fragmented_mp4() {
-        let mut f = File::open("../../video/00000012.mp4").unwrap();
-        let movie_data = f.get_movie_data().unwrap();
-        assert_eq!(movie_data.tracks.len(), 1);
-    }
+    } 
 }
