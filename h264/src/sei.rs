@@ -17,6 +17,7 @@ pub struct PicTiming {
   pub hours: Option<u8>,
   pub minutes: Option<u8>,
   pub seconds: Option<u8>,
+  pub frames: Option<u8>,
 }
 
 impl SEIMessage {
@@ -103,6 +104,8 @@ impl PicTiming {
         &mut cnt_dropped_flag,
         &mut n_frames
       )?;
+
+      ret.frames = Some(n_frames.0);
 
       if full_timestamp_flag.0 == 1 {
         ret.seconds = Some(bs.read_bits(6)? as u8);

@@ -81,6 +81,7 @@ impl Stream {
                     hours: timing.hours,
                     minutes: timing.minutes,
                     seconds: timing.seconds,
+                    frames: timing.frames,
                 }),
             },
             Self::HEVCVideo {
@@ -197,7 +198,7 @@ impl Stream {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
                                 let sei = h264::SEIMessage::decode(&mut rbsp, &vui_params)?;
                                 if let Some(pic_timing) = sei.pic_timing {
-                                    *timecode = Some(pic_timing)
+                                    *timecode = Some(pic_timing);
                                 }
                             }
                         }
@@ -317,6 +318,7 @@ pub struct StreamTimecode {
     pub hours: Option<u8>,
     pub minutes: Option<u8>,
     pub seconds: Option<u8>,
+    pub frames: Option<u8>,
 }
 
 #[derive(Clone)]
@@ -627,7 +629,8 @@ mod test {
                     timecode: Some(StreamTimecode {
                         hours: Some(18),
                         minutes: Some(57),
-                        seconds: Some(30)
+                        seconds: Some(30),
+                        frames: Some(2),
                     }),
                 },
                 StreamInfo::Audio {
