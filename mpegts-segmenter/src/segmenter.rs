@@ -1,11 +1,15 @@
 use super::{analyzer, Analyzer, SegmentStorage, StreamInfo};
-use mpeg2::ts::{Packet, PACKET_LENGTH};
+use mpeg2::{
+    pes,
+    ts::{Packet, PACKET_LENGTH},
+};
 use std::{fmt, io, time::Duration};
 use tokio::prelude::*;
 
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
     pcr: u64,
+    pts: Option<Duration>,
     bytes_written: usize,
 }
 
@@ -150,11 +154,20 @@ impl<S: SegmentStorage> Segmenter<S> {
                 self.current_segment = Some(CurrentSegment {
                     segment: self.storage.new_segment().await?,
                     pcr: self.pcr.unwrap_or(0),
+                    pts: None,
                     bytes_written: 0,
                 });
             }
 
             if let Some(segment) = &mut self.current_segment {
+                // set the segment's pts if necessary
+                if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
+                    if let Some(payload) = p.payload {
+                        let (header, _) = pes::PacketHeader::decode(&payload)?;
+                        segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
+                    }
+                }
+
                 segment.segment.write_all(&buf).await?;
                 segment.bytes_written += buf.len();
             }
@@ -193,6 +206,7 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
 #[derive(Debug, Clone)]
 pub struct SegmentInfo {
     pub size: usize,
+    pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
 }
 
@@ -200,6 +214,7 @@ impl SegmentInfo {
     fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, streams: Vec<StreamInfo>, prev_streams: &[StreamInfo]) -> Self {
         Self {
             size: segment.bytes_written,
+            presentation_time: segment.pts,
             streams: if streams.len() != prev_streams.len() {
                 streams
             } else {
@@ -336,6 +351,10 @@ mod test {
 
         let segments = storage.segments();
         assert_eq!(segments.len(), 2);
+        assert_eq!(
+            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![924.279588, 925.280344]
+        );
     }
 
     #[tokio::test]
@@ -359,6 +378,10 @@ mod test {
 
         let segments = storage.segments();
         assert_eq!(segments.len(), 2);
+        assert_eq!(
+            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![731.629855, 732.631]
+        );
     }
 
     #[tokio::test]
@@ -384,6 +407,36 @@ mod test {
 
         let segments = storage.segments();
         assert_eq!(segments.len(), 25);
+        assert_eq!(
+            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![
+                1.423222,
+                2.423222,
+                3.423222,
+                4.423222,
+                5.423222,
+                6.423222,
+                7.423222,
+                8.423221999999999,
+                9.423221999999999,
+                10.423221999999999,
+                11.423221999999999,
+                12.423221999999999,
+                13.423221999999999,
+                14.423221999999999,
+                1.423222,
+                2.423222,
+                3.423222,
+                4.423222,
+                5.423222,
+                6.423222,
+                7.423222,
+                8.423221999999999,
+                9.423221999999999,
+                10.423221999999999,
+                11.423221999999999,
+            ]
+        );
     }
 
     #[tokio::test]
@@ -409,5 +462,9 @@ mod test {
 
         let segments = storage.segments();
         assert_eq!(segments.len(), 3);
+        assert_eq!(
+            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![8077.017166, 8078.602088, 8080.604088]
+        );
     }
 }

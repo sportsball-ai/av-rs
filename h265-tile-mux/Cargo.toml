@@ -3,7 +3,15 @@ name = "h265-tile-mux"
 version = "0.1.0"
 edition = "2018"
 
+[features]
+default = []
+bin = ["clap"]
+
+[[bin]]
+name = "h265-tile-mux"
+path = "src/main.rs"
+required-features = ["bin"]
+
 [dependencies]
-bytes = "0.5.6"
 h265 = { path = "../h265" }
-clap = "2.33.3"
+clap = { version = "2.33.3", optional = true }
