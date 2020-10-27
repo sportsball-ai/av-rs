@@ -82,13 +82,30 @@ impl Stream {
                     .map(|t| t.timecodes.as_ref())
                     .unwrap_or(&vec![])
                     .iter()
-                    .map(|t| StreamTimecode {
-                        hours: t.hours.0,
-                        minutes: t.minutes.0,
-                        seconds: t.seconds.0,
-                        frames: t.n_frames.0,
-                    })
-                    .collect(),
+                    .fold(vec![], |mut acc, t| {
+                        let mut timecode = StreamTimecode {
+                            hours: t.hours.0,
+                            minutes: t.minutes.0,
+                            seconds: t.seconds.0,
+                            frames: t.n_frames.0,
+                        };
+                        if let Some(previous_timecode) = acc.iter().last() {
+                            if t.full_timestamp_flag.0 == 0 {
+                                if t.seconds_flag.0 == 0 {
+                                    timecode.seconds = previous_timecode.seconds;
+                                    timecode.minutes = previous_timecode.minutes;
+                                    timecode.hours = previous_timecode.hours;
+                                } else if t.minutes_flag.0 == 0 {
+                                    timecode.minutes = previous_timecode.minutes;
+                                    timecode.hours = previous_timecode.hours;
+                                } else if t.hours_flag.0 == 0 {
+                                    timecode.hours = previous_timecode.hours;
+                                }
+                            }
+                        }
+                        acc.push(timecode);
+                        acc
+                    }),
             },
             Self::HEVCVideo {
                 width,

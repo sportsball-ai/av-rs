@@ -53,6 +53,7 @@ pub struct PicTiming {
 #[derive(Clone, Debug, Default)]
 pub struct Timecode {
   pub clock_timestamp_flag: U1,
+  // if (clock_timestamp_flag) {
   pub ct_type: U2,
   pub nuit_field_based_flag: U1,
   pub counting_type: U5,
@@ -66,14 +67,15 @@ pub struct Timecode {
   pub seconds_flag: U1,
   pub minutes_flag: U1,
   pub hours_flag: U1,
-  pub time_offset: U16,
+  // }
+  pub time_offset: U32,
 }
 
 impl PicTiming {
   pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
     let mut ret = Self::default();
     let mut hrd_params = None;
-    if vui_params.nal_hrd_parameters_present_flag.0 != 0 || vui_params.vcl_hrd_parameters_present_flag.0 != 0 {
+    if vui_params.cpb_dpb_delays_present_flag() {
       hrd_params = match (&vui_params.nal_hrd_parameters, &vui_params.vcl_hrd_parameters) {
         (Some(params), _) => Some(params),
         (_, Some(params)) => Some(params),
@@ -92,13 +94,7 @@ impl PicTiming {
 
     decode!(bs, &mut ret.pic_struct)?;
 
-    let num_clock_ts = match ret.pic_struct.0 {
-      0..=2 => 1,
-      3..=6 => 2,
-      _ => 3,
-    };
-
-    for _ in 0..num_clock_ts {
+    for _ in 0..ret.num_clock_ts() {
       let mut timecode = Timecode::default();
 
       decode!(bs, &mut timecode.clock_timestamp_flag)?;
@@ -132,15 +128,23 @@ impl PicTiming {
         }
       }
 
-      if let Some(hrd_params) = hrd_params {
-        if hrd_params.time_offset_length.0 > 0 {
-          timecode.time_offset.0 = bs.read_bits(hrd_params.time_offset_length.0 as usize)? as u16;
-        }
-      }
+      let time_offset_length = match hrd_params {
+        Some(hrd_params) if hrd_params.time_offset_length.0 > 0 => hrd_params.time_offset_length.0 as usize,
+        _ => 24,
+      };
 
+      timecode.time_offset.0 = bs.read_bits(time_offset_length)? as u32;
       ret.timecodes.push(timecode);
     }
 
     Ok(ret)
+  }
+
+  pub fn num_clock_ts(&self) -> usize {
+    match self.pic_struct.0 {
+      0..=2 => 1,
+      3..=6 => 2,
+      _ => 3,
+    }
   }
 }

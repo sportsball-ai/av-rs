@@ -311,12 +311,10 @@ pub struct VUIParameters {
     pub time_scale: U32,
     pub fixed_frame_rate_flag: U1,
     // }
-
     pub nal_hrd_parameters_present_flag: U1,
     // if (nal_hrd_parameters_present_flag) {
     pub nal_hrd_parameters: Option<HRDParameters>,
     // }
-
     pub vcl_hrd_parameters_present_flag: U1,
     // if (vcl_hrd_parameters_present_flag) {
     pub vcl_hrd_parameters: Option<HRDParameters>,
@@ -325,11 +323,16 @@ pub struct VUIParameters {
     // if (nal_hrd_parameters_present_flag || vcl_hrd_parameters_present_flag)
     pub low_delay_hrd_flag: U1,
     // }
-
     pub pic_struct_present_flag: U1,
 }
 
 pub const ASPECT_RATIO_IDC_EXTENDED_SAR: u8 = 255;
+
+impl VUIParameters {
+    pub fn cpb_dpb_delays_present_flag(&self) -> bool {
+        self.nal_hrd_parameters_present_flag.0 != 0 || self.vcl_hrd_parameters_present_flag.0 != 0
+    }
+}
 
 impl Decode for VUIParameters {
     fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
