@@ -168,7 +168,6 @@ impl Stream {
                 use h264::Decode;
 
                 let mut last_vui_parameters: Option<h264::VUIParameters> = None;
-                let mut last_sei_pic_timing: Option<h264::PicTiming> = None;
 
                 for nalu in h264::iterate_annex_b(&data) {
                     if nalu.len() == 0 {
@@ -203,9 +202,8 @@ impl Stream {
 
                             if let Some(vui_params) = &last_vui_parameters {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
-                                let sei = h264::SEIMessage::decode(&mut rbsp, &vui_params, last_sei_pic_timing.as_ref())?;
+                                let sei = h264::SEIMessage::decode(&mut rbsp, &vui_params)?;
                                 if let Some(pic_timing) = sei.pic_timing {
-                                    last_sei_pic_timing = Some(pic_timing.clone());
                                     *timecode = Some(pic_timing);
                                 }
                             }

@@ -13,7 +13,7 @@ pub struct SEIMessage {
 }
 
 impl SEIMessage {
-  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters, last_pic_timing: Option<&PicTiming>) -> io::Result<Self> {
+  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
     let mut ret = Self::default();
 
     let mut payload_type = 0;
@@ -35,7 +35,7 @@ impl SEIMessage {
     ret.payload_size = payload_size;
 
     if payload_type == SEI_PAYLOAD_TYPE_PIC_TIMING {
-      ret.pic_timing = Some(PicTiming::decode(bs, vui_params, last_pic_timing)?);
+      ret.pic_timing = Some(PicTiming::decode(bs, vui_params)?);
     }
 
     Ok(ret)
@@ -70,11 +70,10 @@ pub struct Timecode {
 }
 
 impl PicTiming {
-  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters, last_pic_timing: Option<&PicTiming>) -> io::Result<Self> {
+  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
     let mut ret = Self::default();
     let mut hrd_params = None;
     if vui_params.nal_hrd_parameters_present_flag.0 != 0 || vui_params.vcl_hrd_parameters_present_flag.0 != 0 {
-      // Reading delays
       hrd_params = match (&vui_params.nal_hrd_parameters, &vui_params.vcl_hrd_parameters) {
         (Some(params), _) => Some(params),
         (_, Some(params)) => Some(params),
@@ -99,14 +98,10 @@ impl PicTiming {
       _ => 3,
     };
 
-    for clock_idx in 0..num_clock_ts {
-      let mut timecode = match last_pic_timing {
-        Some(pic_timing) if pic_timing.timecodes.len() > clock_idx => pic_timing.timecodes[clock_idx].clone(),
-        _ => Timecode::default(),
-      };
+    for _ in 0..num_clock_ts {
+      let mut timecode = Timecode::default();
 
       decode!(bs, &mut timecode.clock_timestamp_flag)?;
-
       if timecode.clock_timestamp_flag.0 == 0 {
         continue;
       }
