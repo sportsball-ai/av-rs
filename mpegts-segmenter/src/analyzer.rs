@@ -77,12 +77,18 @@ impl Stream {
                     access_unit_counter.count()
                 },
                 rfc6381_codec: rfc6381_codec.clone(),
-                timecode: timecode.as_ref().map(|timing| StreamTimecode {
-                    hours: timing.hours,
-                    minutes: timing.minutes,
-                    seconds: timing.seconds,
-                    frames: timing.frames,
-                }),
+                timecodes: timecode
+                    .as_ref()
+                    .map(|t| t.timecodes.as_ref())
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .map(|t| StreamTimecode {
+                        hours: t.hours,
+                        minutes: t.minutes,
+                        seconds: t.seconds,
+                        frames: t.frames,
+                    })
+                    .collect(),
             },
             Self::HEVCVideo {
                 width,
@@ -97,7 +103,7 @@ impl Stream {
                 frame_rate: *frame_rate,
                 frame_count: access_unit_counter.count(),
                 rfc6381_codec: rfc6381_codec.clone(),
-                timecode: None,
+                timecodes: vec![],
             },
             Self::Other(_) => StreamInfo::Other,
         }
@@ -162,6 +168,7 @@ impl Stream {
                 use h264::Decode;
 
                 let mut last_vui_parameters: Option<h264::VUIParameters> = None;
+                let mut last_sei_pic_timing: Option<h264::PicTiming> = None;
 
                 for nalu in h264::iterate_annex_b(&data) {
                     if nalu.len() == 0 {
@@ -196,8 +203,9 @@ impl Stream {
 
                             if let Some(vui_params) = &last_vui_parameters {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
-                                let sei = h264::SEIMessage::decode(&mut rbsp, &vui_params)?;
+                                let sei = h264::SEIMessage::decode(&mut rbsp, &vui_params, last_sei_pic_timing.as_ref())?;
                                 if let Some(pic_timing) = sei.pic_timing {
+                                    last_sei_pic_timing = Some(pic_timing.clone());
                                     *timecode = Some(pic_timing);
                                 }
                             }
@@ -308,17 +316,17 @@ pub enum StreamInfo {
         frame_rate: f64,
         frame_count: u64,
         rfc6381_codec: Option<String>,
-        timecode: Option<StreamTimecode>,
+        timecodes: Vec<StreamTimecode>,
     },
     Other,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct StreamTimecode {
-    pub hours: Option<u8>,
-    pub minutes: Option<u8>,
-    pub seconds: Option<u8>,
-    pub frames: Option<u8>,
+    pub hours: u8,
+    pub minutes: u8,
+    pub seconds: u8,
+    pub frames: u8,
 }
 
 #[derive(Clone)]
@@ -490,7 +498,7 @@ mod test {
                     frame_rate: 59.94,
                     frame_count: 600,
                     rfc6381_codec: Some("avc1.7a0020".to_string()),
-                    timecode: None,
+                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -524,7 +532,7 @@ mod test {
                     frame_rate: 29.97,
                     frame_count: 33,
                     rfc6381_codec: Some("avc1.42003c".to_string()),
-                    timecode: None,
+                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -558,7 +566,7 @@ mod test {
                     frame_rate: 59.94,
                     frame_count: 600,
                     rfc6381_codec: Some("hvc1.4.10.L120.9D.08".to_string()),
-                    timecode: None,
+                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -592,7 +600,7 @@ mod test {
                     frame_rate: 59.94,
                     frame_count: 31,
                     rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
-                    timecode: None,
+                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -626,12 +634,12 @@ mod test {
                     frame_rate: 29.97,
                     frame_count: 152,
                     rfc6381_codec: Some("avc1.4d4028".to_string()),
-                    timecode: Some(StreamTimecode {
-                        hours: Some(18),
-                        minutes: Some(57),
-                        seconds: Some(30),
-                        frames: Some(2),
-                    }),
+                    timecodes: vec![StreamTimecode {
+                        hours: 18,
+                        minutes: 57,
+                        seconds: 30,
+                        frames: 2,
+                    }],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,

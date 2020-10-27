@@ -14,14 +14,19 @@ pub struct SEIMessage {
 
 #[derive(Clone, Debug, Default)]
 pub struct PicTiming {
-  pub hours: Option<u8>,
-  pub minutes: Option<u8>,
-  pub seconds: Option<u8>,
-  pub frames: Option<u8>,
+  pub timecodes: Vec<Timecode>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Timecode {
+  pub hours: u8,
+  pub minutes: u8,
+  pub seconds: u8,
+  pub frames: u8,
 }
 
 impl SEIMessage {
-  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
+  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters, last_pic_timing: Option<&PicTiming>) -> io::Result<Self> {
     let mut ret = Self::default();
 
     let mut payload_type = 0;
@@ -43,7 +48,7 @@ impl SEIMessage {
     ret.payload_size = payload_size;
 
     if payload_type == SEI_PAYLOAD_TYPE_PIC_TIMING {
-      ret.pic_timing = Some(PicTiming::decode(bs, vui_params)?);
+      ret.pic_timing = Some(PicTiming::decode(bs, vui_params, last_pic_timing)?);
     }
 
     Ok(ret)
@@ -51,7 +56,7 @@ impl SEIMessage {
 }
 
 impl PicTiming {
-  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
+  pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters, last_pic_timing: Option<&PicTiming>) -> io::Result<Self> {
     let mut ret = Self::default();
     if vui_params.nal_hrd_parameters_present_flag.0 != 0 || vui_params.vcl_hrd_parameters_present_flag.0 != 0 {
       // Reading delays
@@ -80,7 +85,7 @@ impl PicTiming {
       _ => 3,
     };
 
-    for _ in 0..num_clock_ts {
+    for clock_idx in 0..num_clock_ts {
       // Checking for clock timestamp flag
       if bs.read_bits(1)? == 0 {
         continue;
@@ -105,26 +110,33 @@ impl PicTiming {
         &mut n_frames
       )?;
 
-      ret.frames = Some(n_frames.0);
+      let mut timecode = match last_pic_timing {
+        Some(pic_timing) if pic_timing.timecodes.len() > clock_idx => pic_timing.timecodes[clock_idx].clone(),
+        _ => Timecode::default(),
+      };
+
+      timecode.frames = n_frames.0;
 
       if full_timestamp_flag.0 == 1 {
-        ret.seconds = Some(bs.read_bits(6)? as u8);
-        ret.minutes = Some(bs.read_bits(6)? as u8);
-        ret.hours = Some(bs.read_bits(5)? as u8);
+        timecode.seconds = bs.read_bits(6)? as u8;
+        timecode.minutes = bs.read_bits(6)? as u8;
+        timecode.hours = bs.read_bits(5)? as u8;
       } else {
         // Seconds flag
         if bs.read_bits(1)? == 1 {
-          ret.seconds = Some(bs.read_bits(6)? as u8);
+          timecode.seconds = bs.read_bits(6)? as u8;
           // Minutes flag
           if bs.read_bits(1)? == 1 {
-            ret.minutes = Some(bs.read_bits(6)? as u8);
+            timecode.minutes = bs.read_bits(6)? as u8;
             // Hours flag
             if bs.read_bits(1)? == 1 {
-              ret.hours = Some(bs.read_bits(5)? as u8);
+              timecode.hours = bs.read_bits(5)? as u8;
             }
           }
         }
       }
+
+      ret.timecodes.push(timecode);
     }
 
     Ok(ret)
