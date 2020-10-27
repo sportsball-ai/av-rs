@@ -83,10 +83,10 @@ impl Stream {
                     .unwrap_or(&vec![])
                     .iter()
                     .map(|t| StreamTimecode {
-                        hours: t.hours,
-                        minutes: t.minutes,
-                        seconds: t.seconds,
-                        frames: t.frames,
+                        hours: t.hours.0,
+                        minutes: t.minutes.0,
+                        seconds: t.seconds.0,
+                        frames: t.n_frames.0,
                     })
                     .collect(),
             },
@@ -316,6 +316,7 @@ pub enum StreamInfo {
         frame_rate: f64,
         frame_count: u64,
         rfc6381_codec: Option<String>,
+        // One timecode per each ClockTS
         timecodes: Vec<StreamTimecode>,
     },
     Other,

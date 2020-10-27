@@ -12,19 +12,6 @@ pub struct SEIMessage {
   pub pic_timing: Option<PicTiming>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct PicTiming {
-  pub timecodes: Vec<Timecode>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct Timecode {
-  pub hours: u8,
-  pub minutes: u8,
-  pub seconds: u8,
-  pub frames: u8,
-}
-
 impl SEIMessage {
   pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters, last_pic_timing: Option<&PicTiming>) -> io::Result<Self> {
     let mut ret = Self::default();
@@ -55,22 +42,48 @@ impl SEIMessage {
   }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct PicTiming {
+  pub cpb_removal_delay: u64,
+  pub dpb_output_delay: u64,
+  pub pic_struct: U4,
+  pub timecodes: Vec<Timecode>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct Timecode {
+  pub clock_timestamp_flag: U1,
+  pub ct_type: U2,
+  pub nuit_field_based_flag: U1,
+  pub counting_type: U5,
+  pub full_timestamp_flag: U1,
+  pub discontinuity_flag: U1,
+  pub cnt_dropped_flag: U1,
+  pub n_frames: U8,
+  pub seconds: U6,
+  pub minutes: U6,
+  pub hours: U5,
+  pub seconds_flag: U1,
+  pub minutes_flag: U1,
+  pub hours_flag: U1,
+  pub time_offset: U16,
+}
+
 impl PicTiming {
   pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters, last_pic_timing: Option<&PicTiming>) -> io::Result<Self> {
     let mut ret = Self::default();
+    let mut hrd_params = None;
     if vui_params.nal_hrd_parameters_present_flag.0 != 0 || vui_params.vcl_hrd_parameters_present_flag.0 != 0 {
       // Reading delays
-      let hrd_params = match (&vui_params.nal_hrd_parameters, &vui_params.vcl_hrd_parameters) {
+      hrd_params = match (&vui_params.nal_hrd_parameters, &vui_params.vcl_hrd_parameters) {
         (Some(params), _) => Some(params),
         (_, Some(params)) => Some(params),
         _ => None,
       };
 
       if let Some(hrd_params) = hrd_params {
-        // Reading cpb_removal_delay
-        bs.read_bits(hrd_params.cpb_removal_delay_length_minus1.0 as usize + 1)?;
-        // Reading dpb_output_delay
-        bs.read_bits(hrd_params.dpb_output_delay_length_minus1.0 as usize + 1)?;
+        ret.cpb_removal_delay = bs.read_bits(hrd_params.cpb_removal_delay_length_minus1.0 as usize + 1)?;
+        ret.dpb_output_delay = bs.read_bits(hrd_params.dpb_output_delay_length_minus1.0 as usize + 1)?;
       }
     }
 
@@ -78,61 +91,55 @@ impl PicTiming {
       return Ok(ret);
     }
 
-    let pic_struct = bs.read_bits(4)?;
-    let num_clock_ts = match pic_struct {
+    decode!(bs, &mut ret.pic_struct)?;
+
+    let num_clock_ts = match ret.pic_struct.0 {
       0..=2 => 1,
       3..=6 => 2,
       _ => 3,
     };
 
     for clock_idx in 0..num_clock_ts {
-      // Checking for clock timestamp flag
-      if bs.read_bits(1)? == 0 {
-        continue;
-      }
-
-      let mut ct_type = U2::default();
-      let mut nuit_field_based_flag = U1::default();
-      let mut counting_type = U5::default();
-      let mut full_timestamp_flag = U1::default();
-      let mut discontinuity_flag = U1::default();
-      let mut cnt_dropped_flag = U1::default();
-      let mut n_frames = U8::default();
-
-      decode!(
-        bs,
-        &mut ct_type,
-        &mut nuit_field_based_flag,
-        &mut counting_type,
-        &mut full_timestamp_flag,
-        &mut discontinuity_flag,
-        &mut cnt_dropped_flag,
-        &mut n_frames
-      )?;
-
       let mut timecode = match last_pic_timing {
         Some(pic_timing) if pic_timing.timecodes.len() > clock_idx => pic_timing.timecodes[clock_idx].clone(),
         _ => Timecode::default(),
       };
 
-      timecode.frames = n_frames.0;
+      decode!(bs, &mut timecode.clock_timestamp_flag)?;
 
-      if full_timestamp_flag.0 == 1 {
-        timecode.seconds = bs.read_bits(6)? as u8;
-        timecode.minutes = bs.read_bits(6)? as u8;
-        timecode.hours = bs.read_bits(5)? as u8;
+      if timecode.clock_timestamp_flag.0 == 0 {
+        continue;
+      }
+
+      decode!(
+        bs,
+        &mut timecode.ct_type,
+        &mut timecode.nuit_field_based_flag,
+        &mut timecode.counting_type,
+        &mut timecode.full_timestamp_flag,
+        &mut timecode.discontinuity_flag,
+        &mut timecode.cnt_dropped_flag,
+        &mut timecode.n_frames
+      )?;
+
+      if timecode.full_timestamp_flag.0 == 1 {
+        decode!(bs, &mut timecode.seconds, &mut timecode.minutes, &mut timecode.hours)?;
       } else {
-        // Seconds flag
-        if bs.read_bits(1)? == 1 {
-          timecode.seconds = bs.read_bits(6)? as u8;
-          // Minutes flag
-          if bs.read_bits(1)? == 1 {
-            timecode.minutes = bs.read_bits(6)? as u8;
-            // Hours flag
-            if bs.read_bits(1)? == 1 {
-              timecode.hours = bs.read_bits(5)? as u8;
+        decode!(bs, &mut timecode.seconds_flag)?;
+        if timecode.seconds_flag.0 == 1 {
+          decode!(bs, &mut timecode.seconds, &mut timecode.minutes_flag)?;
+          if timecode.minutes_flag.0 == 1 {
+            decode!(bs, &mut timecode.minutes, &mut timecode.hours_flag)?;
+            if timecode.hours_flag.0 == 1 {
+              decode!(bs, &mut timecode.hours)?;
             }
           }
+        }
+      }
+
+      if let Some(hrd_params) = hrd_params {
+        if hrd_params.time_offset_length.0 > 0 {
+          timecode.time_offset.0 = bs.read_bits(hrd_params.time_offset_length.0 as usize)? as u16;
         }
       }
 
