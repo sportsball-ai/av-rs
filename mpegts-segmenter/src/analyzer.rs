@@ -287,14 +287,6 @@ pub enum StreamInfo {
     Other,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct StreamTimecode {
-    pub hours: u8,
-    pub minutes: u8,
-    pub seconds: u8,
-    pub frames: u8,
-}
-
 #[derive(Clone)]
 enum PIDState {
     Unused,
