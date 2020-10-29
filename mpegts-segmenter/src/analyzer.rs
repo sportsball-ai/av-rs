@@ -326,7 +326,6 @@ pub enum StreamInfo {
         frame_rate: f64,
         frame_count: u64,
         rfc6381_codec: Option<String>,
-        // One timecode per each ClockTS
         timecodes: Vec<StreamTimecode>,
     },
     Other,
