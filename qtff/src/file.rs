@@ -697,5 +697,5 @@ mod tests {
         let mut f = File::open("src/testdata/empty.mov").unwrap();
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
-    } 
+    }
 }

@@ -22,7 +22,6 @@ pub enum Stream {
         rfc6381_codec: Option<String>,
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
-        timecodes: Vec<h264::PicTiming>,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -65,7 +64,6 @@ impl Stream {
                 is_interlaced,
                 access_unit_counter,
                 rfc6381_codec,
-                timecodes,
                 ..
             } => StreamInfo::Video {
                 width: *width,
@@ -77,30 +75,6 @@ impl Stream {
                     access_unit_counter.count()
                 },
                 rfc6381_codec: rfc6381_codec.clone(),
-                timecodes: timecodes.iter().flat_map(|t| t.timecodes.clone()).fold(vec![], |mut acc, t| {
-                    let mut timecode = StreamTimecode {
-                        hours: t.hours.0,
-                        minutes: t.minutes.0,
-                        seconds: t.seconds.0,
-                        frames: t.n_frames.0,
-                    };
-                    if let Some(previous_timecode) = acc.iter().last() {
-                        if t.full_timestamp_flag.0 == 0 {
-                            if t.seconds_flag.0 == 0 {
-                                timecode.seconds = previous_timecode.seconds;
-                                timecode.minutes = previous_timecode.minutes;
-                                timecode.hours = previous_timecode.hours;
-                            } else if t.minutes_flag.0 == 0 {
-                                timecode.minutes = previous_timecode.minutes;
-                                timecode.hours = previous_timecode.hours;
-                            } else if t.hours_flag.0 == 0 {
-                                timecode.hours = previous_timecode.hours;
-                            }
-                        }
-                    }
-                    acc.push(timecode);
-                    acc
-                }),
             },
             Self::HEVCVideo {
                 width,
@@ -115,7 +89,6 @@ impl Stream {
                 frame_rate: *frame_rate,
                 frame_count: access_unit_counter.count(),
                 rfc6381_codec: rfc6381_codec.clone(),
-                timecodes: vec![],
             },
             Self::Other(_) => StreamInfo::Other,
         }
@@ -174,12 +147,9 @@ impl Stream {
                 rfc6381_codec,
                 is_interlaced,
                 access_unit_counter,
-                timecodes,
                 ..
             } => {
                 use h264::Decode;
-
-                let mut last_vui_parameters: Option<h264::VUIParameters> = None;
 
                 for nalu in h264::iterate_annex_b(&data) {
                     if nalu.len() == 0 {
@@ -206,19 +176,6 @@ impl Stream {
                                 0 => 0.0,
                                 num_units_in_tick @ _ => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
                             };
-                            last_vui_parameters = Some(sps.vui_parameters);
-                        }
-                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
-                            let bs = h264::Bitstream::new(nalu.iter().copied());
-                            let mut nalu = h264::NALUnit::decode(bs)?;
-
-                            if let Some(vui_params) = &last_vui_parameters {
-                                let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
-                                let sei = h264::SEIMessage::decode(&mut rbsp, &vui_params)?;
-                                if let Some(pic_timing) = sei.pic_timing {
-                                    timecodes.push(pic_timing);
-                                }
-                            }
                         }
                         _ => {}
                     }
@@ -326,7 +283,6 @@ pub enum StreamInfo {
         frame_rate: f64,
         frame_count: u64,
         rfc6381_codec: Option<String>,
-        timecodes: Vec<StreamTimecode>,
     },
     Other,
 }
@@ -443,7 +399,6 @@ impl Analyzer {
                                         is_interlaced: false,
                                         access_unit_counter: h264::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
-                                        timecodes: vec![],
                                     },
                                     0x24 => Stream::HEVCVideo {
                                         pes: pes::Stream::new(),
@@ -508,7 +463,6 @@ mod test {
                     frame_rate: 59.94,
                     frame_count: 600,
                     rfc6381_codec: Some("avc1.7a0020".to_string()),
-                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -542,7 +496,6 @@ mod test {
                     frame_rate: 29.97,
                     frame_count: 33,
                     rfc6381_codec: Some("avc1.42003c".to_string()),
-                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -576,7 +529,6 @@ mod test {
                     frame_rate: 59.94,
                     frame_count: 600,
                     rfc6381_codec: Some("hvc1.4.10.L120.9D.08".to_string()),
-                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -610,7 +562,6 @@ mod test {
                     frame_rate: 59.94,
                     frame_count: 31,
                     rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
-                    timecodes: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -644,38 +595,6 @@ mod test {
                     frame_rate: 29.97,
                     frame_count: 152,
                     rfc6381_codec: Some("avc1.4d4028".to_string()),
-                    timecodes: vec![
-                        StreamTimecode {
-                            hours: 18,
-                            minutes: 57,
-                            seconds: 26,
-                            frames: 2
-                        },
-                        StreamTimecode {
-                            hours: 18,
-                            minutes: 57,
-                            seconds: 27,
-                            frames: 2
-                        },
-                        StreamTimecode {
-                            hours: 18,
-                            minutes: 57,
-                            seconds: 28,
-                            frames: 2
-                        },
-                        StreamTimecode {
-                            hours: 18,
-                            minutes: 57,
-                            seconds: 29,
-                            frames: 2
-                        },
-                        StreamTimecode {
-                            hours: 18,
-                            minutes: 57,
-                            seconds: 30,
-                            frames: 2
-                        }
-                    ],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
