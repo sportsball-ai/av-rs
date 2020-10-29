@@ -77,7 +77,7 @@ impl Stream {
                     access_unit_counter.count()
                 },
                 rfc6381_codec: rfc6381_codec.clone(),
-                timecodes: timecodes.iter().flat_map(|t| t.timecodes.clone()).fold(vec![], |mut acc, t| {
+                timecodes: timecodes.iter().filter_map(|t| t.timecodes.iter().next()).fold(vec![], |mut acc, t| {
                     let mut timecode = StreamTimecode {
                         hours: t.hours.0,
                         minutes: t.minutes.0,
