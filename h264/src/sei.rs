@@ -148,3 +148,49 @@ impl PicTiming {
     }
   }
 }
+
+#[cfg(test)]
+mod test {
+  use super::*;
+  use crate::bitstream::Decode;
+  use crate::sequence_parameter_set::*;
+
+  #[test]
+  fn test_sei_message() {
+    let mut bs = Bitstream::new(vec![
+      0x4d, 0x40, 0x28, 0x8d, 0x95, 0x80, 0xf0, 0x8, 0x8f, 0xbc, 0x4, 0x40, 0x0, 0x0, 0xfa, 0x40, 0x0, 0x3a, 0x98, 0x25,
+    ]);
+    let sps = SequenceParameterSet::decode(&mut bs).unwrap();
+
+    let mut bs = Bitstream::new(vec![0x1, 0x9, 0x1a, 0x24, 0x2, 0x6b, 0x99, 0x0, 0x0, 0x0, 0x40, 0x80]);
+    let sei = SEIMessage::decode(&mut bs, &sps.vui_parameters).unwrap();
+
+    assert_eq!(1, sps.vui_parameters.pic_struct_present_flag.0);
+    assert_eq!(1, sei.payload_type);
+    assert_eq!(9, sei.payload_size);
+    assert_eq!(true, sei.pic_timing.is_some());
+
+    let pic_timing = sei.pic_timing.unwrap();
+    assert_eq!(0, pic_timing.cpb_removal_delay);
+    assert_eq!(0, pic_timing.dpb_output_delay);
+    assert_eq!(1, pic_timing.pic_struct.0);
+    assert_eq!(1, pic_timing.timecodes.len());
+
+    let timecode = &pic_timing.timecodes[0];
+    assert_eq!(2, timecode.n_frames.0);
+    assert_eq!(26, timecode.seconds.0);
+    assert_eq!(57, timecode.minutes.0);
+    assert_eq!(18, timecode.hours.0);
+    assert_eq!(1, timecode.clock_timestamp_flag.0);
+    assert_eq!(1, timecode.ct_type.0);
+    assert_eq!(0, timecode.nuit_field_based_flag.0);
+    assert_eq!(4, timecode.counting_type.0);
+    assert_eq!(1, timecode.full_timestamp_flag.0);
+    assert_eq!(0, timecode.discontinuity_flag.0);
+    assert_eq!(0, timecode.cnt_dropped_flag.0);
+    assert_eq!(0, timecode.seconds_flag.0);
+    assert_eq!(0, timecode.minutes_flag.0);
+    assert_eq!(0, timecode.hours_flag.0);
+    assert_eq!(0, timecode.time_offset.0);
+  }
+}
