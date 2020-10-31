@@ -147,9 +147,9 @@ impl PicTiming {
 
     pub fn num_clock_ts(&self) -> usize {
         match self.pic_struct.0 {
-            0..=2 => 1,
-            3..=6 => 2,
-            _ => 3,
+            3..=4 | 7 => 2,
+            5..=6 | 8 => 3,
+            _ => 1,
         }
     }
 }
