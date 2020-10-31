@@ -65,6 +65,41 @@ impl<T: Iterator<Item = u8>> Bitstream<T> {
         }
     }
 
+    // Reads exactly the given number of bytes into a Vec. The bitstream must be byte aligned.
+    pub fn read_bytes(&mut self, n: usize) -> io::Result<Vec<u8>> {
+        if !self.byte_aligned() {
+            return Err(io::Error::new(io::ErrorKind::Other, "bitstream is not byte aligned"));
+        }
+        let mut ret = Vec::with_capacity(n);
+        let mut read = 0;
+        while n > read && self.next_bits_length > 0 {
+            ret.push(self.read_bits(8)? as _);
+            read += 1;
+        }
+        ret.extend((&mut self.inner).take(n - read));
+        if ret.len() < n {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "unexpected end of bitstream"));
+        }
+        Ok(ret)
+    }
+
+    // Returns true if there is more RBSP data. This assumes that the rbsp_stop_one_bit has not
+    // already been consumed and that the RBSP does not have any trailing cabac_zero_words.
+    pub fn more_non_slice_rbsp_data(&mut self) -> bool {
+        match self.next_bits(1) {
+            None => false,
+            Some(0) => true,
+            Some(_) => {
+                // if there's more than one byte left, this is not the rbsp_stop_one_bit
+                self.next_bits_length > 8 
+                    // if there's more than one set bit left, this is not the rbsp_stop_one_bit
+                    || self.next_bits(self.next_bits_length) != Some(1 << (self.next_bits_length - 1))
+                    // if there is additional data after the byte alignment, this is not the rbsp_stop_one_bit
+                    || self.next_bits(self.next_bits_length + 1).is_some()
+            }
+        }
+    }
+
     pub fn into_inner(self) -> T {
         self.inner
     }
