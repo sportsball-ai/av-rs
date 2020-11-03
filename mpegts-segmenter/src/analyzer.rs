@@ -658,7 +658,7 @@ mod test {
                     timecode: Some(StreamTimecode {
                         hours: 18,
                         minutes: 57,
-                        seconds: 26,
+                        seconds: 30,
                         frames: 2
                     }),
                 },
