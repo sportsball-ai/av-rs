@@ -461,10 +461,43 @@ mod test {
         }
 
         let segments = storage.segments();
+        let timecodes = segments
+            .iter()
+            .flat_map(|(_, info)| {
+                info.streams.iter().filter_map(|stream| match stream {
+                    StreamInfo::Video { timecode, .. } => timecode.clone(),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<analyzer::StreamTimecode>>();
+
         assert_eq!(segments.len(), 3);
         assert_eq!(
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![8077.017166, 8078.602088, 8080.604088]
+        );
+        assert_eq!(
+            timecodes,
+            vec![
+                analyzer::StreamTimecode {
+                    hours: 18,
+                    minutes: 57,
+                    seconds: 26,
+                    frames: 2
+                },
+                analyzer::StreamTimecode {
+                    hours: 18,
+                    minutes: 57,
+                    seconds: 28,
+                    frames: 2
+                },
+                analyzer::StreamTimecode {
+                    hours: 18,
+                    minutes: 57,
+                    seconds: 30,
+                    frames: 2
+                }
+            ]
         );
     }
 }

@@ -30,7 +30,7 @@ pub enum Stream {
         rfc6381_codec: Option<String>,
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
-        timecode: Option<h264::Timecode>,
+        timecode: Option<StreamTimecode>,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -85,12 +85,7 @@ impl Stream {
                     access_unit_counter.count()
                 },
                 rfc6381_codec: rfc6381_codec.clone(),
-                timecode: timecode.as_ref().map(|t| StreamTimecode {
-                    hours: t.hours.0,
-                    minutes: t.minutes.0,
-                    seconds: t.seconds.0,
-                    frames: t.n_frames.0,
-                }),
+                timecode: timecode.clone(),
             },
             Self::HEVCVideo {
                 width,
@@ -199,10 +194,6 @@ impl Stream {
                             last_vui_parameters = Some(sps.vui_parameters);
                         }
                         h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
-                            if timecode.is_some() {
-                                continue;
-                            }
-
                             let bs = h264::Bitstream::new(nalu.iter().copied());
                             let mut nalu = h264::NALUnit::decode(bs)?;
 
@@ -210,17 +201,41 @@ impl Stream {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
                                 let sei = h264::SEI::decode(&mut rbsp)?;
 
-                                let first_timecode = sei
+                                let acc: Vec<StreamTimecode> = vec![];
+                                let timecodes = sei
                                     .sei_message
                                     .iter()
                                     .flat_map(|sei_message| {
                                         let mut bs = h264::Bitstream::new(sei_message.payload.iter().copied());
                                         h264::PicTiming::decode(&mut bs, &vui_params).unwrap().timecodes
                                     })
-                                    .next();
-
-                                if let Some(first_timecode) = first_timecode {
-                                    *timecode = Some(first_timecode.clone());
+                                    .fold(acc, |mut acc, t| {
+                                        let mut timecode = StreamTimecode {
+                                            hours: t.hours.0,
+                                            minutes: t.minutes.0,
+                                            seconds: t.seconds.0,
+                                            frames: t.n_frames.0,
+                                        };
+                                        if let Some(previous_timecode) = acc.iter().last() {
+                                            if t.full_timestamp_flag.0 == 0 {
+                                                if t.seconds_flag.0 == 0 {
+                                                    timecode.seconds = previous_timecode.seconds;
+                                                    timecode.minutes = previous_timecode.minutes;
+                                                    timecode.hours = previous_timecode.hours;
+                                                } else if t.minutes_flag.0 == 0 {
+                                                    timecode.minutes = previous_timecode.minutes;
+                                                    timecode.hours = previous_timecode.hours;
+                                                } else if t.hours_flag.0 == 0 {
+                                                    timecode.hours = previous_timecode.hours;
+                                                }
+                                            }
+                                        }
+                                        acc.push(timecode);
+                                        acc
+                                    });
+                                let last_timecode = timecodes.iter().last();
+                                if let Some(last_timecode) = last_timecode {
+                                    *timecode = Some(last_timecode.clone());
                                 }
                             }
                         }
