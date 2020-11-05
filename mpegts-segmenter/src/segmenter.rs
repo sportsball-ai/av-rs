@@ -157,6 +157,8 @@ impl<S: SegmentStorage> Segmenter<S> {
                     pts: None,
                     bytes_written: 0,
                 });
+
+                self.analyzer.reset_timecodes();
             }
 
             if let Some(segment) = &mut self.current_segment {
@@ -488,13 +490,13 @@ mod test {
                 analyzer::StreamTimecode {
                     hours: 18,
                     minutes: 57,
-                    seconds: 28,
+                    seconds: 27,
                     frames: 2
                 },
                 analyzer::StreamTimecode {
                     hours: 18,
                     minutes: 57,
-                    seconds: 30,
+                    seconds: 29,
                     frames: 2
                 }
             ]

@@ -193,7 +193,7 @@ impl Stream {
                             };
                             last_vui_parameters = Some(sps.vui_parameters);
                         }
-                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
+                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION if timecode.is_none() => {
                             let bs = h264::Bitstream::new(nalu.iter().copied());
                             let mut nalu = h264::NALUnit::decode(bs)?;
 
@@ -301,6 +301,15 @@ impl Stream {
             _ => {}
         }
         Ok(())
+    }
+
+    pub fn reset_timecode(&mut self) {
+        match self {
+            Self::AVCVideo { timecode, .. } => {
+                *timecode = None;
+            }
+            _ => {}
+        }
     }
 
     fn pes(&mut self) -> Option<&mut pes::Stream> {
@@ -416,6 +425,14 @@ impl Analyzer {
                 _ => None,
             })
             .collect()
+    }
+
+    pub fn reset_timecodes(&mut self) {
+        for pid in &mut self.pids {
+            if let PIDState::PES { stream } = pid {
+                stream.reset_timecode();
+            }
+        }
     }
 
     pub fn handle_packet(&mut self, packet: &ts::Packet<'_>) -> Result<()> {
@@ -658,7 +675,7 @@ mod test {
                     timecode: Some(StreamTimecode {
                         hours: 18,
                         minutes: 57,
-                        seconds: 30,
+                        seconds: 26,
                         frames: 2
                     }),
                 },
