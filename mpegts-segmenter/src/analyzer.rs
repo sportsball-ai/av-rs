@@ -30,9 +30,10 @@ pub enum Stream {
         rfc6381_codec: Option<String>,
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
+        timecode_pending: bool,
         timecode: Option<StreamTimecode>,
         last_timecode: Option<StreamTimecode>,
-        timecode_pending: bool,
+        last_vui_parameters: Option<h264::VUIParameters>,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -162,13 +163,12 @@ impl Stream {
                 is_interlaced,
                 access_unit_counter,
                 timecode,
-                last_timecode,
                 timecode_pending,
+                last_timecode,
+                last_vui_parameters,
                 ..
             } => {
                 use h264::Decode;
-
-                let mut last_vui_parameters: Option<h264::VUIParameters> = None;
 
                 for nalu in h264::iterate_annex_b(&data) {
                     if nalu.len() == 0 {
@@ -195,7 +195,7 @@ impl Stream {
                                 0 => 0.0,
                                 num_units_in_tick @ _ => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
                             };
-                            last_vui_parameters = Some(sps.vui_parameters);
+                            *last_vui_parameters = Some(sps.vui_parameters);
                         }
                         h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
                             let bs = h264::Bitstream::new(nalu.iter().copied());
@@ -479,9 +479,10 @@ impl Analyzer {
                                         is_interlaced: false,
                                         access_unit_counter: h264::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
-                                        timecode: None,
+                                        last_vui_parameters: None,
                                         last_timecode: None,
                                         timecode_pending: true,
+                                        timecode: None,
                                     },
                                     0x24 => Stream::HEVCVideo {
                                         pes: pes::Stream::new(),
