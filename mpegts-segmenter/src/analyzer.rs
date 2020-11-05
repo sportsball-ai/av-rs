@@ -31,7 +31,8 @@ pub enum Stream {
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
         timecode: Option<StreamTimecode>,
-        timecode_pending: bool
+        last_timecode: Option<StreamTimecode>,
+        timecode_pending: bool,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -161,6 +162,7 @@ impl Stream {
                 is_interlaced,
                 access_unit_counter,
                 timecode,
+                last_timecode,
                 timecode_pending,
                 ..
             } => {
@@ -195,7 +197,7 @@ impl Stream {
                             };
                             last_vui_parameters = Some(sps.vui_parameters);
                         }
-                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION if *timecode_pending => {
+                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
                             let bs = h264::Bitstream::new(nalu.iter().copied());
                             let mut nalu = h264::NALUnit::decode(bs)?;
 
@@ -203,7 +205,7 @@ impl Stream {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
                                 let sei = h264::SEI::decode(&mut rbsp)?;
 
-                                let acc: Vec<StreamTimecode> = timecode.iter().cloned().collect();
+                                let acc: Vec<StreamTimecode> = last_timecode.iter().cloned().collect();
                                 let timecodes = sei
                                     .sei_message
                                     .iter()
@@ -235,10 +237,13 @@ impl Stream {
                                         acc.push(timecode);
                                         acc
                                     });
-                                let last_timecode = timecodes.iter().last();
-                                if let Some(last_timecode) = last_timecode {
-                                    *timecode = Some(last_timecode.clone());
-                                    *timecode_pending = false;
+                                let last = timecodes.iter().last();
+                                if let Some(last) = last {
+                                    if *timecode_pending {
+                                        *timecode_pending = false;
+                                        *timecode = Some(last.clone());
+                                    }
+                                    *last_timecode = Some(last.clone());
                                 }
                             }
                         }
@@ -475,6 +480,7 @@ impl Analyzer {
                                         access_unit_counter: h264::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
                                         timecode: None,
+                                        last_timecode: None,
                                         timecode_pending: true,
                                     },
                                     0x24 => Stream::HEVCVideo {
