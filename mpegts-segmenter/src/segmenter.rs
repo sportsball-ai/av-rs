@@ -471,7 +471,7 @@ mod test {
                     _ => None,
                 })
             })
-            .collect::<Vec<analyzer::StreamTimecode>>();
+            .collect::<Vec<analyzer::Timecode>>();
 
         assert_eq!(segments.len(), 3);
         assert_eq!(
@@ -481,19 +481,19 @@ mod test {
         assert_eq!(
             timecodes,
             vec![
-                analyzer::StreamTimecode {
+                analyzer::Timecode {
                     hours: 18,
                     minutes: 57,
                     seconds: 26,
                     frames: 2
                 },
-                analyzer::StreamTimecode {
+                analyzer::Timecode {
                     hours: 18,
                     minutes: 57,
                     seconds: 27,
                     frames: 2
                 },
-                analyzer::StreamTimecode {
+                analyzer::Timecode {
                     hours: 18,
                     minutes: 57,
                     seconds: 29,

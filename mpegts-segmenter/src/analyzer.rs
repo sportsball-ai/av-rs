@@ -5,7 +5,7 @@ use std::error::Error;
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct StreamTimecode {
+pub struct Timecode {
     pub hours: u8,
     pub minutes: u8,
     pub seconds: u8,
@@ -31,8 +31,8 @@ pub enum Stream {
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
         timecode_pending: bool,
-        timecode: Option<StreamTimecode>,
-        last_timecode: Option<StreamTimecode>,
+        timecode: Option<Timecode>,
+        last_timecode: Option<Timecode>,
         last_vui_parameters: Option<h264::VUIParameters>,
     },
     HEVCVideo {
@@ -205,7 +205,7 @@ impl Stream {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
                                 let sei = h264::SEI::decode(&mut rbsp)?;
 
-                                let acc: Vec<StreamTimecode> = last_timecode.iter().cloned().collect();
+                                let acc: Vec<Timecode> = last_timecode.iter().cloned().collect();
                                 let timecodes = sei
                                     .sei_message
                                     .iter()
@@ -214,7 +214,7 @@ impl Stream {
                                         h264::PicTiming::decode(&mut bs, &vui_params).unwrap().timecodes
                                     })
                                     .fold(acc, |mut acc, t| {
-                                        let mut timecode = StreamTimecode {
+                                        let mut timecode = Timecode {
                                             hours: t.hours.0,
                                             minutes: t.minutes.0,
                                             seconds: t.seconds.0,
@@ -362,7 +362,7 @@ pub enum StreamInfo {
         frame_rate: f64,
         frame_count: u64,
         rfc6381_codec: Option<String>,
-        timecode: Option<StreamTimecode>,
+        timecode: Option<Timecode>,
     },
     Other,
 }
@@ -683,7 +683,7 @@ mod test {
                     frame_rate: 29.97,
                     frame_count: 152,
                     rfc6381_codec: Some("avc1.4d4028".to_string()),
-                    timecode: Some(StreamTimecode {
+                    timecode: Some(Timecode {
                         hours: 18,
                         minutes: 57,
                         seconds: 26,
