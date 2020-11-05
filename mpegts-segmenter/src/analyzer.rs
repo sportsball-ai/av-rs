@@ -31,6 +31,7 @@ pub enum Stream {
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
         timecode: Option<StreamTimecode>,
+        timecode_pending: bool
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -160,6 +161,7 @@ impl Stream {
                 is_interlaced,
                 access_unit_counter,
                 timecode,
+                timecode_pending,
                 ..
             } => {
                 use h264::Decode;
@@ -193,7 +195,7 @@ impl Stream {
                             };
                             last_vui_parameters = Some(sps.vui_parameters);
                         }
-                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION if timecode.is_none() => {
+                        h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION if *timecode_pending => {
                             let bs = h264::Bitstream::new(nalu.iter().copied());
                             let mut nalu = h264::NALUnit::decode(bs)?;
 
@@ -201,7 +203,7 @@ impl Stream {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
                                 let sei = h264::SEI::decode(&mut rbsp)?;
 
-                                let acc: Vec<StreamTimecode> = vec![];
+                                let acc: Vec<StreamTimecode> = timecode.iter().cloned().collect();
                                 let timecodes = sei
                                     .sei_message
                                     .iter()
@@ -236,6 +238,7 @@ impl Stream {
                                 let last_timecode = timecodes.iter().last();
                                 if let Some(last_timecode) = last_timecode {
                                     *timecode = Some(last_timecode.clone());
+                                    *timecode_pending = false;
                                 }
                             }
                         }
@@ -305,8 +308,8 @@ impl Stream {
 
     pub fn reset_timecode(&mut self) {
         match self {
-            Self::AVCVideo { timecode, .. } => {
-                *timecode = None;
+            Self::AVCVideo { timecode_pending, .. } => {
+                *timecode_pending = true;
             }
             _ => {}
         }
@@ -472,6 +475,7 @@ impl Analyzer {
                                         access_unit_counter: h264::AccessUnitCounter::new(),
                                         rfc6381_codec: None,
                                         timecode: None,
+                                        timecode_pending: true,
                                     },
                                     0x24 => Stream::HEVCVideo {
                                         pes: pes::Stream::new(),
