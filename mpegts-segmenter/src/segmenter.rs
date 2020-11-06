@@ -502,4 +502,60 @@ mod test {
             ]
         );
     }
+
+    #[tokio::test]
+    /// The file used for this test has SEI NALU's with partial PicTimings.
+    async fn test_segmenter_program_with_partial_timecodes() {
+        let mut storage = MemorySegmentStorage::new();
+
+        {
+            let mut f = File::open("src/testdata/h264-SEI.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(2),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+
+        let timecodes = segments
+            .iter()
+            .flat_map(|(_, info)| {
+                info.streams.iter().filter_map(|stream| match stream {
+                    StreamInfo::Video { timecode, .. } => timecode.clone(),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<analyzer::Timecode>>();
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(
+            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![2.4, 4.4]
+        );
+        assert_eq!(
+            timecodes,
+            vec![
+                analyzer::Timecode {
+                    hours: 0,
+                    minutes: 0,
+                    seconds: 5,
+                    frames: 24
+                },
+                analyzer::Timecode {
+                    hours: 0,
+                    minutes: 0,
+                    seconds: 7,
+                    frames: 22
+                }
+            ]
+        );
+    }
 }
