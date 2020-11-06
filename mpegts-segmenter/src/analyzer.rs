@@ -206,9 +206,9 @@ impl Stream {
                                 let acc: Vec<Timecode> = last_timecode.iter().cloned().collect();
                                 let timecodes = sei
                                     .sei_message
-                                    .iter()
+                                    .into_iter()
                                     .flat_map(|sei_message| {
-                                        let mut bs = h264::Bitstream::new(sei_message.payload.iter().copied());
+                                        let mut bs = h264::Bitstream::new(sei_message.payload);
                                         h264::PicTiming::decode(&mut bs, &vui_params).unwrap().timecodes
                                     })
                                     .fold(acc, |mut acc, t| {
