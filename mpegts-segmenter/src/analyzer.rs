@@ -218,7 +218,7 @@ impl Stream {
                                             seconds: t.seconds.0,
                                             frames: t.n_frames.0,
                                         };
-                                        if let Some(previous_timecode) = acc.iter().last() {
+                                        if let Some(previous_timecode) = acc.last() {
                                             if t.full_timestamp_flag.0 == 0 {
                                                 if t.seconds_flag.0 == 0 {
                                                     timecode.seconds = previous_timecode.seconds;
