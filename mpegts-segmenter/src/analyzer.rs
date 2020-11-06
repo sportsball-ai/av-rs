@@ -30,7 +30,6 @@ pub enum Stream {
         rfc6381_codec: Option<String>,
         is_interlaced: bool,
         access_unit_counter: h264::AccessUnitCounter,
-        timecode_pending: bool,
         timecode: Option<Timecode>,
         last_timecode: Option<Timecode>,
         last_vui_parameters: Option<h264::VUIParameters>,
@@ -163,7 +162,6 @@ impl Stream {
                 is_interlaced,
                 access_unit_counter,
                 timecode,
-                timecode_pending,
                 last_timecode,
                 last_vui_parameters,
                 ..
@@ -239,8 +237,7 @@ impl Stream {
                                     });
                                 let last = timecodes.iter().last();
                                 if let Some(last) = last {
-                                    if *timecode_pending {
-                                        *timecode_pending = false;
+                                    if timecode.is_none() {
                                         *timecode = Some(last.clone());
                                     }
                                     *last_timecode = Some(last.clone());
@@ -313,8 +310,8 @@ impl Stream {
 
     pub fn reset_timecode(&mut self) {
         match self {
-            Self::AVCVideo { timecode_pending, .. } => {
-                *timecode_pending = true;
+            Self::AVCVideo { timecode, .. } => {
+                *timecode = None;
             }
             _ => {}
         }
@@ -481,7 +478,6 @@ impl Analyzer {
                                         rfc6381_codec: None,
                                         last_vui_parameters: None,
                                         last_timecode: None,
-                                        timecode_pending: true,
                                         timecode: None,
                                     },
                                     0x24 => Stream::HEVCVideo {
