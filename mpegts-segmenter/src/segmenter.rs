@@ -157,6 +157,8 @@ impl<S: SegmentStorage> Segmenter<S> {
                     pts: None,
                     bytes_written: 0,
                 });
+
+                self.analyzer.reset_timecodes();
             }
 
             if let Some(segment) = &mut self.current_segment {
@@ -253,6 +255,7 @@ impl SegmentInfo {
                                 frame_rate,
                                 frame_count,
                                 rfc6381_codec,
+                                timecode,
                             },
                         ) => Some(StreamInfo::Video {
                             width: *width,
@@ -260,6 +263,7 @@ impl SegmentInfo {
                             frame_rate: *frame_rate,
                             frame_count: if frame_count >= prev_frame_count { frame_count - prev_frame_count } else { 0 },
                             rfc6381_codec: rfc6381_codec.clone(),
+                            timecode: timecode.clone(),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -459,10 +463,99 @@ mod test {
         }
 
         let segments = storage.segments();
+        let timecodes = segments
+            .iter()
+            .flat_map(|(_, info)| {
+                info.streams.iter().filter_map(|stream| match stream {
+                    StreamInfo::Video { timecode, .. } => timecode.clone(),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<analyzer::Timecode>>();
+
         assert_eq!(segments.len(), 3);
         assert_eq!(
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![8077.017166, 8078.602088, 8080.604088]
+        );
+        assert_eq!(
+            timecodes,
+            vec![
+                analyzer::Timecode {
+                    hours: 18,
+                    minutes: 57,
+                    seconds: 26,
+                    frames: 2
+                },
+                analyzer::Timecode {
+                    hours: 18,
+                    minutes: 57,
+                    seconds: 27,
+                    frames: 2
+                },
+                analyzer::Timecode {
+                    hours: 18,
+                    minutes: 57,
+                    seconds: 29,
+                    frames: 2
+                }
+            ]
+        );
+    }
+
+    #[tokio::test]
+    /// The file used for this test has SEI NALU's with partial PicTimings.
+    async fn test_segmenter_program_with_partial_timecodes() {
+        let mut storage = MemorySegmentStorage::new();
+
+        {
+            let mut f = File::open("src/testdata/h264-SEI.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(2),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+
+        let timecodes = segments
+            .iter()
+            .flat_map(|(_, info)| {
+                info.streams.iter().filter_map(|stream| match stream {
+                    StreamInfo::Video { timecode, .. } => timecode.clone(),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<analyzer::Timecode>>();
+
+        assert_eq!(segments.len(), 2);
+        assert_eq!(
+            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![2.4, 4.4]
+        );
+        assert_eq!(
+            timecodes,
+            vec![
+                analyzer::Timecode {
+                    hours: 0,
+                    minutes: 0,
+                    seconds: 5,
+                    frames: 24
+                },
+                analyzer::Timecode {
+                    hours: 0,
+                    minutes: 0,
+                    seconds: 7,
+                    frames: 22
+                }
+            ]
         );
     }
 }
