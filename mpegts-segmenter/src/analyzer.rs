@@ -203,38 +203,38 @@ impl Stream {
                                 let mut rbsp = h264::Bitstream::new(&mut nalu.rbsp_byte);
                                 let sei = h264::SEI::decode(&mut rbsp)?;
 
-                                let acc: Vec<Timecode> = last_timecode.iter().cloned().collect();
-                                let timecodes = sei
-                                    .sei_message
-                                    .into_iter()
-                                    .flat_map(|sei_message| {
-                                        let mut bs = h264::Bitstream::new(sei_message.payload);
-                                        h264::PicTiming::decode(&mut bs, &vui_params).unwrap().timecodes
-                                    })
-                                    .fold(acc, |mut acc, t| {
-                                        let mut timecode = Timecode {
-                                            hours: t.hours.0,
-                                            minutes: t.minutes.0,
-                                            seconds: t.seconds.0,
-                                            frames: t.n_frames.0,
-                                        };
-                                        if let Some(previous_timecode) = acc.last() {
-                                            if t.full_timestamp_flag.0 == 0 {
-                                                if t.seconds_flag.0 == 0 {
-                                                    timecode.seconds = previous_timecode.seconds;
-                                                    timecode.minutes = previous_timecode.minutes;
-                                                    timecode.hours = previous_timecode.hours;
-                                                } else if t.minutes_flag.0 == 0 {
-                                                    timecode.minutes = previous_timecode.minutes;
-                                                    timecode.hours = previous_timecode.hours;
-                                                } else if t.hours_flag.0 == 0 {
-                                                    timecode.hours = previous_timecode.hours;
-                                                }
+                                let mut pic_timings = vec![];
+                                for message in sei.sei_message {
+                                    let mut bs = h264::Bitstream::new(message.payload);
+                                    let timing = h264::PicTiming::decode(&mut bs, &vui_params)?;
+                                    pic_timings.extend_from_slice(timing.timecodes.as_slice());
+                                }
+
+                                let timecodes: Vec<Timecode> = last_timecode.iter().cloned().collect();
+                                let timecodes = pic_timings.iter().fold(timecodes, |mut timecodes, t| {
+                                    let mut timecode = Timecode {
+                                        hours: t.hours.0,
+                                        minutes: t.minutes.0,
+                                        seconds: t.seconds.0,
+                                        frames: t.n_frames.0,
+                                    };
+                                    if let Some(previous_timecode) = timecodes.last() {
+                                        if t.full_timestamp_flag.0 == 0 {
+                                            if t.seconds_flag.0 == 0 {
+                                                timecode.seconds = previous_timecode.seconds;
+                                                timecode.minutes = previous_timecode.minutes;
+                                                timecode.hours = previous_timecode.hours;
+                                            } else if t.minutes_flag.0 == 0 {
+                                                timecode.minutes = previous_timecode.minutes;
+                                                timecode.hours = previous_timecode.hours;
+                                            } else if t.hours_flag.0 == 0 {
+                                                timecode.hours = previous_timecode.hours;
                                             }
                                         }
-                                        acc.push(timecode);
-                                        acc
-                                    });
+                                    }
+                                    timecodes.push(timecode);
+                                    timecodes
+                                });
                                 let last = timecodes.iter().last();
                                 if let Some(last) = last {
                                     if timecode.is_none() {
