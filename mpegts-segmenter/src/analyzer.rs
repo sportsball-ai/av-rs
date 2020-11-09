@@ -458,39 +458,41 @@ impl Analyzer {
                     match &mut self.pids[pes.elementary_pid as usize] {
                         PIDState::PES { .. } => {}
                         state @ _ => {
-                            *state = PIDState::PES {
-                                stream: match pes.stream_type {
-                                    0x0f => Stream::ADTSAudio {
-                                        pes: pes::Stream::new(),
-                                        channel_count: 0,
-                                        sample_rate: 0,
-                                        sample_count: 0,
-                                        object_type_indication: 0x40,
-                                        rfc6381_codec: None,
-                                    },
-                                    0x1b => Stream::AVCVideo {
-                                        pes: pes::Stream::new(),
-                                        width: 0,
-                                        height: 0,
-                                        frame_rate: 0.0,
-                                        is_interlaced: false,
-                                        access_unit_counter: h264::AccessUnitCounter::new(),
-                                        rfc6381_codec: None,
-                                        last_vui_parameters: None,
-                                        last_timecode: None,
-                                        timecode: None,
-                                    },
-                                    0x24 => Stream::HEVCVideo {
-                                        pes: pes::Stream::new(),
-                                        width: 0,
-                                        height: 0,
-                                        frame_rate: 0.0,
-                                        access_unit_counter: h265::AccessUnitCounter::new(),
-                                        rfc6381_codec: None,
-                                    },
-                                    t @ _ => Stream::Other(t),
+                            let stream = match pes.stream_type {
+                                0x0f => Stream::ADTSAudio {
+                                    pes: pes::Stream::new(),
+                                    channel_count: 0,
+                                    sample_rate: 0,
+                                    sample_count: 0,
+                                    object_type_indication: 0x40,
+                                    rfc6381_codec: None,
                                 },
+                                0x1b => Stream::AVCVideo {
+                                    pes: pes::Stream::new(),
+                                    width: 0,
+                                    height: 0,
+                                    frame_rate: 0.0,
+                                    is_interlaced: false,
+                                    access_unit_counter: h264::AccessUnitCounter::new(),
+                                    rfc6381_codec: None,
+                                    last_vui_parameters: None,
+                                    last_timecode: None,
+                                    timecode: None,
+                                },
+                                0x24 => Stream::HEVCVideo {
+                                    pes: pes::Stream::new(),
+                                    width: 0,
+                                    height: 0,
+                                    frame_rate: 0.0,
+                                    access_unit_counter: h265::AccessUnitCounter::new(),
+                                    rfc6381_codec: None,
+                                },
+                                t @ _ => Stream::Other(t),
+                            };
+                            if stream.is_video() {
+                                self.has_video = true;
                             }
+                            *state = PIDState::PES { stream }
                         }
                     };
                 }
@@ -534,6 +536,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
+        assert_eq!(analyzer.has_video(), true);
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -568,6 +571,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
+        assert_eq!(analyzer.has_video(), true);
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -602,6 +606,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
+        assert_eq!(analyzer.has_video(), true);
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -636,6 +641,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
+        assert_eq!(analyzer.has_video(), true);
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -670,6 +676,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
+        assert_eq!(analyzer.has_video(), true);
         assert_eq!(
             analyzer.streams(),
             vec![

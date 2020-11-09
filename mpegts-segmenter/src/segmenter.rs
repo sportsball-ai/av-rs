@@ -299,7 +299,7 @@ mod test {
         }
 
         let segments = storage.segments();
-        assert_eq!(segments.len(), 4);
+        assert_eq!(segments.len(), 3);
         for (_, info) in segments {
             assert_eq!(info.streams.len(), 2);
             for stream in &info.streams {
