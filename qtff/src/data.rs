@@ -240,7 +240,7 @@ impl ReadData for MediaData {
                 let component_subtype = handler_reference
                     .as_ref()
                     .and_then(|v| v.component_subtype.to_string())
-                    .unwrap_or("".to_string());
+                    .unwrap_or_else(|| "".to_string());
                 match component_subtype.as_str() {
                     "vide" => Some(MediaInformationData::Video(
                         read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media video information"))?,
@@ -256,7 +256,7 @@ impl ReadData for MediaData {
                     )),
                 }
             },
-            handler_reference: handler_reference,
+            handler_reference,
             metadata: read_one(&mut reader)?,
         })
     }
@@ -346,10 +346,10 @@ impl ReadData for SampleSizeData {
                     sample_sizes: (0..number_of_entries as usize).map(|i| BigEndian::read_u32(&entry_buf[i * 4..])).collect(),
                 })
             }
-            constant_sample_size @ _ => Ok(Self {
+            constant_sample_size => Ok(Self {
+                constant_sample_size,
                 version: buf[0],
                 flags: buf[1..4].try_into().unwrap(),
-                constant_sample_size: constant_sample_size,
                 sample_count: BigEndian::read_u32(&buf[8..]),
                 sample_sizes: vec![],
             }),
@@ -1072,7 +1072,7 @@ pub struct Timecode {
 
 impl Timecode {
     pub fn frame_number(&self, fps: f64) -> i64 {
-        let abs_number = if fps.round() != fps {
+        let abs_number = if (fps.round() - fps).abs() > f64::EPSILON {
             let minutes = self.hours as u64 * 60 + self.minutes as u64;
             let ten_minutes = minutes / 10;
             let rem_minutes = minutes % 10;
@@ -1092,7 +1092,7 @@ impl Timecode {
 
     pub fn from_frame_number(n: i64, fps: f64) -> Timecode {
         let abs_number = n.abs() as u64;
-        if fps.round() != fps {
+        if (fps.round() - fps).abs() > f64::EPSILON {
             let fp10m = (fps * 600.0).round() as u64;
             let ten_minutes = abs_number / fp10m;
             let abs_number = abs_number % fp10m;
@@ -1163,7 +1163,7 @@ impl TimecodeSampleDescriptionDataEntry {
                 let fps = self.fps();
                 let mut new_frame_number = tc.frame_number(fps) + frames;
                 if (self.flags & TimecodeSampleDescriptionFlags::WrapsAt24Hours as u32) != 0 {
-                    new_frame_number = new_frame_number % (fps * 60.0 * 60.0 * 24.0).round() as i64;
+                    new_frame_number %= (fps * 60.0 * 60.0 * 24.0).round() as i64;
                 }
                 TimecodeSample::Timecode(Timecode::from_frame_number(new_frame_number, fps))
             }
@@ -1312,7 +1312,7 @@ impl<M: MediaType> SampleTableData<M> {
         Some(self.sample_to_chunk.as_ref()?.sample_chunk_info(sample, hint))
     }
 
-    pub fn sample_description<'a>(&'a self, id: u32) -> Option<&'a M::SampleDescriptionDataEntry> {
+    pub fn sample_description(&'_ self, id: u32) -> Option<&'_ M::SampleDescriptionDataEntry> {
         let sample_descriptions = &self.sample_description.as_ref()?.entries;
         if sample_descriptions.len() <= id as usize {
             return None;
@@ -1370,7 +1370,7 @@ impl<M: MediaType> ReadData for SampleDescriptionData<M> {
             reader.read_exact(&mut buf)?;
             entries.push(M::SampleDescriptionDataEntry::read(Cursor::new(buf.as_slice()))?);
         }
-        Ok(Self { entries: entries })
+        Ok(Self { entries })
     }
 }
 
@@ -1405,14 +1405,14 @@ impl MetadataData {
         let mut ret = HashMap::new();
         for (key_index, item) in self.item_list.items.iter() {
             let key_index = *key_index as usize;
-            if key_index >= self.item_keys.entries.len() + 1 {
+            if key_index > self.item_keys.entries.len() {
                 continue;
             }
-            if let Some(key) = String::from_utf8(self.item_keys.entries[key_index - 1].key_value.clone()).ok() {
+            if let Ok(key) = String::from_utf8(self.item_keys.entries[key_index - 1].key_value.clone()) {
                 ret.insert(key, &item.values);
             }
         }
-        return ret;
+        ret
     }
 }
 
@@ -1456,15 +1456,14 @@ impl ReadData for MetadataItemKeysData {
                 return Err(Error::MalformedFile("invalid metadata key size"));
             }
             let key_value_size = (key_size - 8) as usize;
-            let mut key_value = Vec::with_capacity(key_value_size);
-            key_value.resize(key_value_size, 0);
+            let mut key_value = vec![0; key_value_size];
             reader.read_exact(&mut key_value)?;
             entries.push(MetadataItemKeysDataEntry {
                 key_namespace: BigEndian::read_u32(&buf[4..]),
-                key_value: key_value,
+                key_value,
             })
         }
-        Ok(Self { entries: entries })
+        Ok(Self { entries })
     }
 }
 
@@ -1530,10 +1529,10 @@ impl ReadData for MetadataValueData {
                 76 => MetadataValue::U16(reader.read_u16::<BigEndian>()?),
                 77 => MetadataValue::U32(reader.read_u32::<BigEndian>()?),
                 78 => MetadataValue::U64(reader.read_u64::<BigEndian>()?),
-                n @ _ => {
+                n => {
                     let mut data = vec![];
                     reader.read_to_end(&mut data)?;
-                    MetadataValue::Unknown { type_indicator: n, data: data }
+                    MetadataValue::Unknown { type_indicator: n, data }
                 }
             },
         })

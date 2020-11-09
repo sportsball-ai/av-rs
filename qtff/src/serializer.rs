@@ -11,7 +11,7 @@ pub struct Serializer<W: Write> {
 
 impl<W: Write> Serializer<W> {
     pub fn new(writer: W) -> Self {
-        Serializer { writer: writer }
+        Serializer { writer }
     }
 }
 
@@ -120,7 +120,7 @@ impl<'a, W: Write> ser::Serializer for &'a mut Serializer<W> {
     }
 
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq> {
-        self.serialize_u32(len.ok_or(Error::SerializationError("unknown sequence length".to_string()))? as _)?;
+        self.serialize_u32(len.ok_or_else(|| Error::SerializationError("unknown sequence length".to_string()))? as _)?;
         Ok(self)
     }
 

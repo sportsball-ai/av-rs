@@ -59,7 +59,6 @@ impl File {
             None => {
                 let buf = self.read_moov_data()?;
                 let data = MovieData::read(Cursor::new(buf.as_slice()))?;
-                println!("data: {:?}", data);
                 self.movie_data = Some(data.clone());
                 Ok(data)
             }
@@ -72,10 +71,7 @@ impl File {
         let video_track = movie_data
             .tracks
             .iter()
-            .find(|t| match t.media.information.as_ref() {
-                Some(data::MediaInformationData::Video(_)) => true,
-                _ => false,
-            })
+            .find(|t| matches!(t.media.information.as_ref(), Some(data::MediaInformationData::Video(_))))
             .ok_or(Error::Other("no video track"))?;
 
         let video_minf = match &video_track.media.information {
@@ -274,7 +270,7 @@ impl File {
 
                                         // reduce the duration of the first sample so any samples that come after it are timed correctly
                                         if let Some(time_to_sample) = table.time_to_sample.as_mut() {
-                                            if time_to_sample.entries.len() > 0 {
+                                            if !time_to_sample.entries.is_empty() {
                                                 let first = &mut time_to_sample.entries[0];
                                                 let new_duration = first.sample_duration - offset;
                                                 if first.sample_count == 1 {
@@ -327,7 +323,7 @@ impl File {
                                 }),
                             }
                         })
-                        .unwrap_or(Ok((None, None, None, None, vec![])))?;
+                        .unwrap_or_else(|| Ok((None, None, None, None, vec![])))?;
                     mdat.append(&mut mdat_additions);
 
                     let mut trak: Vec<u8> = Vec::new();
@@ -380,9 +376,8 @@ impl File {
                                                         let mut r = atom.data(&mut r);
                                                         for atom in AtomReader::new(&mut r).collect::<Vec<_>>().drain(..) {
                                                             let atom = atom?;
-                                                            match atom.typ {
-                                                                data::SampleDescriptionData::<data::GeneralMediaType>::TYPE => atom.copy(&mut r, &mut stbl)?,
-                                                                _ => {}
+                                                            if let data::SampleDescriptionData::<data::GeneralMediaType>::TYPE = atom.typ {
+                                                                atom.copy(&mut r, &mut stbl)?
                                                             }
                                                         }
 
@@ -497,35 +492,32 @@ mod tests {
         assert_eq!(movie_data.tracks.len(), 3);
 
         for track in movie_data.tracks.iter() {
-            match track.media.information.as_ref().unwrap() {
-                data::MediaInformationData::Sound(minf) => {
-                    let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
-                    assert_eq!(
-                        &data::SoundSampleDescriptionDataEntry {
-                            data_format: 1768829492,
-                            reserved: [0, 0, 0, 0, 0, 0],
-                            data_reference_index: 1,
-                            version: data::SoundSampleDescriptionDataEntryVersion::V1(data::SoundSampleDescriptionDataEntryV1 {
-                                revision_level: 0,
-                                vendor: 0,
-                                number_of_channels: 2,
-                                sample_size: 16,
-                                compression_id: 0,
-                                packet_size: 0,
-                                sample_rate: 48000.0.into(),
-                                samples_per_packet: 1,
-                                bytes_per_packet: 3,
-                                bytes_per_frame: 6,
-                                bytes_per_sample: 2,
-                                extensions: data::SoundSampleDescriptionDataEntryExtensions {
-                                    elementary_stream_descriptor: None,
-                                },
-                            }),
-                        },
-                        desc
-                    );
-                }
-                _ => {}
+            if let data::MediaInformationData::Sound(minf) = track.media.information.as_ref().unwrap() {
+                let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
+                assert_eq!(
+                    &data::SoundSampleDescriptionDataEntry {
+                        data_format: 1768829492,
+                        reserved: [0, 0, 0, 0, 0, 0],
+                        data_reference_index: 1,
+                        version: data::SoundSampleDescriptionDataEntryVersion::V1(data::SoundSampleDescriptionDataEntryV1 {
+                            revision_level: 0,
+                            vendor: 0,
+                            number_of_channels: 2,
+                            sample_size: 16,
+                            compression_id: 0,
+                            packet_size: 0,
+                            sample_rate: 48000.0.into(),
+                            samples_per_packet: 1,
+                            bytes_per_packet: 3,
+                            bytes_per_frame: 6,
+                            bytes_per_sample: 2,
+                            extensions: data::SoundSampleDescriptionDataEntryExtensions {
+                                elementary_stream_descriptor: None,
+                            },
+                        }),
+                    },
+                    desc
+                );
             }
         }
     }

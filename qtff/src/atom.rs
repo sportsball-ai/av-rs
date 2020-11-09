@@ -98,6 +98,7 @@ impl FourCC {
 }
 
 impl FourCC {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> FourCC {
         FourCC(BigEndian::read_u32(s.as_ref()))
     }
@@ -150,7 +151,7 @@ pub struct SectionReader<R: Read + Seek> {
 impl<R: Read + Seek> SectionReader<R> {
     pub fn new(reader: R, offset: usize, len: usize) -> Self {
         Self {
-            reader: reader,
+            reader,
             begin: offset as _,
             end: (offset + len) as _,
             position: offset as _,
@@ -214,7 +215,7 @@ impl<R: Read + Seek> AtomReader<R> {
     /// Creates a new atom reader with the given reader. Atoms will be read beginning at the
     /// reader's current position.
     pub fn new(reader: R) -> Self {
-        Self { offset: None, reader: reader }
+        Self { offset: None, reader }
     }
 }
 

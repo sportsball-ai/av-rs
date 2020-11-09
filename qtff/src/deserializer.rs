@@ -11,7 +11,7 @@ pub struct Deserializer<R: Read> {
 
 impl<R: Read> Deserializer<R> {
     pub fn new(reader: R) -> Self {
-        Deserializer { reader: reader }
+        Deserializer { reader }
     }
 }
 
