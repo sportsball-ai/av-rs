@@ -1072,7 +1072,7 @@ pub struct Timecode {
 
 impl Timecode {
     pub fn frame_number(&self, fps: f64) -> i64 {
-        let abs_number = if (fps.round() - fps).abs() > f64::EPSILON {
+        let abs_number = if (fps.round() - fps).abs() > std::f64::EPSILON {
             let minutes = self.hours as u64 * 60 + self.minutes as u64;
             let ten_minutes = minutes / 10;
             let rem_minutes = minutes % 10;
@@ -1092,7 +1092,7 @@ impl Timecode {
 
     pub fn from_frame_number(n: i64, fps: f64) -> Timecode {
         let abs_number = n.abs() as u64;
-        if (fps.round() - fps).abs() > f64::EPSILON {
+        if (fps.round() - fps).abs() > std::f64::EPSILON {
             let fp10m = (fps * 600.0).round() as u64;
             let ten_minutes = abs_number / fp10m;
             let abs_number = abs_number % fp10m;
