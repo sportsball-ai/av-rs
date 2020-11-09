@@ -59,6 +59,7 @@ impl File {
             None => {
                 let buf = self.read_moov_data()?;
                 let data = MovieData::read(Cursor::new(buf.as_slice()))?;
+                println!("data: {:?}", data);
                 self.movie_data = Some(data.clone());
                 Ok(data)
             }
@@ -683,6 +684,14 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_file_h264_fragmented_mp4() {
+        let mut f = File::open("src/testdata/h264-fragmented.mp4").unwrap();
+
+        let movie_data = f.get_movie_data().unwrap();
+        assert_eq!(movie_data.tracks.len(), 2);
     }
 
     #[test]

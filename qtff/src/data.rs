@@ -127,7 +127,7 @@ pub struct MovieData {
 }
 
 impl AtomData for MovieData {
-    const TYPE: FourCC = FourCC(0x6d6f6f76);
+    const TYPE: FourCC = FourCC::MOOV;
 }
 
 impl ReadData for MovieData {
@@ -162,7 +162,7 @@ pub struct MovieHeaderData {
 }
 
 impl AtomData for MovieHeaderData {
-    const TYPE: FourCC = FourCC(0x6d766864);
+    const TYPE: FourCC = FourCC::MVHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -174,7 +174,7 @@ pub struct TrackData {
 }
 
 impl AtomData for TrackData {
-    const TYPE: FourCC = FourCC(0x7472616b);
+    const TYPE: FourCC = FourCC::TRAK;
 }
 
 impl ReadData for TrackData {
@@ -208,7 +208,7 @@ pub struct TrackHeaderData {
 }
 
 impl AtomData for TrackHeaderData {
-    const TYPE: FourCC = FourCC(0x746b6864);
+    const TYPE: FourCC = FourCC::TKHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,7 +228,7 @@ pub struct MediaData {
 }
 
 impl AtomData for MediaData {
-    const TYPE: FourCC = FourCC(0x6d646961);
+    const TYPE: FourCC = FourCC::MDIA;
 }
 
 impl ReadData for MediaData {
@@ -275,7 +275,7 @@ pub struct MediaHeaderData {
 }
 
 impl AtomData for MediaHeaderData {
-    const TYPE: FourCC = FourCC(0x6d646864);
+    const TYPE: FourCC = FourCC::MDHD;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -290,7 +290,7 @@ pub struct HandlerReferenceData {
 }
 
 impl AtomData for HandlerReferenceData {
-    const TYPE: FourCC = FourCC(0x68646c72);
+    const TYPE: FourCC = FourCC::HDLR;
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -301,7 +301,7 @@ pub struct ChunkOffset64Data {
 }
 
 impl AtomData for ChunkOffset64Data {
-    const TYPE: FourCC = FourCC(0x636f3634);
+    const TYPE: FourCC = FourCC::CO64;
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -312,7 +312,7 @@ pub struct ChunkOffsetData {
 }
 
 impl AtomData for ChunkOffsetData {
-    const TYPE: FourCC = FourCC(0x7374636f);
+    const TYPE: FourCC = FourCC::STCO;
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -325,7 +325,7 @@ pub struct SampleSizeData {
 }
 
 impl AtomData for SampleSizeData {
-    const TYPE: FourCC = FourCC(0x7374737a);
+    const TYPE: FourCC = FourCC::STSZ;
 }
 
 impl ReadData for SampleSizeData {
@@ -360,7 +360,7 @@ impl ReadData for SampleSizeData {
 impl WriteData for SampleSizeData {
     fn write<W: Write>(&self, mut writer: W) -> Result<()> {
         writer.write_u8(self.version)?;
-        writer.write(&self.flags)?;
+        writer.write_all(&self.flags)?;
         writer.write_u32::<BigEndian>(self.constant_sample_size)?;
         if self.constant_sample_size == 0 {
             writer.write_u32::<BigEndian>(self.sample_sizes.len() as _)?;
@@ -427,7 +427,7 @@ pub struct TimeToSampleData {
 }
 
 impl AtomData for TimeToSampleData {
-    const TYPE: FourCC = FourCC(0x73747473);
+    const TYPE: FourCC = FourCC::STTS;
 }
 
 impl TimeToSampleData {
@@ -494,7 +494,7 @@ pub struct SampleToChunkData {
 }
 
 impl AtomData for SampleToChunkData {
-    const TYPE: FourCC = FourCC(0x73747363);
+    const TYPE: FourCC = FourCC::STSC;
 }
 
 #[derive(Clone, Debug)]
@@ -762,7 +762,7 @@ pub struct AVCDecoderConfigurationData {
 }
 
 impl AtomData for AVCDecoderConfigurationData {
-    const TYPE: FourCC = FourCC(0x61766343);
+    const TYPE: FourCC = FourCC::AVCC;
 }
 
 impl ReadData for AVCDecoderConfigurationData {
@@ -779,7 +779,7 @@ pub struct HVCDecoderConfigurationData {
 }
 
 impl AtomData for HVCDecoderConfigurationData {
-    const TYPE: FourCC = FourCC(0x68766343);
+    const TYPE: FourCC = FourCC::HVCC;
 }
 
 impl ReadData for HVCDecoderConfigurationData {
@@ -802,7 +802,7 @@ pub struct VideoMediaInformationData {
 }
 
 impl AtomData for VideoMediaInformationData {
-    const TYPE: FourCC = FourCC(0x6d696e66);
+    const TYPE: FourCC = FourCC::MINF;
 }
 
 impl ReadData for VideoMediaInformationData {
@@ -819,7 +819,7 @@ impl ReadData for VideoMediaInformationData {
 pub struct VideoMediaInformationHeaderData {}
 
 impl AtomData for VideoMediaInformationHeaderData {
-    const TYPE: FourCC = FourCC(0x766d6864);
+    const TYPE: FourCC = FourCC::VMHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -832,7 +832,7 @@ pub struct ElementaryStreamDescriptorData {
 }
 
 impl AtomData for ElementaryStreamDescriptorData {
-    const TYPE: FourCC = FourCC(0x65736473);
+    const TYPE: FourCC = FourCC::ESDS;
 }
 
 impl ReadData for ElementaryStreamDescriptorData {
@@ -997,7 +997,7 @@ pub struct SoundMediaInformationData {
 }
 
 impl AtomData for SoundMediaInformationData {
-    const TYPE: FourCC = FourCC(0x6d696e66);
+    const TYPE: FourCC = FourCC::MINF;
 }
 
 impl ReadData for SoundMediaInformationData {
@@ -1014,7 +1014,7 @@ impl ReadData for SoundMediaInformationData {
 pub struct SoundMediaInformationHeaderData {}
 
 impl AtomData for SoundMediaInformationHeaderData {
-    const TYPE: FourCC = FourCC(0x736D6864);
+    const TYPE: FourCC = FourCC::SMHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1182,7 +1182,7 @@ pub struct BaseMediaInformationData<M: MediaType> {
 }
 
 impl<M: MediaType> AtomData for BaseMediaInformationData<M> {
-    const TYPE: FourCC = FourCC(0x6d696e66);
+    const TYPE: FourCC = FourCC::MINF;
 }
 
 impl<M: MediaType> ReadData for BaseMediaInformationData<M> {
@@ -1198,7 +1198,7 @@ impl<M: MediaType> ReadData for BaseMediaInformationData<M> {
 pub struct BaseMediaInformationHeaderData {}
 
 impl AtomData for BaseMediaInformationHeaderData {
-    const TYPE: FourCC = FourCC(0x676d6864);
+    const TYPE: FourCC = FourCC::GMHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1225,7 +1225,7 @@ impl<M: MediaType> Default for SampleTableData<M> {
 }
 
 impl<M: MediaType> AtomData for SampleTableData<M> {
-    const TYPE: FourCC = FourCC(0x7374626c);
+    const TYPE: FourCC = FourCC::STBL;
 }
 
 impl<M: MediaType> ReadData for SampleTableData<M> {
@@ -1375,7 +1375,7 @@ impl<M: MediaType> ReadData for SampleDescriptionData<M> {
 }
 
 impl<M: MediaType> AtomData for SampleDescriptionData<M> {
-    const TYPE: FourCC = FourCC(0x73747364);
+    const TYPE: FourCC = FourCC::STSD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1386,7 +1386,7 @@ pub struct MetadataData {
 }
 
 impl AtomData for MetadataData {
-    const TYPE: FourCC = FourCC(0x6d657461);
+    const TYPE: FourCC = FourCC::META;
 }
 
 impl ReadData for MetadataData {
@@ -1425,7 +1425,7 @@ pub struct MetadataHandlerData {
 }
 
 impl AtomData for MetadataHandlerData {
-    const TYPE: FourCC = FourCC(0x68646c72);
+    const TYPE: FourCC = FourCC::HDLR;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1440,7 +1440,7 @@ pub struct MetadataItemKeysData {
 }
 
 impl AtomData for MetadataItemKeysData {
-    const TYPE: FourCC = FourCC(0x6b657973);
+    const TYPE: FourCC = FourCC::KEYS;
 }
 
 impl ReadData for MetadataItemKeysData {
@@ -1541,7 +1541,7 @@ impl ReadData for MetadataValueData {
 }
 
 impl AtomData for MetadataValueData {
-    const TYPE: FourCC = FourCC(0x64617461);
+    const TYPE: FourCC = FourCC::DATA;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1563,7 +1563,7 @@ pub struct MetadataItemListData {
 }
 
 impl AtomData for MetadataItemListData {
-    const TYPE: FourCC = FourCC(0x696c7374);
+    const TYPE: FourCC = FourCC::ILST;
 }
 
 impl ReadData for MetadataItemListData {
@@ -1582,28 +1582,28 @@ impl ReadData for MetadataItemListData {
 pub struct TrackReferenceData {}
 
 impl AtomData for TrackReferenceData {
-    const TYPE: FourCC = FourCC(0x74726566);
+    const TYPE: FourCC = FourCC::TREF;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ExtendedLanguageTagData {}
 
 impl AtomData for ExtendedLanguageTagData {
-    const TYPE: FourCC = FourCC(0x656c6e67);
+    const TYPE: FourCC = FourCC::ELNG;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct DataInformationData {}
 
 impl AtomData for DataInformationData {
-    const TYPE: FourCC = FourCC(0x64696e66);
+    const TYPE: FourCC = FourCC::DINF;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct UserDataData {}
 
 impl AtomData for UserDataData {
-    const TYPE: FourCC = FourCC(0x75647461);
+    const TYPE: FourCC = FourCC::UDTA;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1612,7 +1612,7 @@ pub struct EditData {
 }
 
 impl AtomData for EditData {
-    const TYPE: FourCC = FourCC(0x65647473);
+    const TYPE: FourCC = FourCC::EDTS;
 }
 
 impl ReadData for EditData {
@@ -1647,7 +1647,7 @@ pub struct EditListData {
 }
 
 impl AtomData for EditListData {
-    const TYPE: FourCC = FourCC(0x656c7374);
+    const TYPE: FourCC = FourCC::ELST;
 }
 
 #[cfg(test)]
