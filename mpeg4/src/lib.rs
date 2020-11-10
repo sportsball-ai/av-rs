@@ -17,7 +17,7 @@ impl AVCDecoderConfigurationRecord {
         Ok(Self {
             configuration_version: match r.read_u8()? {
                 1 => 1,
-                v @ _ => return Err(io::Error::new(io::ErrorKind::Other, format!("unexpected configuration version: {}", v))),
+                v => return Err(io::Error::new(io::ErrorKind::Other, format!("unexpected configuration version: {}", v))),
             },
             avc_profile_indication: r.read_u8()?,
             profile_compatibility: r.read_u8()?,
@@ -28,8 +28,7 @@ impl AVCDecoderConfigurationRecord {
                 let mut sets = Vec::with_capacity(count as _);
                 for _ in 0..count {
                     let len = r.read_u16::<BigEndian>()? as usize;
-                    let mut sps = Vec::with_capacity(len);
-                    sps.resize(len, 0);
+                    let mut sps = vec![0; len];
                     r.read_exact(&mut sps)?;
                     sets.push(sps);
                 }
@@ -40,8 +39,7 @@ impl AVCDecoderConfigurationRecord {
                 let mut sets = Vec::with_capacity(count as _);
                 for _ in 0..count {
                     let len = r.read_u16::<BigEndian>()? as usize;
-                    let mut pps = Vec::with_capacity(len);
-                    pps.resize(len, 0);
+                    let mut pps = vec![0; len];
                     r.read_exact(&mut pps)?;
                     sets.push(pps);
                 }
@@ -77,7 +75,7 @@ impl HVCDecoderConfigurationRecord {
     pub fn decode<R: Read>(mut r: R) -> io::Result<Self> {
         let configuration_version = match r.read_u8()? {
             1 => 1,
-            v @ _ => return Err(io::Error::new(io::ErrorKind::Other, format!("unexpected configuration version: {}", v))),
+            v => return Err(io::Error::new(io::ErrorKind::Other, format!("unexpected configuration version: {}", v))),
         };
         let b = r.read_u8()?;
         let general_profile_space = b >> 6;
@@ -123,8 +121,7 @@ impl HVCDecoderConfigurationRecord {
                     let nalu_count = r.read_u16::<BigEndian>()?;
                     for _ in 0..nalu_count {
                         let len = r.read_u16::<BigEndian>()? as usize;
-                        let mut data = Vec::with_capacity(len);
-                        data.resize(len, 0);
+                        let mut data = vec![0; len];
                         r.read_exact(&mut data)?;
                         nalus.push(data);
                     }
@@ -161,7 +158,7 @@ pub struct Descriptor<'a> {
 
 impl<'a> Descriptor<'a> {
     pub fn parse(b: &'a [u8]) -> io::Result<(Self, usize)> {
-        if b.len() == 0 {
+        if b.is_empty() {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "expected tag, found eof"));
         }
         let tag = b[0];
@@ -252,7 +249,7 @@ impl<'a> DecoderConfigDescriptorData<'a> {
             object_type_indication: b[0],
             decoder_specific_info_descriptor: {
                 let b = &b[13..];
-                if b.len() == 0 {
+                if b.is_empty() {
                     None
                 } else {
                     let next = Descriptor::parse(b)?.0;

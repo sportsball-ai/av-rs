@@ -21,7 +21,7 @@ pub fn codec_from_h265_nalu<T: Iterator<Item = u8>>(mut nalu: h265::NALUnit<h265
         return Some(format!(
             "hvc1.{}{}.{:X}.{}{}.{}",
             if ptl.general_profile_space.0 > 0 {
-                (('A' as u8 + (ptl.general_profile_space.0 - 1)) as char).to_string()
+                ((b'A' + (ptl.general_profile_space.0 - 1)) as char).to_string()
             } else {
                 "".to_string()
             },
@@ -39,7 +39,7 @@ pub fn codec_from_h265_nalu<T: Iterator<Item = u8>>(mut nalu: h265::NALUnit<h265
                     (ptl.general_constraint_flags.0 >> 24) as u8,
                     (ptl.general_constraint_flags.0 >> 16) as u8,
                     (ptl.general_constraint_flags.0 >> 8) as u8,
-                    (ptl.general_constraint_flags.0 >> 0) as u8,
+                    ptl.general_constraint_flags.0 as u8,
                 ];
                 while constraint_bytes.len() > 1 && constraint_bytes.last().copied() == Some(0) {
                     constraint_bytes.pop();

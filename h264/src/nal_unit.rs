@@ -22,9 +22,9 @@ pub struct NALUnit<T> {
 impl<T: Clone> Clone for NALUnit<T> {
     fn clone(&self) -> Self {
         Self {
-            forbidden_zero_bit: self.forbidden_zero_bit.clone(),
-            nal_ref_idc: self.nal_ref_idc.clone(),
-            nal_unit_type: self.nal_unit_type.clone(),
+            forbidden_zero_bit: self.forbidden_zero_bit,
+            nal_ref_idc: self.nal_ref_idc,
+            nal_unit_type: self.nal_unit_type,
             rbsp_byte: self.rbsp_byte.clone(),
         }
     }

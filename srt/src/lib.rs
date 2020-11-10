@@ -78,7 +78,7 @@ impl API {
         let mut api = GLOBAL_API.lock().unwrap();
         let existing = (*api).as_ref().and_then(|api| api.upgrade());
         match existing {
-            Some(api) => Ok(api.clone()),
+            Some(api) => Ok(api),
             None => {
                 unsafe {
                     check_code(sys::srt_startup())?;
@@ -137,7 +137,7 @@ impl FromOption for Option<String> {
         check_code(unsafe { sys::srt_getsockopt(sock, 0, opt, buf.as_mut_ptr() as *mut _, &mut len as *mut _ as *mut _) })?;
         Ok(match len {
             0 => None,
-            len @ _ => Some(str::from_utf8(&buf[..len])?.to_string()),
+            len => Some(str::from_utf8(&buf[..len])?.to_string()),
         })
     }
 }
@@ -201,7 +201,7 @@ fn sockaddr_from_storage(storage: &sys::sockaddr_storage, len: sys::socklen_t) -
                 unsafe { u32::from_be((*(storage as *const _ as *const sockaddr_in6)).sin6_scope_id) },
             )))
         }
-        f @ _ => Err(Error::UnsupportedFamily(f)),
+        f => Err(Error::UnsupportedFamily(f)),
     }
 }
 
@@ -399,11 +399,11 @@ mod test {
             let (mut conn, _) = listener.accept().unwrap();
             let mut buf = [0; 1316];
             assert_eq!(conn.read(&mut buf).unwrap(), 3);
-            assert_eq!(&buf[0..3], "foo".as_bytes());
+            assert_eq!(&buf[0..3], b"foo");
         });
 
         let mut conn = Stream::connect("127.0.0.1:1234", &ConnectOptions::default()).unwrap();
-        assert_eq!(conn.write("foo".as_bytes()).unwrap(), 3);
+        assert_eq!(conn.write(b"foo").unwrap(), 3);
         assert_eq!(conn.id(), None);
 
         server_thread.join().unwrap();
@@ -424,7 +424,7 @@ mod test {
             let (mut conn, _) = listener.accept().unwrap();
             let mut buf = [0; 1316];
             assert_eq!(conn.read(&mut buf).unwrap(), 3);
-            assert_eq!(&buf[0..3], "foo".as_bytes());
+            assert_eq!(&buf[0..3], b"foo");
         });
 
         let mut options = ConnectOptions::default();
@@ -435,7 +435,7 @@ mod test {
 
         options.passphrase = Some("thepassphrase".to_string());
         let mut conn = Stream::connect("127.0.0.1:1236", &options).unwrap();
-        assert_eq!(conn.write("foo".as_bytes()).unwrap(), 3);
+        assert_eq!(conn.write(b"foo").unwrap(), 3);
         assert_eq!(conn.id(), options.stream_id.as_ref());
 
         server_thread.join().unwrap();

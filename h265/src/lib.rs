@@ -34,6 +34,12 @@ pub struct AccessUnitCounter {
     count: u64,
 }
 
+impl Default for AccessUnitCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AccessUnitCounter {
     pub fn new() -> Self {
         Self {

@@ -121,9 +121,8 @@ impl<S: SegmentStorage> Segmenter<S> {
                                                 let mut bs = h265::Bitstream::new(nalu.iter().copied());
                                                 let header = h265::NALUnitHeader::decode(&mut bs)?;
                                                 if header.nuh_layer_id.0 == 0 {
-                                                    match header.nal_unit_type.0 {
-                                                        16..=21 => is_keyframe = true,
-                                                        _ => {}
+                                                    if let 16..=21 = header.nal_unit_type.0 {
+                                                        is_keyframe = true
                                                     }
                                                 }
                                             }

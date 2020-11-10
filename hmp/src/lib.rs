@@ -25,7 +25,7 @@ impl Client {
     }
 
     pub fn authentication(&mut self) -> ClientAuthentication<'_> {
-        return ClientAuthentication { client: self };
+        ClientAuthentication { client: self }
     }
 
     pub async fn sections(&self, page_size: i32, page: i32) -> Result<Vec<Section>> {
@@ -37,11 +37,11 @@ impl Client {
     }
 
     pub fn section<'a>(&'a self, id: &'a str) -> ClientSection<'a> {
-        return ClientSection { client: self, id };
+        ClientSection { client: self, id }
     }
 
     pub fn player(&mut self) -> ClientPlayer<'_> {
-        return ClientPlayer { client: self };
+        ClientPlayer { client: self }
     }
 }
 

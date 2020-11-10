@@ -28,7 +28,7 @@ impl<T: Iterator<Item = u8>> Bitstream<T> {
                     return false;
                 }
             }
-            n = n % 8;
+            n %= 8;
             if n > 0 {
                 self.next_bits = match self.inner.next() {
                     Some(b) => b as u128,
@@ -190,11 +190,11 @@ impl<T: io::Write> Drop for BitstreamWriter<T> {
 }
 
 pub trait Encode: Sized {
-    fn encode<'a, T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()>;
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()>;
 }
 
 impl<T: Encode> Encode for Vec<T> {
-    fn encode<'a, U: io::Write>(&self, bs: &mut BitstreamWriter<U>) -> io::Result<()> {
+    fn encode<U: io::Write>(&self, bs: &mut BitstreamWriter<U>) -> io::Result<()> {
         for v in self {
             v.encode(bs)?;
         }
