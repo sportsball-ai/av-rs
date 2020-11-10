@@ -200,6 +200,7 @@ pub struct SliceSegmentHeader {
 #[allow(non_snake_case)]
 impl SliceSegmentHeader {
     // TODO: pps should probably be a map so we can find the correct pps based on slice_pic_parameter_set_id
+    #[allow(clippy::cognitive_complexity)]
     pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, nal_unit_type: u8, sps: &SequenceParameterSet, pps: &PictureParameterSet) -> io::Result<Self> {
         if pps.pps_range_extension_flag.0 != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "the pps range extension is not supported"));
@@ -383,6 +384,7 @@ impl SliceSegmentHeader {
     }
 
     // TODO: pps should probably be a map so we can find the correct pps based on slice_pic_parameter_set_id
+    #[allow(clippy::cognitive_complexity)]
     pub fn encode<T: io::Write>(
         &self,
         bs: &mut BitstreamWriter<T>,

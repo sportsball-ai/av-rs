@@ -290,6 +290,7 @@ impl Encode for PictureParameterSet {
 mod test {
     use super::*;
 
+    #[allow(clippy::cognitive_complexity)]
     #[test]
     fn test_picture_parameter_set() {
         {

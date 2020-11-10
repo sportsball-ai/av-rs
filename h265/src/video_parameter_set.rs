@@ -109,8 +109,8 @@ mod test {
 
         let vps = VideoParameterSet::decode(&mut bs).unwrap();
 
-        assert_eq!(0x60000000, vps.profile_tier_level.general_profile_compatibility_flags.0);
-        assert_eq!(0xb00000000000, vps.profile_tier_level.general_constraint_flags.0);
+        assert_eq!(0x6000_0000, vps.profile_tier_level.general_profile_compatibility_flags.0);
+        assert_eq!(0xb000_0000_0000, vps.profile_tier_level.general_constraint_flags.0);
         assert_eq!(0, vps.vps_timing_info_present_flag.0);
 
         let mut bs = Bitstream::new(vec![
@@ -119,8 +119,8 @@ mod test {
 
         let vps = VideoParameterSet::decode(&mut bs).unwrap();
 
-        assert_eq!(0x8000000, vps.profile_tier_level.general_profile_compatibility_flags.0);
-        assert_eq!(0x9d0800000000, vps.profile_tier_level.general_constraint_flags.0);
+        assert_eq!(0x800_0000, vps.profile_tier_level.general_profile_compatibility_flags.0);
+        assert_eq!(0x9d08_0000_0000, vps.profile_tier_level.general_constraint_flags.0);
         assert_eq!(0, vps.vps_timing_info_present_flag.0);
     }
 }
