@@ -179,8 +179,8 @@ mod test {
             PacketHeader {
                 stream_id: 0xe0,
                 optional_header: Some(OptionalHeader {
-                    pts: Some(129003),
-                    dts: Some(126000),
+                    pts: Some(129_003),
+                    dts: Some(126_000),
                 }),
                 data_length: 0,
             }

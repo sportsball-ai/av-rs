@@ -266,7 +266,7 @@ mod test {
                 length: 7,
                 discontinuity_indicator: false,
                 random_access_indicator: true,
-                program_clock_reference_27mhz: Some(18900000),
+                program_clock_reference_27mhz: Some(18_900_000),
             })
         );
 
@@ -319,6 +319,6 @@ mod test {
             }
         }
         assert_eq!(rais, 62);
-        assert_eq!(last_pcr, 286917900);
+        assert_eq!(last_pcr, 286_917_900);
     }
 }

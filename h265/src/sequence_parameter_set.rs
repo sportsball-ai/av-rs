@@ -689,8 +689,8 @@ mod test {
 
             assert_eq!(0, sps.sps_video_parameter_set_id.0);
             assert_eq!(0, sps.sps_max_sub_layers_minus1.0);
-            assert_eq!(0x60000000, sps.profile_tier_level.general_profile_compatibility_flags.0);
-            assert_eq!(0xb00000000000, sps.profile_tier_level.general_constraint_flags.0);
+            assert_eq!(0x6000_0000, sps.profile_tier_level.general_profile_compatibility_flags.0);
+            assert_eq!(0xb000_0000_0000, sps.profile_tier_level.general_constraint_flags.0);
             assert_eq!(0, sps.sps_seq_parameter_set_id.0);
             assert_eq!(1, sps.chroma_format_idc.0);
             assert_eq!(1280, sps.pic_width_in_luma_samples.0);
@@ -727,8 +727,8 @@ mod test {
 
             assert_eq!(0, sps.sps_video_parameter_set_id.0);
             assert_eq!(0, sps.sps_max_sub_layers_minus1.0);
-            assert_eq!(0x8000000, sps.profile_tier_level.general_profile_compatibility_flags.0);
-            assert_eq!(0x9d0800000000, sps.profile_tier_level.general_constraint_flags.0);
+            assert_eq!(0x0800_0000, sps.profile_tier_level.general_profile_compatibility_flags.0);
+            assert_eq!(0x9d08_0000_0000, sps.profile_tier_level.general_constraint_flags.0);
             assert_eq!(0, sps.sps_seq_parameter_set_id.0);
             assert_eq!(2, sps.chroma_format_idc.0);
             assert_eq!(1280, sps.pic_width_in_luma_samples.0);
@@ -747,7 +747,7 @@ mod test {
             assert_eq!(1, sps.vui_parameters_present_flag.0);
             assert_eq!(1, sps.vui_parameters.vui_timing_info_present_flag.0);
             assert_eq!(1001, sps.vui_parameters.vui_num_units_in_tick.0);
-            assert_eq!(60000, sps.vui_parameters.vui_time_scale.0);
+            assert_eq!(60_000, sps.vui_parameters.vui_time_scale.0);
 
             assert_eq!(bs.next_bits(1), None);
 
