@@ -321,7 +321,7 @@ mod test {
                         ..
                     } => {
                         assert_eq!(*frame_count > 0, true);
-                        assert_eq!(*frame_rate, 59.94);
+                        assert_eq!((*frame_rate - 59.94).abs() < std::f64::EPSILON, true);
                         assert_eq!(*width, 1280);
                         assert_eq!(*height, 720);
                     }
