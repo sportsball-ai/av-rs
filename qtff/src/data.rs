@@ -1052,7 +1052,7 @@ impl TimecodeSample {
             Self::Counter(ticks) => *ticks,
             Self::Timecode(tc) => {
                 ((tc.hours as u32) << 24)
-                    | (if tc.negative { 0x800000 } else { 0 })
+                    | (if tc.negative { 0x80_0000 } else { 0 })
                     | ((tc.minutes as u32) << 16)
                     | ((tc.seconds as u32) << 8)
                     | tc.frames as u32
@@ -1151,7 +1151,7 @@ impl TimecodeSampleDescriptionDataEntry {
                 let wrap = if (self.flags & TimecodeSampleDescriptionFlags::WrapsAt24Hours as u32) != 0 {
                     self.time_scale as i64 * 60 * 60 * 24 * self.number_of_frames as i64 / self.frame_duration as i64
                 } else {
-                    0xffffffff
+                    0xffff_ffff
                 };
                 if (self.flags & TimecodeSampleDescriptionFlags::Counter as u32) != 0 {
                     TimecodeSample::Counter(((ticks as i64 + (frames / self.number_of_frames as i64)) % wrap) as u32)
@@ -1667,7 +1667,7 @@ mod tests {
         let entry = VideoSampleDescriptionDataEntry::read(Cursor::new(&buf)).unwrap();
         assert_eq!(
             VideoSampleDescriptionDataEntry {
-                data_format: 1635148593,
+                data_format: 1635_148_593,
                 reserved: [0; 6],
                 data_reference_index: 1,
                 version: 0,
@@ -1717,7 +1717,7 @@ mod tests {
     #[test]
     fn test_sound_media_type() {
         let desc = SoundSampleDescriptionDataEntry {
-            data_format: 1836069985,
+            data_format: 1_836_069_985,
             reserved: [0; 6],
             data_reference_index: 1,
             version: SoundSampleDescriptionDataEntryVersion::V1(SoundSampleDescriptionDataEntryV1 {
@@ -1748,7 +1748,7 @@ mod tests {
             chunk_offset: Some(ChunkOffsetData {
                 version: 0,
                 flags: [0; 3],
-                offsets: vec![40, 623924, 1247864, 1865576, 2489396, 3107180, 3731028, 4348828, 4972704],
+                offsets: vec![40, 623_924, 1_247_864, 1_865_576, 2_489_396, 3_107_180, 3_731_028, 4_348_828, 4_972_704],
             }),
             chunk_offset_64: None,
             sample_size: Some(SampleSizeData {
@@ -1756,7 +1756,7 @@ mod tests {
                 flags: [9, 85, 12],
                 constant_sample_size: 0,
                 sample_count: 9,
-                sample_sizes: vec![611596, 611652, 611568, 611532, 611640, 611560, 611656, 611588, 611544],
+                sample_sizes: vec![611_596, 611_652, 611_568, 611_532, 611_640, 611_560, 611_656, 611_588, 611_544],
             }),
             sample_to_chunk: Some(SampleToChunkData {
                 version: 0,
@@ -1770,7 +1770,7 @@ mod tests {
         };
 
         assert_eq!(
-            vec![40, 623924, 1247864, 1865576, 2489396, 3107180, 3731028, 4348828, 4972704],
+            vec![40, 623_924, 1_247_864, 1_865_576, 2_489_396, 3_107_180, 3_731_028, 4_348_828, 4_972_704],
             table.iter_chunk_offsets().unwrap().collect::<Vec<u64>>()
         );
 
@@ -1780,7 +1780,7 @@ mod tests {
             chunk_offset: Some(ChunkOffsetData {
                 version: 0,
                 flags: [0; 3],
-                offsets: vec![611636, 1235576, 1859432, 2477108, 3101036, 3718740, 4342684, 4960416, 5584248],
+                offsets: vec![611_636, 1_235_576, 1_859_432, 2_477_108, 3_101_036, 3_718_740, 4_342_684, 4_960_416, 5_584_248],
             }),
             chunk_offset_64: None,
             sample_size: Some(SampleSizeData {
@@ -1834,7 +1834,7 @@ mod tests {
         };
 
         assert_eq!(
-            vec![611636, 1235576, 1859432, 2477108, 3101036, 3718740, 4342684, 4960416, 5584248],
+            vec![611636, 1_235_576, 1_859_432, 2_477_108, 3_101_036, 3_718_740, 4_342_684, 4_960_416, 5_584_248],
             table.iter_chunk_offsets().unwrap().collect::<Vec<u64>>()
         );
         assert_eq!(2048 + 2048 + 1024 + 2048 + 1024 + 2048 + 1024 + 2048 + 2048, table.sample_count());
@@ -1978,7 +1978,7 @@ mod tests {
                 seconds: 59,
                 frames: 28
             },
-            Timecode::from_frame_number(17980, 29.97)
+            Timecode::from_frame_number(17_980, 29.97)
         );
         assert_eq!(
             Timecode {
@@ -1988,7 +1988,7 @@ mod tests {
                 seconds: 0,
                 frames: 0
             },
-            Timecode::from_frame_number(17982, 29.97)
+            Timecode::from_frame_number(17_982, 29.97)
         );
 
         assert_eq!(
@@ -2136,7 +2136,7 @@ mod tests {
             71 * 60 * 24 + 2
         );
 
-        for frame in -300000..300000 {
+        for frame in -300_000..300_000 {
             let tc = Timecode::from_frame_number(frame, 29.97);
             assert_eq!(frame, tc.frame_number(29.97));
 

@@ -496,7 +496,7 @@ mod tests {
                 let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
                 assert_eq!(
                     &data::SoundSampleDescriptionDataEntry {
-                        data_format: 1768829492,
+                        data_format: 1_768_829_492,
                         reserved: [0, 0, 0, 0, 0, 0],
                         data_reference_index: 1,
                         version: data::SoundSampleDescriptionDataEntryVersion::V1(data::SoundSampleDescriptionDataEntryV1 {
@@ -506,7 +506,7 @@ mod tests {
                             sample_size: 16,
                             compression_id: 0,
                             packet_size: 0,
-                            sample_rate: 48000.0.into(),
+                            sample_rate: 48_000.0.into(),
                             samples_per_packet: 1,
                             bytes_per_packet: 3,
                             bytes_per_frame: 6,
@@ -548,11 +548,11 @@ mod tests {
                 ("lens_type", data::MetadataValue::String("Sigma or Tamron 24-70mm f/2.8".to_string())),
                 ("camera_number", data::MetadataValue::String("A".to_string())),
                 ("aspect_ratio", data::MetadataValue::String("2.40:1".to_string())),
-                ("tone_curve_contrast", data::MetadataValue::F32(1.410178)),
+                ("tone_curve_contrast", data::MetadataValue::F32(1.410_178)),
                 ("tone_curve_saturation", data::MetadataValue::F32(1.0)),
-                ("tone_curve_midpoint", data::MetadataValue::F32(0.409008)),
-                ("tone_curve_highlights", data::MetadataValue::F32(0.221778)),
-                ("tone_curve_shadows", data::MetadataValue::F32(1.633367)),
+                ("tone_curve_midpoint", data::MetadataValue::F32(0.409_008)),
+                ("tone_curve_highlights", data::MetadataValue::F32(0.221_778)),
+                ("tone_curve_shadows", data::MetadataValue::F32(1.633_367)),
                 ("tone_curve_video_black_level", data::MetadataValue::U16(0)),
                 ("post_3dlut_mode", data::MetadataValue::String("Disabled".to_string())),
                 ("viewing_gamma", data::MetadataValue::String("Blackmagic Design Extended Video".to_string())),
@@ -650,7 +650,7 @@ mod tests {
                 let desc = &minf.sample_table.as_ref().unwrap().sample_description.as_ref().unwrap().entries[0];
                 assert_eq!(
                     &data::SoundSampleDescriptionDataEntry {
-                        data_format: 1836069985,
+                        data_format: 1_836_069_985,
                         reserved: [0, 0, 0, 0, 0, 0],
                         data_reference_index: 1,
                         version: data::SoundSampleDescriptionDataEntryVersion::V0(data::SoundSampleDescriptionDataEntryV0 {
