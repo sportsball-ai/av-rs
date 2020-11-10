@@ -134,19 +134,19 @@ impl Stream {
                         c => c as _,
                     };
                     *sample_rate = match (data[2] >> 2) & 0x0f {
-                        0 => 96000,
-                        1 => 88200,
-                        2 => 64000,
-                        3 => 48000,
-                        4 => 44100,
-                        5 => 32000,
-                        6 => 24000,
-                        7 => 22050,
-                        8 => 16000,
-                        9 => 12000,
-                        10 => 11025,
-                        11 => 8000,
-                        12 => 7350,
+                        0 => 96_000,
+                        1 => 88_200,
+                        2 => 64_000,
+                        3 => 48_000,
+                        4 => 44_100,
+                        5 => 32_000,
+                        6 => 24_000,
+                        7 => 22_050,
+                        8 => 16_000,
+                        9 => 12_000,
+                        10 => 11_025,
+                        11 => 8_000,
+                        12 => 7_350,
                         _ => 0,
                     };
                     if (data[1] & 0x08) == 0 {
@@ -552,8 +552,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 481280,
+                    sample_rate: 48_000,
+                    sample_count: 481_280,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
@@ -587,8 +587,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 81920,
+                    sample_rate: 48_000,
+                    sample_count: 81_920,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
@@ -622,8 +622,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 481280,
+                    sample_rate: 48_000,
+                    sample_count: 481_280,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
@@ -697,8 +697,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 243712,
+                    sample_rate: 48_000,
+                    sample_count: 243_712,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
