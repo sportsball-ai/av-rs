@@ -163,6 +163,7 @@ impl File {
         (dest, mdat)
     }
 
+    #[allow(clippy::cognitive_complexity)]
     pub fn trim<W: Write>(&mut self, mut w: W, time_scale: u32, start: u64, duration: u64) -> Result<()> {
         let mut moov: Vec<u8> = Vec::new();
         let mut mdat: Vec<Data> = Vec::new();

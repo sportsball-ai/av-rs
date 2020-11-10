@@ -32,9 +32,7 @@ jobs:
         command: build
         args: --verbose
     - name: Lint
-      uses: actions-rs/clippy@master
-      with:
-        args: --all-targets -- --deny warnings
+      run: cargo clippy --all-targets -- --deny warnings
     - name: Test
       uses: actions-rs/cargo@v1
       with:

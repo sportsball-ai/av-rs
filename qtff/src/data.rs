@@ -70,13 +70,13 @@ pub struct FixedPoint16(f32);
 
 impl ser::Serialize for FixedPoint16 {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_u16((self.0 * (0x100 as f32)) as _)
+        serializer.serialize_u16((self.0 * 256_f32) as _)
     }
 }
 
 impl<'de> de::Deserialize<'de> for FixedPoint16 {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<FixedPoint16, D::Error> {
-        Ok(((u16::deserialize(deserializer)? as f32) / (0x100 as f32)).into())
+        Ok(((u16::deserialize(deserializer)? as f32) / 256_f32).into())
     }
 }
 
@@ -97,13 +97,13 @@ pub struct FixedPoint32(f32);
 
 impl ser::Serialize for FixedPoint32 {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_u32((self.0 * (0x10000 as f32)) as _)
+        serializer.serialize_u32((self.0 * (65536_f32)) as _)
     }
 }
 
 impl<'de> de::Deserialize<'de> for FixedPoint32 {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<FixedPoint32, D::Error> {
-        Ok(((u32::deserialize(deserializer)? as f32) / (0x10000 as f32)).into())
+        Ok(((u32::deserialize(deserializer)? as f32) / 65536_f32).into())
     }
 }
 
@@ -379,10 +379,13 @@ impl SampleSizeData {
     pub fn sample_size(&self, n: u64) -> Option<u32> {
         let n = n as usize;
         match self.constant_sample_size {
-            0 => match n < self.sample_sizes.len() {
-                true => Some(self.sample_sizes[n]),
-                false => None,
-            },
+            0 => {
+                if n < self.sample_sizes.len() {
+                    Some(self.sample_sizes[n])
+                } else {
+                    None
+                }
+            }
             _ => Some(self.constant_sample_size),
         }
     }
@@ -1667,7 +1670,7 @@ mod tests {
         let entry = VideoSampleDescriptionDataEntry::read(Cursor::new(&buf)).unwrap();
         assert_eq!(
             VideoSampleDescriptionDataEntry {
-                data_format: 1635_148_593,
+                data_format: 1_635_148_593,
                 reserved: [0; 6],
                 data_reference_index: 1,
                 version: 0,
@@ -1834,7 +1837,7 @@ mod tests {
         };
 
         assert_eq!(
-            vec![611636, 1_235_576, 1_859_432, 2_477_108, 3_101_036, 3_718_740, 4_342_684, 4_960_416, 5_584_248],
+            vec![611_636, 1_235_576, 1_859_432, 2_477_108, 3_101_036, 3_718_740, 4_342_684, 4_960_416, 5_584_248],
             table.iter_chunk_offsets().unwrap().collect::<Vec<u64>>()
         );
         assert_eq!(2048 + 2048 + 1024 + 2048 + 1024 + 2048 + 1024 + 2048 + 2048, table.sample_count());
