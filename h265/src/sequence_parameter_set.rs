@@ -676,6 +676,7 @@ impl Encode for VUIParameters {
 mod test {
     use super::*;
 
+    #[allow(clippy::cognitive_complexity)]
     #[test]
     fn test_sequence_parameter_set() {
         {
