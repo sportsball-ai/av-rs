@@ -121,9 +121,8 @@ impl<S: SegmentStorage> Segmenter<S> {
                                                 let mut bs = h265::Bitstream::new(nalu.iter().copied());
                                                 let header = h265::NALUnitHeader::decode(&mut bs)?;
                                                 if header.nuh_layer_id.0 == 0 {
-                                                    match header.nal_unit_type.0 {
-                                                        16..=21 => is_keyframe = true,
-                                                        _ => {}
+                                                    if let 16..=21 = header.nal_unit_type.0 {
+                                                        is_keyframe = true
                                                     }
                                                 }
                                             }
@@ -322,7 +321,7 @@ mod test {
                         ..
                     } => {
                         assert_eq!(*frame_count > 0, true);
-                        assert_eq!(*frame_rate, 59.94);
+                        assert_eq!((*frame_rate - 59.94).abs() < std::f64::EPSILON, true);
                         assert_eq!(*width, 1280);
                         assert_eq!(*height, 720);
                     }
@@ -355,7 +354,7 @@ mod test {
         assert_eq!(segments.len(), 2);
         assert_eq!(
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
-            vec![924.279588, 925.280344]
+            vec![924.279_588, 925.280_344]
         );
     }
 
@@ -382,7 +381,7 @@ mod test {
         assert_eq!(segments.len(), 2);
         assert_eq!(
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
-            vec![731.629855, 732.631]
+            vec![731.629_855, 732.631]
         );
     }
 
@@ -412,31 +411,31 @@ mod test {
         assert_eq!(
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![
-                1.423222,
-                2.423222,
-                3.423222,
-                4.423222,
-                5.423222,
-                6.423222,
-                7.423222,
-                8.423221999999999,
-                9.423221999999999,
-                10.423221999999999,
-                11.423221999999999,
-                12.423221999999999,
-                13.423221999999999,
-                14.423221999999999,
-                1.423222,
-                2.423222,
-                3.423222,
-                4.423222,
-                5.423222,
-                6.423222,
-                7.423222,
-                8.423221999999999,
-                9.423221999999999,
-                10.423221999999999,
-                11.423221999999999,
+                1.423_222,
+                2.423_222,
+                3.423_222,
+                4.423_222,
+                5.423_222,
+                6.423_222,
+                7.423_222,
+                8.423_221_999_999_999,
+                9.423_221_999_999_999,
+                10.423_221_999_999_999,
+                11.423_221_999_999_999,
+                12.423_221_999_999_999,
+                13.423_221_999_999_999,
+                14.423_221_999_999_999,
+                1.423_222,
+                2.423_222,
+                3.423_222,
+                4.423_222,
+                5.423_222,
+                6.423_222,
+                7.423_222,
+                8.423_221_999_999_999,
+                9.423_221_999_999_999,
+                10.423_221_999_999_999,
+                11.423_221_999_999_999,
             ]
         );
     }
@@ -476,7 +475,7 @@ mod test {
         assert_eq!(segments.len(), 3);
         assert_eq!(
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
-            vec![8077.017166, 8078.602088, 8080.604088]
+            vec![8_077.017_166, 8_078.602_088, 8_080.604_088]
         );
         assert_eq!(
             timecodes,

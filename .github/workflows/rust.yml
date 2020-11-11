@@ -24,14 +24,18 @@ jobs:
       uses: actions-rs/toolchain@v1
       with:
         toolchain: 1.42.0
+        components: clippy
         override: true
     - name: Build
       uses: actions-rs/cargo@v1
       with:
         command: build
         args: --verbose
+    - name: Lint
+      run: cargo clippy --all-targets -- --deny warnings
     - name: Test
       uses: actions-rs/cargo@v1
       with:
         command: test
         args: --verbose
+

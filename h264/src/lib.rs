@@ -27,7 +27,7 @@ pub struct AVCCIter<'a> {
     nalu_length_size: usize,
 }
 
-pub fn iterate_avcc<'a, T: AsRef<[u8]>>(buf: &'a T, nalu_length_size: usize) -> AVCCIter<'a> {
+pub fn iterate_avcc<T: AsRef<[u8]>>(buf: &'_ T, nalu_length_size: usize) -> AVCCIter<'_> {
     AVCCIter {
         buf: buf.as_ref(),
         nalu_length_size,
@@ -61,7 +61,7 @@ pub struct AnnexBIter<'a> {
     buf: &'a [u8],
 }
 
-pub fn iterate_annex_b<'a, T: AsRef<[u8]>>(buf: &'a T) -> AnnexBIter<'a> {
+pub fn iterate_annex_b<T: AsRef<[u8]>>(buf: &'_ T) -> AnnexBIter<'_> {
     AnnexBIter { buf: buf.as_ref() }
 }
 
@@ -75,7 +75,7 @@ impl<'a> Iterator for AnnexBIter<'a> {
             loop {
                 if len == 0 || self.buf[pos] != 0 {
                     return None;
-                } else if len >= 3 && self.buf[pos + 0] == 0 && self.buf[pos + 1] == 0 && self.buf[pos + 2] == 1 {
+                } else if len >= 3 && self.buf[pos] == 0 && self.buf[pos + 1] == 0 && self.buf[pos + 2] == 1 {
                     break;
                 }
                 pos += 1;
@@ -88,7 +88,7 @@ impl<'a> Iterator for AnnexBIter<'a> {
             let nalu = pos;
 
             loop {
-                if len == 0 || (len >= 3 && self.buf[pos + 0] == 0 && self.buf[pos + 1] == 0 && self.buf[pos + 2] <= 1) {
+                if len == 0 || (len >= 3 && self.buf[pos] == 0 && self.buf[pos + 1] == 0 && self.buf[pos + 2] <= 1) {
                     let ret = &self.buf[nalu..pos];
                     self.buf = &self.buf[pos..];
                     return Some(ret);
@@ -184,6 +184,12 @@ pub struct AccessUnitCounter {
     prev_frame_num: u64,
 }
 
+impl Default for AccessUnitCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AccessUnitCounter {
     pub fn new() -> Self {
         Self {
@@ -230,15 +236,12 @@ impl AccessUnitCounter {
             _ => {}
         }
 
-        match nalu_type {
-            NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
-                let bs = Bitstream::new(nalu.iter().copied());
-                let mut nalu = NALUnit::decode(bs)?;
-                let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
-                let sps = SequenceParameterSet::decode(&mut rbsp)?;
-                self.sps = Some(sps);
-            }
-            _ => {}
+        if let NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET = nalu_type {
+            let bs = Bitstream::new(nalu.iter().copied());
+            let mut nalu = NALUnit::decode(bs)?;
+            let mut rbsp = Bitstream::new(&mut nalu.rbsp_byte);
+            let sps = SequenceParameterSet::decode(&mut rbsp)?;
+            self.sps = Some(sps);
         }
 
         Ok(())

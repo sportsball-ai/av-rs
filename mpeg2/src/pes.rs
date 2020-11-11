@@ -44,7 +44,7 @@ impl PacketHeader {
                 optional_header,
                 data_length: match packet_length {
                     0 => 0,
-                    l @ _ => l - optional_header_length,
+                    l => l - optional_header_length,
                 },
             },
             data_offset,
@@ -99,6 +99,12 @@ impl OptionalHeader {
 #[derive(Clone)]
 pub struct Stream {
     pending: Option<Packet>,
+}
+
+impl Default for Stream {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Stream {
@@ -173,8 +179,8 @@ mod test {
             PacketHeader {
                 stream_id: 0xe0,
                 optional_header: Some(OptionalHeader {
-                    pts: Some(129003),
-                    dts: Some(126000),
+                    pts: Some(129_003),
+                    dts: Some(126_000),
                 }),
                 data_length: 0,
             }

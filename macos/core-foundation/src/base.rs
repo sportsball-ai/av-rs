@@ -1,6 +1,7 @@
 use super::sys;
 use std::{error::Error, ffi::CStr, fmt};
 
+#[allow(clippy::missing_safety_doc)]
 pub trait CFType {
     unsafe fn with_cf_type_ref(cf: sys::CFTypeRef) -> Self;
     unsafe fn cf_type_ref(&self) -> sys::CFTypeRef;

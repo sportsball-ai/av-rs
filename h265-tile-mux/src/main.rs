@@ -40,7 +40,7 @@ fn main() -> Result<(), BoxError> {
     let inputs = matches
         .values_of("input")
         .unwrap()
-        .map(|path| File::open(path))
+        .map(File::open)
         .collect::<Result<Vec<_>, _>>()?;
 
     let selection = matches
@@ -58,7 +58,7 @@ fn main() -> Result<(), BoxError> {
 
     let output = File::create(matches.value_of("output").unwrap())?;
 
-    mux(inputs.into_iter().map(|f| h265::read_annex_b(f)), &selection, output)?;
+    mux(inputs.into_iter().map(h265::read_annex_b), &selection, output)?;
 
     Ok(())
 }

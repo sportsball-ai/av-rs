@@ -70,13 +70,13 @@ pub struct FixedPoint16(f32);
 
 impl ser::Serialize for FixedPoint16 {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_u16((self.0 * (0x100 as f32)) as _)
+        serializer.serialize_u16((self.0 * 256_f32) as _)
     }
 }
 
 impl<'de> de::Deserialize<'de> for FixedPoint16 {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<FixedPoint16, D::Error> {
-        Ok(((u16::deserialize(deserializer)? as f32) / (0x100 as f32)).into())
+        Ok(((u16::deserialize(deserializer)? as f32) / 256_f32).into())
     }
 }
 
@@ -97,13 +97,13 @@ pub struct FixedPoint32(f32);
 
 impl ser::Serialize for FixedPoint32 {
     fn serialize<S: ser::Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_u32((self.0 * (0x10000 as f32)) as _)
+        serializer.serialize_u32((self.0 * (65536_f32)) as _)
     }
 }
 
 impl<'de> de::Deserialize<'de> for FixedPoint32 {
     fn deserialize<D: de::Deserializer<'de>>(deserializer: D) -> std::result::Result<FixedPoint32, D::Error> {
-        Ok(((u32::deserialize(deserializer)? as f32) / (0x10000 as f32)).into())
+        Ok(((u32::deserialize(deserializer)? as f32) / 65536_f32).into())
     }
 }
 
@@ -127,7 +127,7 @@ pub struct MovieData {
 }
 
 impl AtomData for MovieData {
-    const TYPE: FourCC = FourCC(0x6d6f6f76);
+    const TYPE: FourCC = FourCC::MOOV;
 }
 
 impl ReadData for MovieData {
@@ -162,7 +162,7 @@ pub struct MovieHeaderData {
 }
 
 impl AtomData for MovieHeaderData {
-    const TYPE: FourCC = FourCC(0x6d766864);
+    const TYPE: FourCC = FourCC::MVHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -174,7 +174,7 @@ pub struct TrackData {
 }
 
 impl AtomData for TrackData {
-    const TYPE: FourCC = FourCC(0x7472616b);
+    const TYPE: FourCC = FourCC::TRAK;
 }
 
 impl ReadData for TrackData {
@@ -208,7 +208,7 @@ pub struct TrackHeaderData {
 }
 
 impl AtomData for TrackHeaderData {
-    const TYPE: FourCC = FourCC(0x746b6864);
+    const TYPE: FourCC = FourCC::TKHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,7 +228,7 @@ pub struct MediaData {
 }
 
 impl AtomData for MediaData {
-    const TYPE: FourCC = FourCC(0x6d646961);
+    const TYPE: FourCC = FourCC::MDIA;
 }
 
 impl ReadData for MediaData {
@@ -240,7 +240,7 @@ impl ReadData for MediaData {
                 let component_subtype = handler_reference
                     .as_ref()
                     .and_then(|v| v.component_subtype.to_string())
-                    .unwrap_or("".to_string());
+                    .unwrap_or_else(|| "".to_string());
                 match component_subtype.as_str() {
                     "vide" => Some(MediaInformationData::Video(
                         read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media video information"))?,
@@ -256,7 +256,7 @@ impl ReadData for MediaData {
                     )),
                 }
             },
-            handler_reference: handler_reference,
+            handler_reference,
             metadata: read_one(&mut reader)?,
         })
     }
@@ -275,7 +275,7 @@ pub struct MediaHeaderData {
 }
 
 impl AtomData for MediaHeaderData {
-    const TYPE: FourCC = FourCC(0x6d646864);
+    const TYPE: FourCC = FourCC::MDHD;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -290,7 +290,7 @@ pub struct HandlerReferenceData {
 }
 
 impl AtomData for HandlerReferenceData {
-    const TYPE: FourCC = FourCC(0x68646c72);
+    const TYPE: FourCC = FourCC::HDLR;
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
@@ -301,7 +301,7 @@ pub struct ChunkOffset64Data {
 }
 
 impl AtomData for ChunkOffset64Data {
-    const TYPE: FourCC = FourCC(0x636f3634);
+    const TYPE: FourCC = FourCC::CO64;
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -312,7 +312,7 @@ pub struct ChunkOffsetData {
 }
 
 impl AtomData for ChunkOffsetData {
-    const TYPE: FourCC = FourCC(0x7374636f);
+    const TYPE: FourCC = FourCC::STCO;
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -325,7 +325,7 @@ pub struct SampleSizeData {
 }
 
 impl AtomData for SampleSizeData {
-    const TYPE: FourCC = FourCC(0x7374737a);
+    const TYPE: FourCC = FourCC::STSZ;
 }
 
 impl ReadData for SampleSizeData {
@@ -346,10 +346,10 @@ impl ReadData for SampleSizeData {
                     sample_sizes: (0..number_of_entries as usize).map(|i| BigEndian::read_u32(&entry_buf[i * 4..])).collect(),
                 })
             }
-            constant_sample_size @ _ => Ok(Self {
+            constant_sample_size => Ok(Self {
+                constant_sample_size,
                 version: buf[0],
                 flags: buf[1..4].try_into().unwrap(),
-                constant_sample_size: constant_sample_size,
                 sample_count: BigEndian::read_u32(&buf[8..]),
                 sample_sizes: vec![],
             }),
@@ -360,7 +360,7 @@ impl ReadData for SampleSizeData {
 impl WriteData for SampleSizeData {
     fn write<W: Write>(&self, mut writer: W) -> Result<()> {
         writer.write_u8(self.version)?;
-        writer.write(&self.flags)?;
+        writer.write_all(&self.flags)?;
         writer.write_u32::<BigEndian>(self.constant_sample_size)?;
         if self.constant_sample_size == 0 {
             writer.write_u32::<BigEndian>(self.sample_sizes.len() as _)?;
@@ -379,10 +379,13 @@ impl SampleSizeData {
     pub fn sample_size(&self, n: u64) -> Option<u32> {
         let n = n as usize;
         match self.constant_sample_size {
-            0 => match n < self.sample_sizes.len() {
-                true => Some(self.sample_sizes[n]),
-                false => None,
-            },
+            0 => {
+                if n < self.sample_sizes.len() {
+                    Some(self.sample_sizes[n])
+                } else {
+                    None
+                }
+            }
             _ => Some(self.constant_sample_size),
         }
     }
@@ -427,7 +430,7 @@ pub struct TimeToSampleData {
 }
 
 impl AtomData for TimeToSampleData {
-    const TYPE: FourCC = FourCC(0x73747473);
+    const TYPE: FourCC = FourCC::STTS;
 }
 
 impl TimeToSampleData {
@@ -494,7 +497,7 @@ pub struct SampleToChunkData {
 }
 
 impl AtomData for SampleToChunkData {
-    const TYPE: FourCC = FourCC(0x73747363);
+    const TYPE: FourCC = FourCC::STSC;
 }
 
 #[derive(Clone, Debug)]
@@ -762,7 +765,7 @@ pub struct AVCDecoderConfigurationData {
 }
 
 impl AtomData for AVCDecoderConfigurationData {
-    const TYPE: FourCC = FourCC(0x61766343);
+    const TYPE: FourCC = FourCC::AVCC;
 }
 
 impl ReadData for AVCDecoderConfigurationData {
@@ -779,7 +782,7 @@ pub struct HVCDecoderConfigurationData {
 }
 
 impl AtomData for HVCDecoderConfigurationData {
-    const TYPE: FourCC = FourCC(0x68766343);
+    const TYPE: FourCC = FourCC::HVCC;
 }
 
 impl ReadData for HVCDecoderConfigurationData {
@@ -802,7 +805,7 @@ pub struct VideoMediaInformationData {
 }
 
 impl AtomData for VideoMediaInformationData {
-    const TYPE: FourCC = FourCC(0x6d696e66);
+    const TYPE: FourCC = FourCC::MINF;
 }
 
 impl ReadData for VideoMediaInformationData {
@@ -819,7 +822,7 @@ impl ReadData for VideoMediaInformationData {
 pub struct VideoMediaInformationHeaderData {}
 
 impl AtomData for VideoMediaInformationHeaderData {
-    const TYPE: FourCC = FourCC(0x766d6864);
+    const TYPE: FourCC = FourCC::VMHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -832,7 +835,7 @@ pub struct ElementaryStreamDescriptorData {
 }
 
 impl AtomData for ElementaryStreamDescriptorData {
-    const TYPE: FourCC = FourCC(0x65736473);
+    const TYPE: FourCC = FourCC::ESDS;
 }
 
 impl ReadData for ElementaryStreamDescriptorData {
@@ -997,7 +1000,7 @@ pub struct SoundMediaInformationData {
 }
 
 impl AtomData for SoundMediaInformationData {
-    const TYPE: FourCC = FourCC(0x6d696e66);
+    const TYPE: FourCC = FourCC::MINF;
 }
 
 impl ReadData for SoundMediaInformationData {
@@ -1014,7 +1017,7 @@ impl ReadData for SoundMediaInformationData {
 pub struct SoundMediaInformationHeaderData {}
 
 impl AtomData for SoundMediaInformationHeaderData {
-    const TYPE: FourCC = FourCC(0x736D6864);
+    const TYPE: FourCC = FourCC::SMHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1052,7 +1055,7 @@ impl TimecodeSample {
             Self::Counter(ticks) => *ticks,
             Self::Timecode(tc) => {
                 ((tc.hours as u32) << 24)
-                    | (if tc.negative { 0x800000 } else { 0 })
+                    | (if tc.negative { 0x80_0000 } else { 0 })
                     | ((tc.minutes as u32) << 16)
                     | ((tc.seconds as u32) << 8)
                     | tc.frames as u32
@@ -1072,7 +1075,7 @@ pub struct Timecode {
 
 impl Timecode {
     pub fn frame_number(&self, fps: f64) -> i64 {
-        let abs_number = if fps.round() != fps {
+        let abs_number = if (fps.round() - fps).abs() > std::f64::EPSILON {
             let minutes = self.hours as u64 * 60 + self.minutes as u64;
             let ten_minutes = minutes / 10;
             let rem_minutes = minutes % 10;
@@ -1092,7 +1095,7 @@ impl Timecode {
 
     pub fn from_frame_number(n: i64, fps: f64) -> Timecode {
         let abs_number = n.abs() as u64;
-        if fps.round() != fps {
+        if (fps.round() - fps).abs() > std::f64::EPSILON {
             let fp10m = (fps * 600.0).round() as u64;
             let ten_minutes = abs_number / fp10m;
             let abs_number = abs_number % fp10m;
@@ -1151,7 +1154,7 @@ impl TimecodeSampleDescriptionDataEntry {
                 let wrap = if (self.flags & TimecodeSampleDescriptionFlags::WrapsAt24Hours as u32) != 0 {
                     self.time_scale as i64 * 60 * 60 * 24 * self.number_of_frames as i64 / self.frame_duration as i64
                 } else {
-                    0xffffffff
+                    0xffff_ffff
                 };
                 if (self.flags & TimecodeSampleDescriptionFlags::Counter as u32) != 0 {
                     TimecodeSample::Counter(((ticks as i64 + (frames / self.number_of_frames as i64)) % wrap) as u32)
@@ -1163,7 +1166,7 @@ impl TimecodeSampleDescriptionDataEntry {
                 let fps = self.fps();
                 let mut new_frame_number = tc.frame_number(fps) + frames;
                 if (self.flags & TimecodeSampleDescriptionFlags::WrapsAt24Hours as u32) != 0 {
-                    new_frame_number = new_frame_number % (fps * 60.0 * 60.0 * 24.0).round() as i64;
+                    new_frame_number %= (fps * 60.0 * 60.0 * 24.0).round() as i64;
                 }
                 TimecodeSample::Timecode(Timecode::from_frame_number(new_frame_number, fps))
             }
@@ -1182,7 +1185,7 @@ pub struct BaseMediaInformationData<M: MediaType> {
 }
 
 impl<M: MediaType> AtomData for BaseMediaInformationData<M> {
-    const TYPE: FourCC = FourCC(0x6d696e66);
+    const TYPE: FourCC = FourCC::MINF;
 }
 
 impl<M: MediaType> ReadData for BaseMediaInformationData<M> {
@@ -1198,7 +1201,7 @@ impl<M: MediaType> ReadData for BaseMediaInformationData<M> {
 pub struct BaseMediaInformationHeaderData {}
 
 impl AtomData for BaseMediaInformationHeaderData {
-    const TYPE: FourCC = FourCC(0x676d6864);
+    const TYPE: FourCC = FourCC::GMHD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1225,7 +1228,7 @@ impl<M: MediaType> Default for SampleTableData<M> {
 }
 
 impl<M: MediaType> AtomData for SampleTableData<M> {
-    const TYPE: FourCC = FourCC(0x7374626c);
+    const TYPE: FourCC = FourCC::STBL;
 }
 
 impl<M: MediaType> ReadData for SampleTableData<M> {
@@ -1312,7 +1315,7 @@ impl<M: MediaType> SampleTableData<M> {
         Some(self.sample_to_chunk.as_ref()?.sample_chunk_info(sample, hint))
     }
 
-    pub fn sample_description<'a>(&'a self, id: u32) -> Option<&'a M::SampleDescriptionDataEntry> {
+    pub fn sample_description(&'_ self, id: u32) -> Option<&'_ M::SampleDescriptionDataEntry> {
         let sample_descriptions = &self.sample_description.as_ref()?.entries;
         if sample_descriptions.len() <= id as usize {
             return None;
@@ -1370,12 +1373,12 @@ impl<M: MediaType> ReadData for SampleDescriptionData<M> {
             reader.read_exact(&mut buf)?;
             entries.push(M::SampleDescriptionDataEntry::read(Cursor::new(buf.as_slice()))?);
         }
-        Ok(Self { entries: entries })
+        Ok(Self { entries })
     }
 }
 
 impl<M: MediaType> AtomData for SampleDescriptionData<M> {
-    const TYPE: FourCC = FourCC(0x73747364);
+    const TYPE: FourCC = FourCC::STSD;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1386,7 +1389,7 @@ pub struct MetadataData {
 }
 
 impl AtomData for MetadataData {
-    const TYPE: FourCC = FourCC(0x6d657461);
+    const TYPE: FourCC = FourCC::META;
 }
 
 impl ReadData for MetadataData {
@@ -1405,14 +1408,14 @@ impl MetadataData {
         let mut ret = HashMap::new();
         for (key_index, item) in self.item_list.items.iter() {
             let key_index = *key_index as usize;
-            if key_index >= self.item_keys.entries.len() + 1 {
+            if key_index > self.item_keys.entries.len() {
                 continue;
             }
-            if let Some(key) = String::from_utf8(self.item_keys.entries[key_index - 1].key_value.clone()).ok() {
+            if let Ok(key) = String::from_utf8(self.item_keys.entries[key_index - 1].key_value.clone()) {
                 ret.insert(key, &item.values);
             }
         }
-        return ret;
+        ret
     }
 }
 
@@ -1425,7 +1428,7 @@ pub struct MetadataHandlerData {
 }
 
 impl AtomData for MetadataHandlerData {
-    const TYPE: FourCC = FourCC(0x68646c72);
+    const TYPE: FourCC = FourCC::HDLR;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1440,7 +1443,7 @@ pub struct MetadataItemKeysData {
 }
 
 impl AtomData for MetadataItemKeysData {
-    const TYPE: FourCC = FourCC(0x6b657973);
+    const TYPE: FourCC = FourCC::KEYS;
 }
 
 impl ReadData for MetadataItemKeysData {
@@ -1456,15 +1459,14 @@ impl ReadData for MetadataItemKeysData {
                 return Err(Error::MalformedFile("invalid metadata key size"));
             }
             let key_value_size = (key_size - 8) as usize;
-            let mut key_value = Vec::with_capacity(key_value_size);
-            key_value.resize(key_value_size, 0);
+            let mut key_value = vec![0; key_value_size];
             reader.read_exact(&mut key_value)?;
             entries.push(MetadataItemKeysDataEntry {
                 key_namespace: BigEndian::read_u32(&buf[4..]),
-                key_value: key_value,
+                key_value,
             })
         }
-        Ok(Self { entries: entries })
+        Ok(Self { entries })
     }
 }
 
@@ -1530,10 +1532,10 @@ impl ReadData for MetadataValueData {
                 76 => MetadataValue::U16(reader.read_u16::<BigEndian>()?),
                 77 => MetadataValue::U32(reader.read_u32::<BigEndian>()?),
                 78 => MetadataValue::U64(reader.read_u64::<BigEndian>()?),
-                n @ _ => {
+                n => {
                     let mut data = vec![];
                     reader.read_to_end(&mut data)?;
-                    MetadataValue::Unknown { type_indicator: n, data: data }
+                    MetadataValue::Unknown { type_indicator: n, data }
                 }
             },
         })
@@ -1541,7 +1543,7 @@ impl ReadData for MetadataValueData {
 }
 
 impl AtomData for MetadataValueData {
-    const TYPE: FourCC = FourCC(0x64617461);
+    const TYPE: FourCC = FourCC::DATA;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1563,7 +1565,7 @@ pub struct MetadataItemListData {
 }
 
 impl AtomData for MetadataItemListData {
-    const TYPE: FourCC = FourCC(0x696c7374);
+    const TYPE: FourCC = FourCC::ILST;
 }
 
 impl ReadData for MetadataItemListData {
@@ -1582,28 +1584,28 @@ impl ReadData for MetadataItemListData {
 pub struct TrackReferenceData {}
 
 impl AtomData for TrackReferenceData {
-    const TYPE: FourCC = FourCC(0x74726566);
+    const TYPE: FourCC = FourCC::TREF;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct ExtendedLanguageTagData {}
 
 impl AtomData for ExtendedLanguageTagData {
-    const TYPE: FourCC = FourCC(0x656c6e67);
+    const TYPE: FourCC = FourCC::ELNG;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct DataInformationData {}
 
 impl AtomData for DataInformationData {
-    const TYPE: FourCC = FourCC(0x64696e66);
+    const TYPE: FourCC = FourCC::DINF;
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct UserDataData {}
 
 impl AtomData for UserDataData {
-    const TYPE: FourCC = FourCC(0x75647461);
+    const TYPE: FourCC = FourCC::UDTA;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1612,7 +1614,7 @@ pub struct EditData {
 }
 
 impl AtomData for EditData {
-    const TYPE: FourCC = FourCC(0x65647473);
+    const TYPE: FourCC = FourCC::EDTS;
 }
 
 impl ReadData for EditData {
@@ -1647,7 +1649,7 @@ pub struct EditListData {
 }
 
 impl AtomData for EditListData {
-    const TYPE: FourCC = FourCC(0x656c7374);
+    const TYPE: FourCC = FourCC::ELST;
 }
 
 #[cfg(test)]
@@ -1668,7 +1670,7 @@ mod tests {
         let entry = VideoSampleDescriptionDataEntry::read(Cursor::new(&buf)).unwrap();
         assert_eq!(
             VideoSampleDescriptionDataEntry {
-                data_format: 1635148593,
+                data_format: 1_635_148_593,
                 reserved: [0; 6],
                 data_reference_index: 1,
                 version: 0,
@@ -1718,7 +1720,7 @@ mod tests {
     #[test]
     fn test_sound_media_type() {
         let desc = SoundSampleDescriptionDataEntry {
-            data_format: 1836069985,
+            data_format: 1_836_069_985,
             reserved: [0; 6],
             data_reference_index: 1,
             version: SoundSampleDescriptionDataEntryVersion::V1(SoundSampleDescriptionDataEntryV1 {
@@ -1749,7 +1751,7 @@ mod tests {
             chunk_offset: Some(ChunkOffsetData {
                 version: 0,
                 flags: [0; 3],
-                offsets: vec![40, 623924, 1247864, 1865576, 2489396, 3107180, 3731028, 4348828, 4972704],
+                offsets: vec![40, 623_924, 1_247_864, 1_865_576, 2_489_396, 3_107_180, 3_731_028, 4_348_828, 4_972_704],
             }),
             chunk_offset_64: None,
             sample_size: Some(SampleSizeData {
@@ -1757,7 +1759,7 @@ mod tests {
                 flags: [9, 85, 12],
                 constant_sample_size: 0,
                 sample_count: 9,
-                sample_sizes: vec![611596, 611652, 611568, 611532, 611640, 611560, 611656, 611588, 611544],
+                sample_sizes: vec![611_596, 611_652, 611_568, 611_532, 611_640, 611_560, 611_656, 611_588, 611_544],
             }),
             sample_to_chunk: Some(SampleToChunkData {
                 version: 0,
@@ -1771,7 +1773,7 @@ mod tests {
         };
 
         assert_eq!(
-            vec![40, 623924, 1247864, 1865576, 2489396, 3107180, 3731028, 4348828, 4972704],
+            vec![40, 623_924, 1_247_864, 1_865_576, 2_489_396, 3_107_180, 3_731_028, 4_348_828, 4_972_704],
             table.iter_chunk_offsets().unwrap().collect::<Vec<u64>>()
         );
 
@@ -1781,7 +1783,7 @@ mod tests {
             chunk_offset: Some(ChunkOffsetData {
                 version: 0,
                 flags: [0; 3],
-                offsets: vec![611636, 1235576, 1859432, 2477108, 3101036, 3718740, 4342684, 4960416, 5584248],
+                offsets: vec![611_636, 1_235_576, 1_859_432, 2_477_108, 3_101_036, 3_718_740, 4_342_684, 4_960_416, 5_584_248],
             }),
             chunk_offset_64: None,
             sample_size: Some(SampleSizeData {
@@ -1835,7 +1837,7 @@ mod tests {
         };
 
         assert_eq!(
-            vec![611636, 1235576, 1859432, 2477108, 3101036, 3718740, 4342684, 4960416, 5584248],
+            vec![611_636, 1_235_576, 1_859_432, 2_477_108, 3_101_036, 3_718_740, 4_342_684, 4_960_416, 5_584_248],
             table.iter_chunk_offsets().unwrap().collect::<Vec<u64>>()
         );
         assert_eq!(2048 + 2048 + 1024 + 2048 + 1024 + 2048 + 1024 + 2048 + 2048, table.sample_count());
@@ -1979,7 +1981,7 @@ mod tests {
                 seconds: 59,
                 frames: 28
             },
-            Timecode::from_frame_number(17980, 29.97)
+            Timecode::from_frame_number(17_980, 29.97)
         );
         assert_eq!(
             Timecode {
@@ -1989,7 +1991,7 @@ mod tests {
                 seconds: 0,
                 frames: 0
             },
-            Timecode::from_frame_number(17982, 29.97)
+            Timecode::from_frame_number(17_982, 29.97)
         );
 
         assert_eq!(
@@ -2137,7 +2139,7 @@ mod tests {
             71 * 60 * 24 + 2
         );
 
-        for frame in -300000..300000 {
+        for frame in -300_000..300_000 {
             let tc = Timecode::from_frame_number(frame, 29.97);
             assert_eq!(frame, tc.frame_number(29.97));
 

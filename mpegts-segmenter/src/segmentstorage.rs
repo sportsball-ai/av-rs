@@ -42,6 +42,12 @@ impl MemorySegmentStorage {
     }
 }
 
+impl Default for MemorySegmentStorage {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait]
 impl SegmentStorage for MemorySegmentStorage {
     type Segment = Vec<u8>;

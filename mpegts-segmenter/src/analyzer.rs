@@ -12,6 +12,7 @@ pub struct Timecode {
     pub frames: u8,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum Stream {
     ADTSAudio {
@@ -130,22 +131,22 @@ impl Stream {
                     *sample_count += 1024;
                     *channel_count = match ((data[2] & 1) << 2) | (data[3] >> 6) {
                         7 => 8,
-                        c @ _ => c as _,
+                        c => c as _,
                     };
                     *sample_rate = match (data[2] >> 2) & 0x0f {
-                        0 => 96000,
-                        1 => 88200,
-                        2 => 64000,
-                        3 => 48000,
-                        4 => 44100,
-                        5 => 32000,
-                        6 => 24000,
-                        7 => 22050,
-                        8 => 16000,
-                        9 => 12000,
-                        10 => 11025,
-                        11 => 8000,
-                        12 => 7350,
+                        0 => 96_000,
+                        1 => 88_200,
+                        2 => 64_000,
+                        3 => 48_000,
+                        4 => 44_100,
+                        5 => 32_000,
+                        6 => 24_000,
+                        7 => 22_050,
+                        8 => 16_000,
+                        9 => 12_000,
+                        10 => 11_025,
+                        11 => 8_000,
+                        12 => 7_350,
                         _ => 0,
                     };
                     if (data[1] & 0x08) == 0 {
@@ -169,7 +170,7 @@ impl Stream {
                 use h264::Decode;
 
                 for nalu in h264::iterate_annex_b(&data) {
-                    if nalu.len() == 0 {
+                    if nalu.is_empty() {
                         continue;
                     }
 
@@ -191,7 +192,7 @@ impl Stream {
                             // frames themselves
                             *frame_rate = match sps.vui_parameters.num_units_in_tick.0 {
                                 0 => 0.0,
-                                num_units_in_tick @ _ => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
+                                num_units_in_tick => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
                             };
                             *last_vui_parameters = Some(sps.vui_parameters);
                         }
@@ -259,7 +260,7 @@ impl Stream {
                 use h265::Decode;
 
                 for nalu in h265::iterate_annex_b(&data) {
-                    if nalu.len() == 0 {
+                    if nalu.is_empty() {
                         continue;
                     }
 
@@ -283,7 +284,7 @@ impl Stream {
                                 // frames themselves
                                 *frame_rate = match sps.vui_parameters.vui_num_units_in_tick.0 {
                                     0 => 0.0,
-                                    num_units_in_tick @ _ => (sps.vui_parameters.vui_time_scale.0 as f64 / num_units_in_tick as f64 * 100.0).round() / 100.0,
+                                    num_units_in_tick => (sps.vui_parameters.vui_time_scale.0 as f64 / num_units_in_tick as f64 * 100.0).round() / 100.0,
                                 };
                             }
                         }
@@ -295,7 +296,7 @@ impl Stream {
                             if vps.vps_timing_info_present_flag.0 != 0 {
                                 *frame_rate = match vps.vps_num_units_in_tick.0 {
                                     0 => 0.0,
-                                    num_units_in_tick @ _ => (vps.vps_time_scale.0 as f64 / num_units_in_tick as f64 * 100.0).round() / 100.0,
+                                    num_units_in_tick => (vps.vps_time_scale.0 as f64 / num_units_in_tick as f64 * 100.0).round() / 100.0,
                                 };
                             }
                         }
@@ -309,11 +310,8 @@ impl Stream {
     }
 
     pub fn reset_timecode(&mut self) {
-        match self {
-            Self::AVCVideo { timecode, .. } => {
-                *timecode = None;
-            }
-            _ => {}
+        if let Self::AVCVideo { timecode, .. } = self {
+            *timecode = None;
         }
     }
 
@@ -364,6 +362,7 @@ pub enum StreamInfo {
     Other,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 enum PIDState {
     Unused,
@@ -398,10 +397,7 @@ impl Analyzer {
     }
 
     pub fn is_pes(&self, pid: u16) -> bool {
-        match self.pids[pid as usize] {
-            PIDState::PES { .. } => true,
-            _ => false,
-        }
+        matches!(self.pids[pid as usize], PIDState::PES { .. })
     }
 
     pub fn stream(&self, pid: u16) -> Option<&Stream> {
@@ -457,7 +453,7 @@ impl Analyzer {
                 for pes in pmt.elementary_stream_info {
                     match &mut self.pids[pes.elementary_pid as usize] {
                         PIDState::PES { .. } => {}
-                        state @ _ => {
+                        state => {
                             let stream = match pes.stream_type {
                                 0x0f => Stream::ADTSAudio {
                                     pes: pes::Stream::new(),
@@ -487,7 +483,7 @@ impl Analyzer {
                                     access_unit_counter: h265::AccessUnitCounter::new(),
                                     rfc6381_codec: None,
                                 },
-                                t @ _ => Stream::Other(t),
+                                t => Stream::Other(t),
                             };
                             if stream.is_video() {
                                 self.has_video = true;
@@ -515,6 +511,12 @@ impl Analyzer {
             }
         }
         Ok(())
+    }
+}
+
+impl Default for Analyzer {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -550,8 +552,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 481280,
+                    sample_rate: 48_000,
+                    sample_count: 481_280,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
@@ -585,8 +587,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 81920,
+                    sample_rate: 48_000,
+                    sample_count: 81_920,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
@@ -620,8 +622,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 481280,
+                    sample_rate: 48_000,
+                    sample_count: 481_280,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
@@ -695,8 +697,8 @@ mod test {
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
-                    sample_rate: 48000,
-                    sample_count: 243712,
+                    sample_rate: 48_000,
+                    sample_count: 243_712,
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]

@@ -148,7 +148,7 @@ impl<'a> PMTData<'a> {
             elementary_stream_info: {
                 let mut infos = Vec::new();
                 let mut buf = &buf[PMT_HEADER_LENGTH + descs_length..];
-                while buf.len() > 0 {
+                while !buf.is_empty() {
                     let info = PMTElementaryStreamInfo::decode(buf)?;
                     buf = &buf[PMT_ELEMENTARY_STREAM_INFO_HEADER_LENGTH + info.data.len()..];
                     infos.push(info);
@@ -220,7 +220,7 @@ impl<'a> Packet<'a> {
             None => return Ok(vec![]),
         };
 
-        if !self.payload_unit_start_indicator || payload.len() == 0 {
+        if !self.payload_unit_start_indicator || payload.is_empty() {
             return Ok(vec![]);
         }
 
@@ -232,7 +232,7 @@ impl<'a> Packet<'a> {
         let mut ret = Vec::new();
 
         let mut buf = &payload[1 + padding..];
-        while buf.len() > 0 && buf[0] != 0xff {
+        while !buf.is_empty() && buf[0] != 0xff {
             let section = TableSection::decode(buf)?;
             buf = &buf[TABLE_SECTION_HEADER_LENGTH + section.data.len()..];
             ret.push(section);
@@ -266,7 +266,7 @@ mod test {
                 length: 7,
                 discontinuity_indicator: false,
                 random_access_indicator: true,
-                program_clock_reference_27mhz: Some(18900000),
+                program_clock_reference_27mhz: Some(18_900_000),
             })
         );
 
@@ -319,6 +319,6 @@ mod test {
             }
         }
         assert_eq!(rais, 62);
-        assert_eq!(last_pcr, 286917900);
+        assert_eq!(last_pcr, 286_917_900);
     }
 }

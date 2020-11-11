@@ -161,7 +161,7 @@ impl<'a> Future for Connect {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         match &mut self.state {
             State::Idle => {
-                let addr = self.addr.clone();
+                let addr = self.addr;
                 let options = self.options.clone();
                 let mut handle = spawn_blocking(move || {
                     let (addr, len) = to_sockaddr(&addr);
@@ -215,12 +215,9 @@ impl AsyncRead for AsyncStream {
 
         match poll {
             Poll::Ready(Ok((recv_buf, result))) => {
-                match result {
-                    Ok(n) => {
-                        let n = n.min(buf.len());
-                        buf[..n].copy_from_slice(&recv_buf[..n]);
-                    }
-                    _ => {}
+                if let Ok(n) = result {
+                    let n = n.min(buf.len());
+                    buf[..n].copy_from_slice(&recv_buf[..n]);
                 }
                 self.read_state = IOState::Idle(Some(recv_buf));
                 Poll::Ready(result)
@@ -302,11 +299,11 @@ mod test {
         let mut client_conn = connect_result.unwrap();
         assert_eq!(client_conn.id(), None);
 
-        assert_eq!(client_conn.write("foo".as_bytes()).await.unwrap(), 3);
+        assert_eq!(client_conn.write(b"foo").await.unwrap(), 3);
 
         let mut buf = [0; 1316];
         assert_eq!(server_conn.read(&mut buf).await.unwrap(), 3);
-        assert_eq!(&buf[0..3], "foo".as_bytes());
+        assert_eq!(&buf[0..3], b"foo");
     }
 
     #[tokio::test]
@@ -333,10 +330,10 @@ mod test {
         let mut client_conn = connect_result.unwrap();
         assert_eq!(client_conn.id(), options.stream_id.as_ref());
 
-        assert_eq!(client_conn.write("foo".as_bytes()).await.unwrap(), 3);
+        assert_eq!(client_conn.write(b"foo").await.unwrap(), 3);
 
         let mut buf = [0; 1316];
         assert_eq!(server_conn.read(&mut buf).await.unwrap(), 3);
-        assert_eq!(&buf[0..3], "foo".as_bytes());
+        assert_eq!(&buf[0..3], b"foo");
     }
 }
