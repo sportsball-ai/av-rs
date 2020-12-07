@@ -558,6 +558,12 @@ pub struct PTSAnalyzer {
     timestamps: VecDeque<u64>,
 }
 
+impl Default for PTSAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 const PTS_ANALYZER_MAX_TIMESTAMPS: usize = 150;
 
 impl PTSAnalyzer {
@@ -616,7 +622,7 @@ impl PTSAnalyzer {
         }
 
         let mut timestamps = self.timestamps.clone();
-        timestamps.make_contiguous().sort();
+        timestamps.make_contiguous().sort_unstable();
 
         // ignore the most recent timestamps so b-frames don't throw us off
         let used_timestamp_count = if timestamps.len() > MIN_TIMESTAMP_COUNT + MAX_B_FRAMES {
