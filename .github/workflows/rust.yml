@@ -18,7 +18,7 @@ jobs:
     - name: Set Up macOS
       if: startsWith(matrix.os, 'macos-')
       run: |
-        echo "::set-env name=LIBCLANG_PATH::/Library/Developer/CommandLineTools/usr/lib/libclang.dylib"
+        echo "LIBCLANG_PATH=/Library/Developer/CommandLineTools/usr/lib/libclang.dylib" >> $GITHUB_ENV
         brew install kvazaar
     - name: Install Rust
       uses: actions-rs/toolchain@v1
