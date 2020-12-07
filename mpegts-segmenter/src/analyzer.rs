@@ -1,6 +1,6 @@
 use mpeg2::{pes, ts};
 
-use std::error::Error;
+use std::{collections::VecDeque, error::Error};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -34,6 +34,7 @@ pub enum Stream {
         timecode: Option<Timecode>,
         last_timecode: Option<Timecode>,
         last_vui_parameters: Option<h264::VUIParameters>,
+        pts_analyzer: PTSAnalyzer,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -42,6 +43,7 @@ pub enum Stream {
         frame_rate: f64,
         rfc6381_codec: Option<String>,
         access_unit_counter: h265::AccessUnitCounter,
+        pts_analyzer: PTSAnalyzer,
     },
     Other(u8),
 }
@@ -77,11 +79,16 @@ impl Stream {
                 access_unit_counter,
                 rfc6381_codec,
                 timecode,
+                pts_analyzer,
                 ..
             } => StreamInfo::Video {
                 width: *width,
                 height: *height,
-                frame_rate: *frame_rate,
+                frame_rate: if *frame_rate != 0.0 {
+                    *frame_rate
+                } else {
+                    pts_analyzer.guess_frame_rate().unwrap_or(0.0)
+                },
                 frame_count: if *is_interlaced {
                     access_unit_counter.count() / 2
                 } else {
@@ -96,11 +103,16 @@ impl Stream {
                 frame_rate,
                 access_unit_counter,
                 rfc6381_codec,
+                pts_analyzer,
                 ..
             } => StreamInfo::Video {
                 width: *width,
                 height: *height,
-                frame_rate: *frame_rate,
+                frame_rate: if *frame_rate != 0.0 {
+                    *frame_rate
+                } else {
+                    pts_analyzer.guess_frame_rate().unwrap_or(0.0)
+                },
                 frame_count: access_unit_counter.count(),
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
@@ -109,7 +121,7 @@ impl Stream {
         }
     }
 
-    fn handle_pes_data(&mut self, data: &[u8]) -> Result<()> {
+    fn handle_pes_packet(&mut self, packet: pes::Packet) -> Result<()> {
         match self {
             Self::ADTSAudio {
                 channel_count,
@@ -119,7 +131,7 @@ impl Stream {
                 object_type_indication,
                 ..
             } => {
-                let mut data = data;
+                let mut data = packet.data.as_slice();
                 while data.len() >= 7 {
                     if data[0] != 0xff || (data[1] & 0xf0) != 0xf0 {
                         bail!("invalid adts syncword")
@@ -165,11 +177,17 @@ impl Stream {
                 timecode,
                 last_timecode,
                 last_vui_parameters,
+                pts_analyzer,
                 ..
             } => {
+                match packet.header.optional_header.and_then(|h| h.pts) {
+                    Some(pts) => pts_analyzer.write_pts(pts),
+                    None => pts_analyzer.reset(),
+                }
+
                 use h264::Decode;
 
-                for nalu in h264::iterate_annex_b(&data) {
+                for nalu in h264::iterate_annex_b(&packet.data) {
                     if nalu.is_empty() {
                         continue;
                     }
@@ -187,13 +205,16 @@ impl Stream {
                             *is_interlaced = sps.frame_mbs_only_flag.0 == 0;
                             *width = sps.frame_cropping_rectangle_width() as _;
                             *height = sps.frame_cropping_rectangle_height() as _;
-                            // XXX: if vui parameters aren't present or if the video does not have
-                            // a fixed framerate, we'll need to compute the framerate based on the
-                            // frames themselves
-                            *frame_rate = match sps.vui_parameters.num_units_in_tick.0 {
-                                0 => 0.0,
-                                num_units_in_tick => (sps.vui_parameters.time_scale.0 as f64 / (2.0 * num_units_in_tick as f64) * 100.0).round() / 100.0,
-                            };
+                            if sps.vui_parameters_present_flag.0 != 0
+                                && sps.vui_parameters.timing_info_present_flag.0 != 0
+                                && sps.vui_parameters.num_units_in_tick.0 != 0
+                            {
+                                *frame_rate =
+                                    (sps.vui_parameters.time_scale.0 as f64 / (2.0 * sps.vui_parameters.num_units_in_tick.0 as f64) * 100.0).round() / 100.0;
+                            } else {
+                                // if the frame rate is later requested we'll try to guess it via the PTS analyzer
+                                *frame_rate = 0.0;
+                            }
                             *last_vui_parameters = Some(sps.vui_parameters);
                         }
                         h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
@@ -255,11 +276,17 @@ impl Stream {
                 frame_rate,
                 rfc6381_codec,
                 access_unit_counter,
+                pts_analyzer,
                 ..
             } => {
+                match packet.header.optional_header.and_then(|h| h.pts) {
+                    Some(pts) => pts_analyzer.write_pts(pts),
+                    None => pts_analyzer.reset(),
+                }
+
                 use h265::Decode;
 
-                for nalu in h265::iterate_annex_b(&data) {
+                for nalu in h265::iterate_annex_b(&packet.data) {
                     if nalu.is_empty() {
                         continue;
                     }
@@ -278,14 +305,15 @@ impl Stream {
                             let sps = h265::SequenceParameterSet::decode(&mut rbsp)?;
                             *width = sps.pic_width_in_luma_samples.0 as _;
                             *height = sps.pic_height_in_luma_samples.0 as _;
-                            if sps.vui_parameters_present_flag.0 != 0 && sps.vui_parameters.vui_timing_info_present_flag.0 != 0 {
-                                // XXX: if vui parameters aren't present or if the video does not have
-                                // a fixed framerate, we'll need to compute the framerate based on the
-                                // frames themselves
-                                *frame_rate = match sps.vui_parameters.vui_num_units_in_tick.0 {
-                                    0 => 0.0,
-                                    num_units_in_tick => (sps.vui_parameters.vui_time_scale.0 as f64 / num_units_in_tick as f64 * 100.0).round() / 100.0,
-                                };
+                            if sps.vui_parameters_present_flag.0 != 0
+                                && sps.vui_parameters.vui_timing_info_present_flag.0 != 0
+                                && sps.vui_parameters.vui_num_units_in_tick.0 != 0
+                            {
+                                *frame_rate =
+                                    (sps.vui_parameters.vui_time_scale.0 as f64 / sps.vui_parameters.vui_num_units_in_tick.0 as f64 * 100.0).round() / 100.0;
+                            } else {
+                                // if the frame rate is later requested we'll try to guess it via the PTS analyzer
+                                *frame_rate = 0.0;
                             }
                         }
                         h265::NAL_UNIT_TYPE_VPS_NUT => {
@@ -327,7 +355,7 @@ impl Stream {
     pub fn write(&mut self, packet: &ts::Packet) -> Result<()> {
         if let Some(pes) = self.pes() {
             for packet in pes.write(packet)? {
-                self.handle_pes_data(&packet.data)?;
+                self.handle_pes_packet(packet)?;
             }
         }
         Ok(())
@@ -336,7 +364,7 @@ impl Stream {
     pub fn flush(&mut self) -> Result<()> {
         if let Some(pes) = self.pes() {
             for packet in pes.flush()? {
-                self.handle_pes_data(&packet.data)?;
+                self.handle_pes_packet(packet)?;
             }
         }
         Ok(())
@@ -474,6 +502,7 @@ impl Analyzer {
                                     last_vui_parameters: None,
                                     last_timecode: None,
                                     timecode: None,
+                                    pts_analyzer: PTSAnalyzer::new(),
                                 },
                                 0x24 => Stream::HEVCVideo {
                                     pes: pes::Stream::new(),
@@ -482,6 +511,7 @@ impl Analyzer {
                                     frame_rate: 0.0,
                                     access_unit_counter: h265::AccessUnitCounter::new(),
                                     rfc6381_codec: None,
+                                    pts_analyzer: PTSAnalyzer::new(),
                                 },
                                 t => Stream::Other(t),
                             };
@@ -517,6 +547,125 @@ impl Analyzer {
 impl Default for Analyzer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// PTSAnalyzer keeps a small history of PES presentation timestamps and can attempt to guess at
+/// their frame rate.
+#[derive(Clone)]
+pub struct PTSAnalyzer {
+    /// PES presentation timestamps: 90kHz, with no rollovers.
+    timestamps: VecDeque<u64>,
+}
+
+impl Default for PTSAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+const PTS_ANALYZER_MAX_TIMESTAMPS: usize = 150;
+
+impl PTSAnalyzer {
+    pub fn new() -> Self {
+        Self {
+            timestamps: VecDeque::with_capacity(PTS_ANALYZER_MAX_TIMESTAMPS),
+        }
+    }
+
+    pub fn write_pts(&mut self, mut pts: u64) {
+        // Set the high bits of the PTS. If there's any sort of anamoly such as a large gap in
+        // timestamps, the queues timestamps are reset and the PTS is left as-is.
+        if let Some(&last) = self.timestamps.back() {
+            let high_bits = if pts < 90000 && (last & 0x1ffffffff) > 0x1ffff0000 {
+                (last >> 33).checked_add(1)
+            } else if pts > 0x1ffff0000 && (last & 0x1ffffffff) < 90000 {
+                (last >> 33).checked_sub(1)
+            } else {
+                Some(last >> 33)
+            };
+            match high_bits {
+                Some(high_bits) => {
+                    let adjusted_pts = pts | (high_bits << 33);
+                    let abs_delta = adjusted_pts.max(last) - adjusted_pts.min(last);
+                    if abs_delta > 90000 {
+                        self.reset();
+                    } else {
+                        pts = adjusted_pts;
+                    }
+                }
+                None => self.reset(),
+            }
+        }
+
+        // Push the PTS, limiting the queue size.
+        if self.timestamps.len() >= PTS_ANALYZER_MAX_TIMESTAMPS {
+            self.timestamps.pop_front();
+        }
+        self.timestamps.push_back(pts);
+    }
+
+    pub fn reset(&mut self) {
+        self.timestamps.clear()
+    }
+
+    /// Makes a guess at a video's frame rate. This should really only be used as a last resort. If
+    /// the presentation timestamps were set precisely it should be accurate, but if the timestamps
+    /// have jitter, e.g. due to being set to wall-clock times, the guess may be off. For those
+    /// cases, it has a bias towards returning 29.97 or 59.94.
+    pub fn guess_frame_rate(&self) -> Option<f64> {
+        const MIN_TIMESTAMP_COUNT: usize = 10;
+        const MAX_B_FRAMES: usize = 5;
+
+        if self.timestamps.len() < MIN_TIMESTAMP_COUNT {
+            return None;
+        }
+
+        let mut timestamps = self.timestamps.clone();
+        timestamps.make_contiguous().sort_unstable();
+
+        // ignore the most recent timestamps so b-frames don't throw us off
+        let used_timestamp_count = if timestamps.len() > MIN_TIMESTAMP_COUNT + MAX_B_FRAMES {
+            timestamps.len() - MAX_B_FRAMES
+        } else {
+            timestamps.len()
+        };
+
+        let mut min_delta = u64::MAX;
+        let mut max_delta = u64::MIN;
+        let mut sum_delta = 0;
+
+        {
+            let mut prev = None;
+            for &pts in timestamps.iter().take(used_timestamp_count) {
+                if let Some(prev) = prev {
+                    let delta = pts - prev;
+                    min_delta = min_delta.min(delta);
+                    max_delta = max_delta.max(delta);
+                    sum_delta += delta;
+                }
+                prev = Some(pts);
+            }
+        }
+
+        let avg_delta = sum_delta / (used_timestamp_count as u64 - 1);
+        if avg_delta == 0 {
+            return None;
+        }
+
+        let fps = 90000.0 / (avg_delta as f64);
+
+        if max_delta - min_delta > 5 {
+            // if the deltas were inconsistent (e.g. due to wallclock timestamps) and this was
+            // nearly 30 or 60 fps, we should assume 29.97 or 59.94
+            if (fps - 29.97).abs() < 5.0 {
+                return Some(29.97);
+            } else if (fps - 59.94).abs() < 5.0 {
+                return Some(59.94);
+            }
+        }
+
+        Some((fps * 100.0).round() / 100.0)
     }
 }
 
@@ -662,6 +811,60 @@ mod test {
                     rfc6381_codec: Some("mp4a.40.2".to_string()),
                 }
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyzer_h265_8k_hq() {
+        let mut analyzer = Analyzer::new();
+
+        {
+            let mut f = File::open("src/testdata/h265-8k-hq.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            let packets = ts::decode_packets(&buf).unwrap();
+            analyzer.handle_packets(&packets).unwrap();
+            analyzer.flush().unwrap();
+        }
+
+        assert_eq!(analyzer.has_video(), true);
+        assert_eq!(
+            analyzer.streams(),
+            vec![StreamInfo::Video {
+                width: 7680,
+                height: 4320,
+                frame_rate: 29.97,
+                frame_count: 30,
+                rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
+                timecode: None,
+            },]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyzer_h265_8k_wallclock_ts() {
+        let mut analyzer = Analyzer::new();
+
+        {
+            let mut f = File::open("src/testdata/h265-8k-wallclock-ts.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            let packets = ts::decode_packets(&buf).unwrap();
+            analyzer.handle_packets(&packets).unwrap();
+            analyzer.flush().unwrap();
+        }
+
+        assert_eq!(analyzer.has_video(), true);
+        assert_eq!(
+            analyzer.streams(),
+            vec![StreamInfo::Video {
+                width: 7680,
+                height: 4320,
+                frame_rate: 29.97,
+                frame_count: 31,
+                rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
+                timecode: None,
+            },]
         );
     }
 
