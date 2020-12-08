@@ -623,16 +623,20 @@ impl PTSAnalyzer {
 
         let mut timestamps = self.timestamps.clone();
         timestamps.make_contiguous().sort_unstable();
+        // ignore the most oldest and most recent timestamps so b-frames don't throw us off
+        let timestamps: Vec<_> = timestamps
+            .into_iter()
+            .skip(MAX_B_FRAMES)
+            .take(self.timestamps.len() - 2 * MAX_B_FRAMES)
+            .collect();
 
-        let count = timestamps.len() - 2 * MAX_B_FRAMES;
         let mut min_delta = u64::MAX;
         let mut max_delta = u64::MIN;
         let mut sum_delta = 0;
 
         {
             let mut prev = None;
-            // ignore the most oldest and most recent timestamps so b-frames don't throw us off
-            for &pts in timestamps.iter().skip(MAX_B_FRAMES).take(timestamps.len() - 2 * MAX_B_FRAMES) {
+            for &pts in &timestamps {
                 if let Some(prev) = prev {
                     let delta = pts - prev;
                     min_delta = min_delta.min(delta);
@@ -643,7 +647,7 @@ impl PTSAnalyzer {
             }
         }
 
-        let avg_delta = sum_delta / (count as u64 - 1);
+        let avg_delta = sum_delta / (timestamps.len() as u64 - 1);
         if avg_delta == 0 {
             return None;
         }
