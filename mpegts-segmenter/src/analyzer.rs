@@ -614,8 +614,8 @@ impl PTSAnalyzer {
     /// have jitter, e.g. due to being set to wall-clock times, the guess may be off. For those
     /// cases, it has a bias towards returning 29.97 or 59.94.
     pub fn guess_frame_rate(&self) -> Option<f64> {
-        const MIN_TIMESTAMP_COUNT: usize = 10;
-        const MAX_B_FRAMES: usize = 5;
+        const MIN_TIMESTAMP_COUNT: usize = 16;
+        const MAX_B_FRAMES: usize = 3;
 
         if self.timestamps.len() < MIN_TIMESTAMP_COUNT {
             return None;
@@ -624,20 +624,15 @@ impl PTSAnalyzer {
         let mut timestamps = self.timestamps.clone();
         timestamps.make_contiguous().sort_unstable();
 
-        // ignore the most recent timestamps so b-frames don't throw us off
-        let used_timestamp_count = if timestamps.len() > MIN_TIMESTAMP_COUNT + MAX_B_FRAMES {
-            timestamps.len() - MAX_B_FRAMES
-        } else {
-            timestamps.len()
-        };
-
+        let count = timestamps.len() - 2 * MAX_B_FRAMES;
         let mut min_delta = u64::MAX;
         let mut max_delta = u64::MIN;
         let mut sum_delta = 0;
 
         {
             let mut prev = None;
-            for &pts in timestamps.iter().take(used_timestamp_count) {
+            // ignore the most oldest and most recent timestamps so b-frames don't throw us off
+            for &pts in timestamps.iter().skip(MAX_B_FRAMES).take(timestamps.len() - 2 * MAX_B_FRAMES) {
                 if let Some(prev) = prev {
                     let delta = pts - prev;
                     min_delta = min_delta.min(delta);
@@ -648,7 +643,7 @@ impl PTSAnalyzer {
             }
         }
 
-        let avg_delta = sum_delta / (used_timestamp_count as u64 - 1);
+        let avg_delta = sum_delta / (count as u64 - 1);
         if avg_delta == 0 {
             return None;
         }
@@ -906,5 +901,22 @@ mod test {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn test_pts_analyzer_b_frames() {
+        let mut analyzer = PTSAnalyzer::new();
+        for i in 0..500 {
+            analyzer.write_pts(
+                match i % 3 {
+                    0 => i,
+                    1 => i + 1,
+                    _ => i - 1,
+                } * 3000,
+            );
+            if i > 30 {
+                assert_eq!(analyzer.guess_frame_rate(), Some(30.0));
+            }
+        }
     }
 }
