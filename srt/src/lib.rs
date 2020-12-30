@@ -327,6 +327,13 @@ impl<'c> Listener<'c> {
     }
 }
 
+pub struct Message<'a> {
+    pub data: &'a [u8],
+
+    /// The timestamp applied by the source, if any, in microseconds since the epoch.
+    pub source_time_usec: Option<i64>,
+}
+
 pub struct Stream {
     socket: Socket,
     id: Option<String>,
@@ -367,7 +374,8 @@ impl Stream {
 
 impl Read for Stream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match unsafe { sys::srt_recv(self.socket.raw(), buf.as_mut_ptr() as *mut sys::char, buf.len() as _) } {
+        let mut mc = sys::SRT_MSGCTRL::default();
+        match unsafe { sys::srt_recvmsg2(self.socket.raw(), buf.as_mut_ptr() as *mut sys::char, buf.len() as _, &mut mc as _) } {
             len if len >= 0 => Ok(len as usize),
             _ => Err(io::Error::new(io::ErrorKind::Other, "srt_recv error")),
         }

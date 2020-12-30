@@ -6,11 +6,12 @@ use mpeg2::{
 use std::{fmt, io, time::Duration};
 use tokio::prelude::*;
 
-struct CurrentSegment<S: AsyncWrite + Unpin> {
+struct CurrentSegment<S: AsyncWrite + Unpin, W: Clone> {
     segment: S,
     pcr: u64,
     pts: Option<Duration>,
     bytes_written: usize,
+    first_write_context: W,
 }
 
 pub struct SegmenterConfig {
@@ -51,7 +52,7 @@ impl From<Box<dyn std::error::Error + Send + Sync>> for Error {
 pub struct Segmenter<S: SegmentStorage> {
     config: SegmenterConfig,
     storage: S,
-    current_segment: Option<CurrentSegment<S::Segment>>,
+    current_segment: Option<CurrentSegment<S::Segment, S::WriteContext>>,
     analyzer: Analyzer,
     pcr: Option<u64>,
     streams_before_segment: Vec<StreamInfo>,
@@ -79,7 +80,7 @@ impl<S: SegmentStorage> Segmenter<S> {
 
     /// Writes packets to the segmenter. The segmenter does not do any internal buffering, so buf
     /// must be divisible by 188 (the MPEG TS packet length).
-    pub async fn write(&mut self, buf: &[u8]) -> Result<(), Error> {
+    pub async fn write(&mut self, buf: &[u8], ctx: S::WriteContext) -> Result<(), Error> {
         if buf.len() % PACKET_LENGTH != 0 {
             return Err(io::Error::new(io::ErrorKind::Other, "write length not divisible by packet length").into());
         }
@@ -155,6 +156,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     pcr: self.pcr.unwrap_or(0),
                     pts: None,
                     bytes_written: 0,
+                    first_write_context: ctx.clone(),
                 });
 
                 self.analyzer.reset_timecodes();
@@ -186,7 +188,7 @@ impl<S: SegmentStorage> Segmenter<S> {
     }
 }
 
-pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: SegmenterConfig, storage: S) -> Result<(), Error> {
+pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage<WriteContext = ()>>(mut r: R, config: SegmenterConfig, storage: S) -> Result<(), Error> {
     let mut segmenter = Segmenter::new(config, storage);
 
     // XXX: the buffer size should be at least 1316, which is the max SRT payload size
@@ -197,7 +199,7 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
         if bytes_read == 0 {
             break;
         }
-        segmenter.write(&buf[..bytes_read]).await?;
+        segmenter.write(&buf[..bytes_read], ()).await?;
     }
     segmenter.flush().await?;
 
@@ -205,17 +207,19 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
 }
 
 #[derive(Debug, Clone)]
-pub struct SegmentInfo {
+pub struct SegmentInfo<W: Clone> {
     pub size: usize,
     pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
+    pub first_write_context: W,
 }
 
-impl SegmentInfo {
-    fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, streams: Vec<StreamInfo>, prev_streams: &[StreamInfo]) -> Self {
+impl<W: Clone> SegmentInfo<W> {
+    fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S, W>, streams: Vec<StreamInfo>, prev_streams: &[StreamInfo]) -> Self {
         Self {
             size: segment.bytes_written,
             presentation_time: segment.pts,
+            first_write_context: segment.first_write_context.clone(),
             streams: if streams.len() != prev_streams.len() {
                 streams
             } else {
