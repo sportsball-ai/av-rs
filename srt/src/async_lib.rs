@@ -1,4 +1,6 @@
-use super::{check_code, listener_callback, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result, Socket};
+use super::{
+    check_code, listener_callback, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Message, Result, Socket,
+};
 use std::{
     future::Future,
     io,
@@ -6,6 +8,7 @@ use std::{
     net::{SocketAddr, ToSocketAddrs},
     pin::Pin,
     task::{Context, Poll},
+    time::{Duration, Instant},
 };
 use tokio::{
     prelude::{AsyncRead, AsyncWrite},
@@ -106,9 +109,16 @@ impl<'a, 'c> Future for Accept<'a, 'c> {
     }
 }
 
+struct ReadResult {
+    n: usize,
+    receive_time: Instant,
+    source_time: Option<Instant>,
+}
+
 enum IOState {
     Idle(Option<Vec<u8>>),
-    Busy(JoinHandle<(Vec<u8>, io::Result<usize>)>),
+    Reading(JoinHandle<(Vec<u8>, io::Result<ReadResult>)>),
+    Writing(JoinHandle<(Vec<u8>, io::Result<usize>)>),
 }
 
 pub struct AsyncStream {
@@ -146,6 +156,48 @@ impl AsyncStream {
 
     pub fn id(&self) -> Option<&String> {
         self.id.as_ref()
+    }
+
+    pub fn receive<'a>(&'a mut self, buf: &'a mut [u8]) -> Receive<'a> {
+        Receive { stream: self, buf: Some(buf) }
+    }
+
+    fn poll_read_impl(&mut self, cx: &mut Context, len: usize) -> Poll<std::result::Result<(Vec<u8>, io::Result<ReadResult>), JoinError>> {
+        match &mut self.read_state {
+            IOState::Idle(ref mut recv_buf) => {
+                let mut recv_buf = match recv_buf.take() {
+                    Some(b) => b,
+                    None => Vec::new(),
+                };
+                recv_buf.resize(len, 0);
+                let sock = self.socket.raw();
+                let mut handle = spawn_blocking(move || {
+                    let mut mc = sys::SRT_MSGCTRL::default();
+                    let r = match unsafe { sys::srt_recvmsg2(sock, recv_buf.as_mut_ptr() as *mut sys::char, recv_buf.len() as _, &mut mc as _) } {
+                        len if len >= 0 => {
+                            let srt_now = crate::now();
+                            let now = Instant::now();
+                            let source_time = match mc.srctime {
+                                t @ _ if t > 0 && srt_now > t => Some(now - Duration::from_micros((srt_now - t) as _)),
+                                _ => None,
+                            };
+                            Ok(ReadResult {
+                                n: len as _,
+                                receive_time: now,
+                                source_time,
+                            })
+                        }
+                        _ => Err(io::Error::new(io::ErrorKind::Other, "srt_recvmsg2 error")),
+                    };
+                    (recv_buf, r)
+                });
+                let poll = Pin::new(&mut handle).poll(cx);
+                self.read_state = IOState::Reading(handle);
+                poll
+            }
+            IOState::Reading(handle) => Pin::new(handle).poll(cx),
+            IOState::Writing(_) => panic!("read polled during pending write"),
+        }
     }
 }
 
@@ -191,39 +243,53 @@ impl AsyncRead for AsyncStream {
     }
 
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context, buf: &mut [u8]) -> Poll<io::Result<usize>> {
-        let poll = match &mut self.read_state {
-            IOState::Idle(ref mut recv_buf) => {
-                let mut recv_buf = match recv_buf.take() {
-                    Some(b) => b,
-                    None => Vec::new(),
-                };
-                recv_buf.resize(buf.len(), 0);
-                let sock = self.socket.raw();
-                let mut handle = spawn_blocking(move || {
-                    let r = match unsafe { sys::srt_recv(sock, recv_buf.as_mut_ptr() as *mut sys::char, recv_buf.len() as _) } {
-                        len if len >= 0 => Ok(len as usize),
-                        _ => Err(io::Error::new(io::ErrorKind::Other, "srt_recv error")),
-                    };
-                    (recv_buf, r)
-                });
-                let poll = Pin::new(&mut handle).poll(cx);
-                self.read_state = IOState::Busy(handle);
-                poll
-            }
-            IOState::Busy(handle) => Pin::new(handle).poll(cx),
-        };
-
-        match poll {
+        match self.poll_read_impl(cx, buf.len()) {
             Poll::Ready(Ok((recv_buf, result))) => {
-                if let Ok(n) = result {
-                    let n = n.min(buf.len());
+                if let Ok(result) = &result {
+                    let n = result.n.min(buf.len());
                     buf[..n].copy_from_slice(&recv_buf[..n]);
                 }
                 self.read_state = IOState::Idle(Some(recv_buf));
-                Poll::Ready(result)
+                Poll::Ready(result.map(|r| r.n))
             }
             Poll::Ready(Err(join_error)) => {
                 self.read_state = IOState::Idle(None);
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("join error: {}", join_error))))
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+pub struct Receive<'a> {
+    stream: &'a mut AsyncStream,
+    buf: Option<&'a mut [u8]>,
+}
+
+impl<'a> Future for Receive<'a> {
+    type Output = io::Result<Message<'a>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let recv_len = match &self.buf {
+            Some(buf) => buf.len(),
+            None => panic!("poll called after completion"),
+        };
+        match self.stream.poll_read_impl(cx, recv_len) {
+            Poll::Ready(Ok((recv_buf, result))) => {
+                let result = result.map(|r| {
+                    let buf = self.buf.take().expect("we ensured that we have buf above");
+                    buf[..r.n].copy_from_slice(&recv_buf[..r.n]);
+                    Message {
+                        data: &buf[..r.n],
+                        receive_time: r.receive_time,
+                        source_time: r.source_time,
+                    }
+                });
+                self.stream.read_state = IOState::Idle(Some(recv_buf));
+                Poll::Ready(result)
+            }
+            Poll::Ready(Err(join_error)) => {
+                self.stream.read_state = IOState::Idle(None);
                 Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("join error: {}", join_error))))
             }
             Poll::Pending => Poll::Pending,
@@ -250,10 +316,11 @@ impl AsyncWrite for AsyncStream {
                     (send_buf, r)
                 });
                 let poll = Pin::new(&mut handle).poll(cx);
-                self.write_state = IOState::Busy(handle);
+                self.write_state = IOState::Writing(handle);
                 poll
             }
-            IOState::Busy(handle) => Pin::new(handle).poll(cx),
+            IOState::Writing(handle) => Pin::new(handle).poll(cx),
+            IOState::Reading(_) => panic!("write polled during pending read"),
         };
 
         match poll {
@@ -304,6 +371,12 @@ mod test {
         let mut buf = [0; 1316];
         assert_eq!(server_conn.read(&mut buf).await.unwrap(), 3);
         assert_eq!(&buf[0..3], b"foo");
+
+        assert_eq!(client_conn.write(b"bar").await.unwrap(), 3);
+
+        let msg = server_conn.receive(&mut buf).await.unwrap();
+        assert_eq!(msg.data, b"bar");
+        assert_eq!(Instant::now() - msg.source_time.unwrap() >= Duration::from_micros(1), true);
     }
 
     #[tokio::test]
