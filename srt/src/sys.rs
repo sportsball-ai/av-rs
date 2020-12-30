@@ -57,6 +57,8 @@ extern "C" {
     pub fn srt_startup() -> int;
     pub fn srt_cleanup() -> int;
 
+    pub fn srt_time_now() -> i64;
+
     pub fn srt_create_socket() -> SRTSOCKET;
     pub fn srt_close(u: SRTSOCKET) -> int;
 

@@ -10,6 +10,7 @@ use std::{
     pin::Pin,
     str,
     sync::{Arc, Mutex, Weak},
+    time::Instant,
 };
 
 #[cfg(feature = "async")]
@@ -330,8 +331,8 @@ impl<'c> Listener<'c> {
 pub struct Message<'a> {
     pub data: &'a [u8],
 
-    /// The timestamp applied by the source, if any, in microseconds since the epoch.
-    pub source_time_usec: Option<i64>,
+    pub receive_time: Instant,
+    pub source_time: Option<Instant>,
 }
 
 pub struct Stream {
@@ -395,6 +396,10 @@ impl Write for Stream {
     }
 }
 
+pub fn now() -> i64 {
+    unsafe { sys::srt_time_now() }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -447,5 +452,10 @@ mod test {
         assert_eq!(conn.id(), options.stream_id.as_ref());
 
         server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_now() {
+        assert_eq!(now() >= 0, true);
     }
 }
