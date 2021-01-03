@@ -61,6 +61,12 @@ impl fmt::Display for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+pub(crate) fn new_io_error(fn_name: &'static str) -> io::Error {
+    let mut errno = 0;
+    let code = unsafe { sys::srt_getlasterror(&mut errno as _) };
+    io::Error::new(io::ErrorKind::Other, format!("{} error: {} (errno = {})", fn_name, code, errno))
+}
+
 fn check_code(code: sys::int) -> Result<()> {
     match code {
         0 => Ok(()),
@@ -378,7 +384,7 @@ impl Read for Stream {
         let mut mc = sys::SRT_MSGCTRL::default();
         match unsafe { sys::srt_recvmsg2(self.socket.raw(), buf.as_mut_ptr() as *mut sys::char, buf.len() as _, &mut mc as _) } {
             len if len >= 0 => Ok(len as usize),
-            _ => Err(io::Error::new(io::ErrorKind::Other, "srt_recv error")),
+            _ => Err(new_io_error("srt_recvmsg2")),
         }
     }
 }
@@ -387,7 +393,7 @@ impl Write for Stream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match unsafe { sys::srt_send(self.socket.raw(), buf.as_ptr() as *const sys::char, buf.len() as _) } {
             len if len >= 0 => Ok(len as usize),
-            _ => Err(io::Error::new(io::ErrorKind::Other, "srt_send error")),
+            _ => Err(new_io_error("srt_send")),
         }
     }
 
