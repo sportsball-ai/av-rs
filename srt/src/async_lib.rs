@@ -1,4 +1,7 @@
-use super::{check_code, listener_callback, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result, Socket};
+use super::{
+    check_code, listener_callback, new_io_error, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result,
+    Socket,
+};
 use std::{
     future::Future,
     io,
@@ -245,7 +248,7 @@ impl AsyncWrite for AsyncStream {
                 let mut handle = spawn_blocking(move || {
                     let r = match unsafe { sys::srt_send(sock, send_buf.as_ptr() as *const sys::char, send_buf.len() as _) } {
                         len if len >= 0 => Ok(len as usize),
-                        _ => Err(io::Error::new(io::ErrorKind::Other, "srt_send error")),
+                        _ => Err(new_io_error("srt_send")),
                     };
                     (send_buf, r)
                 });

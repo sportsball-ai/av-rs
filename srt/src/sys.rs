@@ -21,6 +21,8 @@ extern "C" {
     pub fn srt_startup() -> int;
     pub fn srt_cleanup() -> int;
 
+    pub fn srt_getlasterror(errno_loc: *mut int) -> int;
+
     pub fn srt_create_socket() -> SRTSOCKET;
     pub fn srt_close(u: SRTSOCKET) -> int;
 
