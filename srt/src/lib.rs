@@ -25,7 +25,7 @@ pub enum Error {
     UnsupportedFamily(sys::int),
     IOError(io::Error),
     Utf8Error(str::Utf8Error),
-    SRTError,
+    SRTError(sys::int, sys::int),
     #[cfg(feature = "async")]
     JoinError(tokio::task::JoinError),
 }
@@ -51,7 +51,7 @@ impl fmt::Display for Error {
             Self::UnsupportedFamily(family) => write!(f, "unsupported family: {}", family),
             Self::IOError(e) => write!(f, "io error: {}", e),
             Self::Utf8Error(e) => write!(f, "utf8 error: {}", e),
-            Self::SRTError => write!(f, "srt error"),
+            Self::SRTError(code, errno) => write!(f, "srt error: {} (errno = {})", code, errno),
             #[cfg(feature = "async")]
             Self::JoinError(e) => write!(f, "join error: {}", e),
         }
@@ -69,7 +69,11 @@ pub(crate) fn new_io_error(fn_name: &'static str) -> io::Error {
 fn check_code(code: sys::int) -> Result<()> {
     match code {
         0 => Ok(()),
-        _ => Err(Error::SRTError),
+        _ => {
+            let mut errno = 0;
+            let code = unsafe { sys::srt_getlasterror(&mut errno as _) };
+            Err(Error::SRTError(code, errno))
+        }
     }
 }
 
