@@ -10,7 +10,6 @@ use std::{
     pin::Pin,
     str,
     sync::{Arc, Mutex, Weak},
-    time::Instant,
 };
 
 #[cfg(feature = "async")]
@@ -328,13 +327,6 @@ impl<'c> Listener<'c> {
     }
 }
 
-pub struct Message<'a> {
-    pub data: &'a [u8],
-
-    pub receive_time: Instant,
-    pub source_time: Option<Instant>,
-}
-
 pub struct Stream {
     socket: Socket,
     id: Option<String>,
@@ -375,8 +367,7 @@ impl Stream {
 
 impl Read for Stream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let mut mc = sys::SRT_MSGCTRL::default();
-        match unsafe { sys::srt_recvmsg2(self.socket.raw(), buf.as_mut_ptr() as *mut sys::char, buf.len() as _, &mut mc as _) } {
+        match unsafe { sys::srt_recv(self.socket.raw(), buf.as_mut_ptr() as *mut sys::char, buf.len() as _) } {
             len if len >= 0 => Ok(len as usize),
             _ => Err(io::Error::new(io::ErrorKind::Other, "srt_recv error")),
         }
@@ -394,10 +385,6 @@ impl Write for Stream {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
-
-pub fn now() -> i64 {
-    unsafe { sys::srt_time_now() }
 }
 
 #[cfg(test)]
@@ -452,10 +439,5 @@ mod test {
         assert_eq!(conn.id(), options.stream_id.as_ref());
 
         server_thread.join().unwrap();
-    }
-
-    #[test]
-    fn test_now() {
-        assert_eq!(now() >= 0, true);
     }
 }
