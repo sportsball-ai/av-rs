@@ -379,7 +379,7 @@ impl Read for Stream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match unsafe { sys::srt_recv(self.socket.raw(), buf.as_mut_ptr() as *mut sys::char, buf.len() as _) } {
             len if len >= 0 => Ok(len as usize),
-            _ => Err(new_io_error("srt_recvmsg2")),
+            _ => Err(new_io_error("srt_recv")),
         }
     }
 }

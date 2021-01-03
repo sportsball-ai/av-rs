@@ -205,7 +205,7 @@ impl AsyncRead for AsyncStream {
                 let mut handle = spawn_blocking(move || {
                     let r = match unsafe { sys::srt_recv(sock, recv_buf.as_mut_ptr() as *mut sys::char, recv_buf.len() as _) } {
                         len if len >= 0 => Ok(len as usize),
-                        _ => Err(io::Error::new(io::ErrorKind::Other, "srt_recv error")),
+                        _ => Err(new_io_error("srt_recv error")),
                     };
                     (recv_buf, r)
                 });
