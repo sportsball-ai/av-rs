@@ -171,6 +171,15 @@ impl Socket {
         if let Some(v) = &options.stream_id {
             self.set(sys::SRT_SOCKOPT::STREAMID, v)?;
         }
+        if let Some(v) = &options.too_late_packet_drop {
+            self.set(sys::SRT_SOCKOPT::TLPKTDROP, *v)?;
+        }
+        if let Some(v) = &options.timestamp_based_packet_delivery_mode {
+            self.set(sys::SRT_SOCKOPT::TSBPDMODE, *v)?;
+        }
+        if let Some(v) = &options.receive_buffer_size {
+            self.set(sys::SRT_SOCKOPT::RCVBUF, *v)?;
+        }
         Ok(())
     }
 
@@ -346,6 +355,9 @@ pub struct Stream {
 pub struct ConnectOptions {
     pub passphrase: Option<String>,
     pub stream_id: Option<String>,
+    pub timestamp_based_packet_delivery_mode: Option<bool>,
+    pub too_late_packet_drop: Option<bool>,
+    pub receive_buffer_size: Option<i32>,
 }
 
 impl Stream {
