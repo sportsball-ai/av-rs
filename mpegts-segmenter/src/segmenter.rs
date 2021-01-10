@@ -102,7 +102,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                 && (elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64())
                             {
                                 // start a new segment if this is a keyframe
-                                if p.adaptation_field.map(|af| af.random_access_indicator).unwrap_or(false) {
+                                if p.adaptation_field.and_then(|af| af.random_access_indicator).unwrap_or(false) {
                                     true
                                 } else if let Some(payload) = p.payload {
                                     // some muxers don't set RAI bits. if possible, see if this

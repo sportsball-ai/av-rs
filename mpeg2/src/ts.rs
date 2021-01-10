@@ -12,11 +12,11 @@ pub struct Packet<'a> {
     pub payload: Option<&'a [u8]>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct AdaptationField {
     pub length: u8,
-    pub discontinuity_indicator: bool,
-    pub random_access_indicator: bool,
+    pub discontinuity_indicator: Option<bool>,
+    pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
 }
 
@@ -175,24 +175,23 @@ impl<'a> Packet<'a> {
 
         let adaptation_field_control = buf[3] & 0x30;
 
-        let adaptation_field = if adaptation_field_control & 0x20 != 0 && buf[4] >= 1 {
-            let length = buf[4] as usize;
-            Some(AdaptationField {
-                length: if length > PACKET_LENGTH - 5 {
-                    bail!("adaptation field length too long")
-                } else {
-                    length as _
-                },
-                discontinuity_indicator: buf[5] & 0x80 != 0,
-                random_access_indicator: buf[5] & 0x40 != 0,
-                program_clock_reference_27mhz: if length >= 7 && buf[5] & 0x10 != 0 {
+        let adaptation_field = if adaptation_field_control & 0x20 != 0 {
+            let mut af = AdaptationField::default();
+            af.length = buf[4];
+            if af.length as usize > PACKET_LENGTH - 5 {
+                bail!("adaptation field length too long")
+            } else if af.length > 0 {
+                af.discontinuity_indicator = Some(buf[5] & 0x80 != 0);
+                af.random_access_indicator = Some(buf[5] & 0x40 != 0);
+                af.program_clock_reference_27mhz = if af.length >= 7 && buf[5] & 0x10 != 0 {
                     let base = (buf[6] as u64) << 25 | (buf[7] as u64) << 17 | (buf[8] as u64) << 9 | (buf[9] as u64) << 1 | (buf[10] as u64) >> 7;
                     let ext = (buf[10] as u64) & 0x80 << 1 | (buf[11] as u64);
                     Some(base * 300 + ext)
                 } else {
                     None
-                },
-            })
+                };
+            }
+            Some(af)
         } else {
             None
         };
@@ -264,8 +263,8 @@ mod test {
             packets[3].adaptation_field,
             Some(AdaptationField {
                 length: 7,
-                discontinuity_indicator: false,
-                random_access_indicator: true,
+                discontinuity_indicator: Some(false),
+                random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
             })
         );
@@ -309,7 +308,7 @@ mod test {
             }
 
             if let Some(f) = &p.adaptation_field {
-                if f.random_access_indicator {
+                if f.random_access_indicator.unwrap_or(false) {
                     rais += 1;
                 }
                 if let Some(pcr) = f.program_clock_reference_27mhz {
@@ -320,5 +319,23 @@ mod test {
         }
         assert_eq!(rais, 62);
         assert_eq!(last_pcr, 286_917_900);
+    }
+
+    #[test]
+    fn test_empty_adaptation_field() {
+        let data = vec![
+            0x47, 0x40, 0x21, 0x38, 0x00, 0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x85, 0x80, 0x07, 0x23, 0x5F, 0xFF, 0x4F, 0x8B, 0xFF, 0xFF, 0x00, 0x00, 0x00,
+            0x01, 0x09, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x06, 0x01, 0x09, 0x1A, 0x24, 0x17, 0x1C, 0x1A, 0x00, 0x00, 0x03, 0x00, 0x40, 0x80, 0x00,
+            0x00, 0x00, 0x01, 0x21, 0x9A, 0x00, 0x07, 0x03, 0x01, 0xE0, 0x05, 0x42, 0xE8, 0x4B, 0x90, 0x12, 0x5C, 0xE7, 0x5F, 0xD2, 0x97, 0x9E, 0xAD, 0x7F,
+            0x08, 0xF4, 0x31, 0xCB, 0xE6, 0x1B, 0xD8, 0x20, 0x67, 0xCD, 0xEA, 0x14, 0xE5, 0xEB, 0x2F, 0x2F, 0x40, 0xA1, 0xDE, 0x43, 0x68, 0xA1, 0xBE, 0xAD,
+            0xF5, 0x6F, 0xAB, 0x90, 0x65, 0xD5, 0xC8, 0x9E, 0xAD, 0x00, 0x9B, 0x75, 0x72, 0x6E, 0xBD, 0x02, 0xFF, 0x56, 0x80, 0x10, 0x8B, 0xAB, 0xC3, 0x5D,
+            0x5D, 0x27, 0x56, 0x20, 0x6C, 0xEB, 0x2A, 0xEA, 0xF0, 0x16, 0x3D, 0x5E, 0x0A, 0x7A, 0xE5, 0x00, 0xA7, 0xF4, 0x66, 0x81, 0x83, 0xAB, 0x97, 0xC8,
+            0x7A, 0x00, 0xFE, 0xAE, 0x5F, 0x58, 0x21, 0x0E, 0xAC, 0x17, 0x56, 0x01, 0x1E, 0x8C, 0xC4, 0x25, 0xD1, 0xDC, 0x1F, 0xA3, 0xBD, 0x72, 0x9A, 0xC0,
+            0x79, 0xBB, 0xA2, 0xE5, 0xEA, 0xC4, 0xBD, 0x1D, 0xC9, 0x3A, 0xF4, 0x57, 0x7D, 0x80, 0x9A, 0x11, 0xD5, 0xFE, 0xBD, 0x2C,
+        ];
+
+        let packet = Packet::decode(&data).unwrap();
+        assert_eq!(packet.adaptation_field, Some(AdaptationField::default()));
+        assert_eq!(packet.payload.unwrap(), &data[5..]);
     }
 }
