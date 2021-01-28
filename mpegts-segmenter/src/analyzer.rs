@@ -96,6 +96,7 @@ impl Stream {
                 },
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: timecode.clone(),
+                is_interlaced: *is_interlaced,
             },
             Self::HEVCVideo {
                 width,
@@ -116,6 +117,7 @@ impl Stream {
                 frame_count: access_unit_counter.count(),
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
+                is_interlaced: false,
             },
             Self::Other(_) => StreamInfo::Other,
         }
@@ -386,6 +388,7 @@ pub enum StreamInfo {
         frame_count: u64,
         rfc6381_codec: Option<String>,
         timecode: Option<Timecode>,
+        is_interlaced: bool,
     },
     Other,
 }
@@ -697,6 +700,7 @@ mod test {
                     frame_count: 600,
                     rfc6381_codec: Some("avc1.7a0020".to_string()),
                     timecode: None,
+                    is_interlaced: false,
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -732,6 +736,7 @@ mod test {
                     frame_count: 33,
                     rfc6381_codec: Some("avc1.42003c".to_string()),
                     timecode: None,
+                    is_interlaced: false,
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -767,6 +772,7 @@ mod test {
                     frame_count: 600,
                     rfc6381_codec: Some("hvc1.4.10.L120.9D.08".to_string()),
                     timecode: None,
+                    is_interlaced: false,
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -802,6 +808,7 @@ mod test {
                     frame_count: 31,
                     rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                     timecode: None,
+                    is_interlaced: false,
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -836,6 +843,7 @@ mod test {
                 frame_count: 30,
                 rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                 timecode: None,
+                is_interlaced: false,
             },]
         );
     }
@@ -863,6 +871,7 @@ mod test {
                 frame_count: 31,
                 rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                 timecode: None,
+                is_interlaced: false,
             },]
         );
     }
@@ -896,6 +905,7 @@ mod test {
                         seconds: 26,
                         frames: 2
                     }),
+                    is_interlaced: true,
                 },
                 StreamInfo::Audio {
                     channel_count: 2,

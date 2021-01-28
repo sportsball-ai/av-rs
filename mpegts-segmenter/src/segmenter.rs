@@ -255,6 +255,7 @@ impl SegmentInfo {
                                 frame_count,
                                 rfc6381_codec,
                                 timecode,
+                                is_interlaced,
                             },
                         ) => Some(StreamInfo::Video {
                             width: *width,
@@ -263,6 +264,7 @@ impl SegmentInfo {
                             frame_count: if frame_count >= prev_frame_count { frame_count - prev_frame_count } else { 0 },
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
+                            is_interlaced: *is_interlaced,
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
