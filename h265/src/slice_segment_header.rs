@@ -23,6 +23,10 @@ pub struct RefPicListsModification {
     //}
 }
 
+fn ceil_log2(n: u64) -> u32 {
+    (n - 1).next_power_of_two().trailing_zeros()
+}
+
 impl RefPicListsModification {
     pub fn decode<T: Iterator<Item = u8>>(
         bs: &mut Bitstream<T>,
@@ -37,7 +41,7 @@ impl RefPicListsModification {
 
         if ret.ref_pic_list_modification_flag_l0.0 != 0 {
             for _ in 0..=num_ref_idx_l0_active_minus1 {
-                ret.list_entry_l0.push(bs.read_bits(NumPicTotalCurr.next_power_of_two().trailing_zeros() as _)?);
+                ret.list_entry_l0.push(bs.read_bits(ceil_log2(NumPicTotalCurr) as _)?);
             }
         }
 
@@ -45,7 +49,7 @@ impl RefPicListsModification {
             bs.decode(&mut ret.ref_pic_list_modification_flag_l1)?;
             if ret.ref_pic_list_modification_flag_l1.0 != 0 {
                 for _ in 0..=num_ref_idx_l1_active_minus1 {
-                    ret.list_entry_l1.push(bs.read_bits(NumPicTotalCurr.next_power_of_two().trailing_zeros() as _)?);
+                    ret.list_entry_l1.push(bs.read_bits(ceil_log2(NumPicTotalCurr) as _)?);
                 }
             }
         }
@@ -58,7 +62,7 @@ impl RefPicListsModification {
 
         if self.ref_pic_list_modification_flag_l0.0 != 0 {
             for entry in &self.list_entry_l0 {
-                bs.write_bits(*entry, NumPicTotalCurr.next_power_of_two().trailing_zeros() as _)?;
+                bs.write_bits(*entry, ceil_log2(NumPicTotalCurr) as _)?;
             }
         }
 
@@ -66,7 +70,7 @@ impl RefPicListsModification {
             bs.encode(&self.ref_pic_list_modification_flag_l1)?;
             if self.ref_pic_list_modification_flag_l1.0 != 0 {
                 for entry in &self.list_entry_l1 {
-                    bs.write_bits(*entry, NumPicTotalCurr.next_power_of_two().trailing_zeros() as _)?;
+                    bs.write_bits(*entry, ceil_log2(NumPicTotalCurr) as _)?;
                 }
             }
         }
@@ -223,8 +227,10 @@ impl SliceSegmentHeader {
             if pps.dependent_slice_segments_enabled_flag.0 != 0 {
                 bs.decode(&mut ret.dependent_slice_segment_flag)?;
             }
-            ret.slice_segment_address = bs.read_bits(sps.PicSizeInCtbsY().next_power_of_two().trailing_zeros() as _)?;
+            ret.slice_segment_address = bs.read_bits(ceil_log2(sps.PicSizeInCtbsY()) as _)?;
         }
+
+        ret.collocated_from_l0_flag.0 = 1;
 
         if ret.dependent_slice_segment_flag.0 == 0 {
             for _ in 0..pps.num_extra_slice_header_bits.0 {
@@ -248,7 +254,7 @@ impl SliceSegmentHeader {
                 if ret.short_term_ref_pic_set_sps_flag.0 == 0 {
                     ret.st_ref_pic_set = ShortTermRefPicSet::decode(bs, sps.num_short_term_ref_pic_sets.0)?;
                 } else if sps.num_short_term_ref_pic_sets.0 > 1 {
-                    ret.short_term_ref_pic_set_idx = bs.read_bits(sps.num_short_term_ref_pic_sets.0.next_power_of_two().trailing_zeros() as _)?;
+                    ret.short_term_ref_pic_set_idx = bs.read_bits(ceil_log2(sps.num_short_term_ref_pic_sets.0) as _)?;
                 }
 
                 if sps.long_term_ref_pics_present_flag.0 != 0 {
@@ -265,7 +271,7 @@ impl SliceSegmentHeader {
                     for i in 0..n {
                         if i < ret.num_long_term_sps.0 as _ {
                             if sps.num_long_term_ref_pics_sps.0 > 1 {
-                                ret.lt_idx_sps[i] = bs.read_bits(sps.num_long_term_ref_pics_sps.0.next_power_of_two().trailing_zeros() as _)?;
+                                ret.lt_idx_sps[i] = bs.read_bits(ceil_log2(sps.num_long_term_ref_pics_sps.0) as _)?;
                             }
                         } else {
                             ret.poc_lsb_lt[i] = bs.read_bits(sps.log2_max_pic_order_cnt_lsb_minus4.0 as usize + 4)?;
@@ -411,7 +417,7 @@ impl SliceSegmentHeader {
             if pps.dependent_slice_segments_enabled_flag.0 != 0 {
                 bs.encode(&self.dependent_slice_segment_flag)?;
             }
-            bs.write_bits(self.slice_segment_address, sps.PicSizeInCtbsY().next_power_of_two().trailing_zeros() as _)?;
+            bs.write_bits(self.slice_segment_address, ceil_log2(sps.PicSizeInCtbsY()) as _)?;
         }
 
         if self.dependent_slice_segment_flag.0 == 0 {
@@ -434,10 +440,7 @@ impl SliceSegmentHeader {
                 if self.short_term_ref_pic_set_sps_flag.0 == 0 {
                     self.st_ref_pic_set.encode(bs, sps.num_short_term_ref_pic_sets.0)?;
                 } else if sps.num_short_term_ref_pic_sets.0 > 1 {
-                    bs.write_bits(
-                        self.short_term_ref_pic_set_idx,
-                        sps.num_short_term_ref_pic_sets.0.next_power_of_two().trailing_zeros() as _,
-                    )?;
+                    bs.write_bits(self.short_term_ref_pic_set_idx, ceil_log2(sps.num_short_term_ref_pic_sets.0) as _)?;
                 }
 
                 if sps.long_term_ref_pics_present_flag.0 != 0 {
@@ -450,7 +453,7 @@ impl SliceSegmentHeader {
                     for i in 0..n {
                         if i < self.num_long_term_sps.0 as _ {
                             if sps.num_long_term_ref_pics_sps.0 > 1 {
-                                bs.write_bits(self.lt_idx_sps[i], sps.num_long_term_ref_pics_sps.0.next_power_of_two().trailing_zeros() as _)?;
+                                bs.write_bits(self.lt_idx_sps[i], ceil_log2(sps.num_long_term_ref_pics_sps.0) as _)?;
                             }
                         } else {
                             bs.write_bits(self.poc_lsb_lt[i], sps.log2_max_pic_order_cnt_lsb_minus4.0 as usize + 4)?;
@@ -641,6 +644,30 @@ mod test {
             let ssh = SliceSegmentHeader::decode(&mut bs, 1, &sps, &pps).unwrap();
 
             assert_eq!(ssh.num_entry_point_offsets.0, 143);
+
+            assert_eq!(bs.next_bits(1), None);
+
+            let mut round_trip = Vec::new();
+            ssh.encode(&mut BitstreamWriter::new(&mut round_trip), 1, &sps, &pps).unwrap();
+            assert_eq!(round_trip, data);
+        }
+    }
+
+    #[test]
+    fn test_slice_segment_header_2() {
+        {
+            let sps_data = vec![
+                0x01, 0x02, 0x60, 0x00, 0x00, 0x00, 0xb0, 0x00, 0x00, 0x00, 0x00, 0x00, 0xb4, 0xa0, 0x00, 0xf0, 0x08, 0x00, 0x43, 0x84, 0xd8, 0xdb, 0xe4, 0x91,
+                0x4b, 0xd3, 0x50, 0x10, 0x10, 0x10, 0x08,
+            ];
+            let sps = SequenceParameterSet::decode(&mut Bitstream::new(sps_data)).unwrap();
+
+            let pps_data = vec![0xc0, 0xf2, 0xc6, 0x8d, 0x09, 0xc0, 0xa0, 0x14, 0x7b, 0x24];
+            let pps = PictureParameterSet::decode(&mut Bitstream::new(pps_data)).unwrap();
+
+            let data = vec![0xd0, 0x00, 0x11, 0x74, 0x00, 0x01, 0x7a, 0x48, 0x36, 0xf8];
+            let mut bs = Bitstream::new(data.iter().copied());
+            let ssh = SliceSegmentHeader::decode(&mut bs, 1, &sps, &pps).unwrap();
 
             assert_eq!(bs.next_bits(1), None);
 
