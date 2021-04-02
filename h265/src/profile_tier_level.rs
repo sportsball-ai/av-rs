@@ -1,7 +1,7 @@
 use super::{decode, encode, syntax_elements::*, Bitstream, BitstreamWriter, Decode, Encode};
 use std::io;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ProfileTierLevel {
     // if( profilePresentFlag ) {
     pub general_profile_space: U2,

@@ -24,7 +24,7 @@ pub struct RefPicListsModification {
 }
 
 fn ceil_log2(n: u64) -> u32 {
-    (n - 1).next_power_of_two().trailing_zeros()
+    n.next_power_of_two().trailing_zeros()
 }
 
 impl RefPicListsModification {
@@ -615,6 +615,14 @@ impl SliceSegmentHeader {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_ceil_log2() {
+        assert_eq!(ceil_log2(1), 0);
+        assert_eq!(ceil_log2(2), 1);
+        assert_eq!(ceil_log2(3), 2);
+        assert_eq!(ceil_log2(4), 2);
+    }
 
     #[test]
     fn test_slice_segment_header() {

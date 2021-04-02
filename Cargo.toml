@@ -5,6 +5,7 @@ members = [
     "h264",
     "h265",
     "h265-tile-mux",
+    "h265-tile-join",
     "hmp",
     "macos/core-foundation",
     "macos/core-media",

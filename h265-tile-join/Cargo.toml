@@ -1,0 +1,17 @@
+[package]
+name = "h265-tile-join"
+version = "0.1.0"
+edition = "2018"
+
+[features]
+default = []
+bin = ["clap"]
+
+[[bin]]
+name = "h265-tile-join"
+path = "src/main.rs"
+required-features = ["bin"]
+
+[dependencies]
+h265 = { path = "../h265" }
+clap = { version = "2.33.3", optional = true }
