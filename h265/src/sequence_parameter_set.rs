@@ -1,7 +1,7 @@
 use super::{decode, encode, syntax_elements::*, Bitstream, BitstreamWriter, Decode, Encode, ProfileTierLevel};
 use std::io;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SequenceParameterSetSubLayerOrderingInfo {
     pub sps_max_dec_pic_buffering_minus1: UE,
     pub sps_max_num_reorder_pics: UE,
@@ -29,7 +29,7 @@ impl Encode for SequenceParameterSetSubLayerOrderingInfo {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct ShortTermRefPicSet {
     // if( stRpsIdx != 0 )
     pub inter_ref_pic_set_prediction_flag: U1,
@@ -114,7 +114,7 @@ impl ShortTermRefPicSet {
 }
 
 // ITU-T H.265, 11/2019 7.3.2.1.1
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SequenceParameterSet {
     pub sps_video_parameter_set_id: U4,
     pub sps_max_sub_layers_minus1: U3,
@@ -484,7 +484,7 @@ impl Encode for SequenceParameterSet {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct VUIParameters {
     pub aspect_ratio_info_present_flag: U1,
 

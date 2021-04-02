@@ -2,7 +2,7 @@ use super::{decode, encode, syntax_elements::*, Bitstream, BitstreamWriter, Deco
 use std::io;
 
 // ITU-T H.265, 11/2019 7.3.2.3.1
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PictureParameterSet {
     pub pps_pic_parameter_set_id: UE,
     pub pps_seq_parameter_set_id: UE,
