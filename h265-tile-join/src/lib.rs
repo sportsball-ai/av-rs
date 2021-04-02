@@ -165,7 +165,7 @@ impl<T: AsRef<[u8]>, Iter: Iterator<Item = Result<T, E>>, E: From<io::Error>> In
                 pps,
                 current_nalu: None,
             }),
-            _ => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "parameter sets not found").into()),
+            _ => Err(io::Error::new(io::ErrorKind::UnexpectedEof, "parameter sets not found").into()),
         }
     }
 
