@@ -29,6 +29,8 @@ impl fmt::Display for NSError {
 impl Error for NSError {}
 
 impl NSError {
+    /// # Safety
+    /// The caller must ensure that the given pointer is a valid NSError pointer.
     pub unsafe fn from_raw(ptr: *const c_void) -> Self {
         Self(ptr)
     }

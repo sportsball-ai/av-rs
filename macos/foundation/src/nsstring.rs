@@ -11,6 +11,8 @@ mod sys {
 pub struct NSString(*const c_void);
 
 impl NSString {
+    /// # Safety
+    /// The caller must ensure that the given pointer is a valid NSError pointer.
     pub unsafe fn from_raw(ptr: *const c_void) -> Self {
         Self(ptr)
     }
