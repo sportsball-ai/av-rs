@@ -12,6 +12,8 @@ fn main() {
             .clang_arg(format!("-isysroot{}", sdk_root))
             .header("src/lib.hpp")
             .whitelist_function("CVImageBuffer.+")
+            .whitelist_function("CVPixelBuffer.+")
+            .whitelist_var("kCVPixelBufferLock_ReadOnly")
             .generate()
             .expect("unable to generate bindings");
 

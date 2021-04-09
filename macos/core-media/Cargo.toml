@@ -10,3 +10,4 @@ bindgen = "0.*"
 
 [dependencies]
 core-foundation = { path = "../core-foundation" }
+core-video = { path = "../core-video" }
