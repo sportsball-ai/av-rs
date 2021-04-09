@@ -60,6 +60,12 @@ pub struct AVCaptureVideoDataOutputVideoSettings {
     pub pixel_format_type: Option<u32>,
 }
 
+impl Default for AVCaptureVideoDataOutput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AVCaptureVideoDataOutput {
     pub fn new() -> Self {
         Self(unsafe { sys::avrs_new_av_capture_video_data_output() })

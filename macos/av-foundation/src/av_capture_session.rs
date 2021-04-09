@@ -19,6 +19,12 @@ pub mod sys {
 
 pub struct AVCaptureSession(*const c_void);
 
+impl Default for AVCaptureSession {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AVCaptureSession {
     pub fn new() -> Self {
         Self(unsafe { sys::avrs_new_av_capture_session() })
