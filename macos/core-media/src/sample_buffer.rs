@@ -40,4 +40,15 @@ impl SampleBuffer {
         )?;
         Ok(Self(ret))
     }
+
+    pub fn image_buffer(&self) -> Option<core_video::ImageBuffer> {
+        unsafe {
+            let buf = sys::CMSampleBufferGetImageBuffer(self.0);
+            if buf.is_null() {
+                None
+            } else {
+                Some(core_video::ImageBuffer::with_cf_type_ref(buf as _))
+            }
+        }
+    }
 }
