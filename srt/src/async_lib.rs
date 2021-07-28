@@ -39,11 +39,11 @@ impl AsyncListener<'static> {
         for addr in addr.to_socket_addrs()? {
             let (addr, len) = to_sockaddr(&addr);
             unsafe {
-                check_code(sys::srt_bind(socket.raw(), addr, len as _))?;
+                check_code("srt_bind", sys::srt_bind(socket.raw(), addr, len as _))?;
             }
         }
         unsafe {
-            check_code(sys::srt_listen(socket.raw(), 10))?;
+            check_code("srt_listen", sys::srt_listen(socket.raw(), 10))?;
         }
         Ok(Self { socket, _callback: None })
     }
@@ -54,7 +54,9 @@ impl<'c> AsyncListener<'c> {
         let mut cb: Box<Box<dyn ListenerCallback>> = Box::new(Box::new(f));
         let ptr = &mut *cb as *mut Box<dyn ListenerCallback>;
         let pb = unsafe { Pin::new_unchecked(cb) };
-        check_code(unsafe { sys::srt_listen_callback(self.socket.raw(), listener_callback, ptr as *mut _) })?;
+        check_code("srt_listen_callback", unsafe {
+            sys::srt_listen_callback(self.socket.raw(), listener_callback, ptr as *mut _)
+        })?;
         Ok(AsyncListener {
             _callback: Some(pb),
             socket: self.socket,
@@ -171,7 +173,7 @@ impl<'a> Future for Connect {
                     let socket = Socket::new()?;
                     socket.set_connect_options(&options)?;
                     unsafe {
-                        check_code(sys::srt_connect(socket.raw(), addr, len as _))?;
+                        check_code("srt_connect", sys::srt_connect(socket.raw(), addr, len as _))?;
                     }
                     Ok(AsyncStream::new(options.stream_id, socket))
                 });

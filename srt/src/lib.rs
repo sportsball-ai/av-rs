@@ -25,7 +25,11 @@ pub enum Error {
     UnsupportedFamily(sys::int),
     IOError(io::Error),
     Utf8Error(str::Utf8Error),
-    SRTError(sys::int, sys::int),
+    SRTError {
+        fn_name: &'static str,
+        code: sys::int,
+        errno: sys::int,
+    },
     #[cfg(feature = "async")]
     JoinError(tokio::task::JoinError),
 }
@@ -51,7 +55,7 @@ impl fmt::Display for Error {
             Self::UnsupportedFamily(family) => write!(f, "unsupported family: {}", family),
             Self::IOError(e) => write!(f, "io error: {}", e),
             Self::Utf8Error(e) => write!(f, "utf8 error: {}", e),
-            Self::SRTError(code, errno) => write!(f, "srt error: {} (errno = {})", code, errno),
+            Self::SRTError { fn_name, code, errno } => write!(f, "{} error: {} (errno = {})", fn_name, code, errno),
             #[cfg(feature = "async")]
             Self::JoinError(e) => write!(f, "join error: {}", e),
         }
@@ -63,16 +67,16 @@ type Result<T> = std::result::Result<T, Error>;
 pub(crate) fn new_io_error(fn_name: &'static str) -> io::Error {
     let mut errno = 0;
     let code = unsafe { sys::srt_getlasterror(&mut errno as _) };
-    io::Error::new(io::ErrorKind::Other, format!("{} error: {} (errno = {})", fn_name, code, errno))
+    io::Error::new(io::ErrorKind::Other, Error::SRTError { fn_name, code, errno })
 }
 
-fn check_code(code: sys::int) -> Result<()> {
+fn check_code(fn_name: &'static str, code: sys::int) -> Result<()> {
     match code {
         0 => Ok(()),
         _ => {
             let mut errno = 0;
             let code = unsafe { sys::srt_getlasterror(&mut errno as _) };
-            Err(Error::SRTError(code, errno))
+            Err(Error::SRTError { fn_name, code, errno })
         }
     }
 }
@@ -91,7 +95,7 @@ impl API {
             Some(api) => Ok(api),
             None => {
                 unsafe {
-                    check_code(sys::srt_startup())?;
+                    check_code("srt_startup", sys::srt_startup())?;
                 }
                 let new_api = Arc::new(Self);
                 *api = Some(Arc::downgrade(&new_api));
@@ -120,19 +124,25 @@ trait ToOption {
 
 impl ToOption for &String {
     fn set(&self, sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<()> {
-        check_code(unsafe { sys::srt_setsockopt(sock, 0, opt, self.as_ptr() as *const _, self.len() as _) })
+        check_code("srt_setsockopt", unsafe {
+            sys::srt_setsockopt(sock, 0, opt, self.as_ptr() as *const _, self.len() as _)
+        })
     }
 }
 
 impl ToOption for bool {
     fn set(&self, sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<()> {
-        check_code(unsafe { sys::srt_setsockopt(sock, 0, opt, self as *const bool as *const _, std::mem::size_of::<bool>() as _) })
+        check_code("srt_setsockopt", unsafe {
+            sys::srt_setsockopt(sock, 0, opt, self as *const bool as *const _, std::mem::size_of::<bool>() as _)
+        })
     }
 }
 
 impl ToOption for i32 {
     fn set(&self, sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<()> {
-        check_code(unsafe { sys::srt_setsockopt(sock, 0, opt, self as *const i32 as *const _, std::mem::size_of::<i32>() as _) })
+        check_code("srt_setsockopt", unsafe {
+            sys::srt_setsockopt(sock, 0, opt, self as *const i32 as *const _, std::mem::size_of::<i32>() as _)
+        })
     }
 }
 
@@ -144,7 +154,9 @@ impl FromOption for Option<String> {
     fn get(sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<Self> {
         let mut buf = [0u8; 512];
         let mut len = buf.len();
-        check_code(unsafe { sys::srt_getsockopt(sock, 0, opt, buf.as_mut_ptr() as *mut _, &mut len as *mut _ as *mut _) })?;
+        check_code("srt_getsockopt", unsafe {
+            sys::srt_getsockopt(sock, 0, opt, buf.as_mut_ptr() as *mut _, &mut len as *mut _ as *mut _)
+        })?;
         Ok(match len {
             0 => None,
             len => Some(str::from_utf8(&buf[..len])?.to_string()),
@@ -305,11 +317,11 @@ impl Listener<'static> {
         for addr in addr.to_socket_addrs()? {
             let (addr, len) = to_sockaddr(&addr);
             unsafe {
-                check_code(sys::srt_bind(socket.raw(), addr, len as _))?;
+                check_code("srt_bind", sys::srt_bind(socket.raw(), addr, len as _))?;
             }
         }
         unsafe {
-            check_code(sys::srt_listen(socket.raw(), 10))?;
+            check_code("srt_listen", sys::srt_listen(socket.raw(), 10))?;
         }
         Ok(Self { socket, _callback: None })
     }
@@ -320,7 +332,9 @@ impl<'c> Listener<'c> {
         let mut cb: Box<Box<dyn ListenerCallback>> = Box::new(Box::new(f));
         let ptr = &mut *cb as *mut Box<dyn ListenerCallback>;
         let pb = unsafe { Pin::new_unchecked(cb) };
-        check_code(unsafe { sys::srt_listen_callback(self.socket.raw(), listener_callback, ptr as *mut _) })?;
+        check_code("srt_listen_callback", unsafe {
+            sys::srt_listen_callback(self.socket.raw(), listener_callback, ptr as *mut _)
+        })?;
         Ok(Listener {
             _callback: Some(pb),
             socket: self.socket,
@@ -368,7 +382,7 @@ impl Stream {
             let socket = Socket::new()?;
             socket.set_connect_options(&options)?;
             unsafe {
-                match check_code(sys::srt_connect(socket.raw(), addr, len as _)) {
+                match check_code("srt_connect", sys::srt_connect(socket.raw(), addr, len as _)) {
                     Err(e) => last_err = e,
                     Ok(_) => {
                         return Ok(Self {
