@@ -4,7 +4,7 @@ use mpeg2::{
     ts::{Packet, PACKET_LENGTH},
 };
 use std::{fmt, io, time::Duration};
-use tokio::prelude::*;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,

@@ -4,14 +4,13 @@ use super::{
 };
 use std::{
     future::Future,
-    io,
-    mem::{self, MaybeUninit},
+    io, mem,
     net::{SocketAddr, ToSocketAddrs},
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::{
-    prelude::{AsyncRead, AsyncWrite},
+    io::{AsyncRead, AsyncWrite, ReadBuf},
     task::{spawn_blocking, JoinError, JoinHandle},
 };
 
@@ -191,18 +190,14 @@ impl<'a> Future for Connect {
 }
 
 impl AsyncRead for AsyncStream {
-    unsafe fn prepare_uninitialized_buffer(&self, _: &mut [MaybeUninit<u8>]) -> bool {
-        false
-    }
-
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context, buf: &mut [u8]) -> Poll<io::Result<usize>> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context, buf: &mut ReadBuf) -> Poll<io::Result<()>> {
         let poll = match &mut self.read_state {
             IOState::Idle(ref mut recv_buf) => {
                 let mut recv_buf = match recv_buf.take() {
                     Some(b) => b,
                     None => Vec::new(),
                 };
-                recv_buf.resize(buf.len(), 0);
+                recv_buf.resize(buf.remaining(), 0);
                 let sock = self.socket.raw();
                 let mut handle = spawn_blocking(move || {
                     let r = match unsafe { sys::srt_recv(sock, recv_buf.as_mut_ptr() as *mut sys::char, recv_buf.len() as _) } {
@@ -221,11 +216,11 @@ impl AsyncRead for AsyncStream {
         match poll {
             Poll::Ready(Ok((recv_buf, result))) => {
                 if let Ok(n) = result {
-                    let n = n.min(buf.len());
-                    buf[..n].copy_from_slice(&recv_buf[..n]);
+                    let n = n.min(buf.remaining());
+                    buf.put_slice(&recv_buf[..n]);
                 }
                 self.read_state = IOState::Idle(Some(recv_buf));
-                Poll::Ready(result)
+                Poll::Ready(result.map(|_| ()))
             }
             Poll::Ready(Err(join_error)) => {
                 self.read_state = IOState::Idle(None);

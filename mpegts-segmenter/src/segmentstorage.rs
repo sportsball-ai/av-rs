@@ -1,5 +1,6 @@
 use super::SegmentInfo;
-use tokio::prelude::*;
+use std::io;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 #[async_trait]
 pub trait SegmentStorage: Send + Unpin + Sized {
