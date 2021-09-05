@@ -102,8 +102,8 @@ impl EpollReactor {
     fn run(eid: int, wakers: Arc<Mutex<HashMap<sys::SRTSOCKET, Wakers>>>, pipe: UnixStream) {
         unsafe { sys::srt_epoll_add_ssock(eid, pipe.into_raw_fd(), &READ_EVENTS) };
 
-        let mut readfds = [0; 10];
-        let mut writefds = [0; 10];
+        let mut readfds = [0; 200];
+        let mut writefds = [0; 200];
         let mut sys_readfds = [0; 1];
         let mut sys_writefds = [0; 1];
         loop {
