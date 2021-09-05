@@ -23,9 +23,9 @@ pub(crate) struct EpollReactor {
     wakers: Arc<Mutex<HashMap<sys::SRTSOCKET, Wakers>>>,
 }
 
-const READ_EVENTS: int = sys::SRT_EPOLL_OPT::SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT::SRT_EPOLL_IN as int;
-const WRITE_EVENTS: int = sys::SRT_EPOLL_OPT::SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT::SRT_EPOLL_OUT as int;
-const READ_WRITE_EVENTS: int = READ_EVENTS | WRITE_EVENTS;
+pub const READ_EVENTS: int = sys::SRT_EPOLL_OPT::SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT::SRT_EPOLL_IN as int;
+pub const WRITE_EVENTS: int = sys::SRT_EPOLL_OPT::SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT::SRT_EPOLL_OUT as int;
+pub const READ_WRITE_EVENTS: int = READ_EVENTS | WRITE_EVENTS;
 
 impl EpollReactor {
     pub fn new() -> Result<Self> {

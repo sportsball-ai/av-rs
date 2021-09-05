@@ -1,6 +1,7 @@
 use super::{
-    check_code, epoll_reactor::EpollReactor, listener_callback, new_io_error, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback,
-    ListenerOption, Result, Socket,
+    check_code,
+    epoll_reactor::{EpollReactor, READ_EVENTS, WRITE_EVENTS},
+    listener_callback, new_io_error, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result, Socket,
 };
 use std::{
     future::Future,
@@ -190,7 +191,7 @@ impl<'a> Future for Connect {
 impl AsyncRead for AsyncStream {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut ReadBuf) -> Poll<io::Result<()>> {
         if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT::EVENT) {
-            if (events & sys::SRT_EPOLL_OPT::SRT_EPOLL_IN as i32) == 0 {
+            if events & READ_EVENTS == 0 {
                 self.epoll_reactor.wake_when_read_ready(&self.socket, cx.waker().clone());
                 return Poll::Pending;
             }
@@ -210,7 +211,7 @@ impl AsyncRead for AsyncStream {
 impl AsyncWrite for AsyncStream {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, src: &[u8]) -> Poll<io::Result<usize>> {
         if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT::EVENT) {
-            if (events & sys::SRT_EPOLL_OPT::SRT_EPOLL_OUT as i32) == 0 {
+            if events & WRITE_EVENTS == 0 {
                 self.epoll_reactor.wake_when_write_ready(&self.socket, cx.waker().clone());
                 return Poll::Pending;
             }
@@ -255,6 +256,7 @@ mod test {
             [
                 ListenerOption::TimestampBasedPacketDeliveryMode(false),
                 ListenerOption::TooLatePacketDrop(false),
+                ListenerOption::ReceiveBufferSize(36400000),
             ]
             .iter()
             .cloned(),
@@ -272,11 +274,17 @@ mod test {
         assert_eq!(client_conn.id(), None);
 
         let mut buf = [0; 1316];
-        for _ in 0..100 {
-            assert_eq!(client_conn.write(b"foo").await.unwrap(), 3);
+        for i in 0..5 {
+            let payload = [i as u8; 1316];
 
-            assert_eq!(server_conn.read(&mut buf).await.unwrap(), 3);
-            assert_eq!(&buf[0..3], b"foo");
+            for _ in 0..10000 {
+                assert_eq!(client_conn.write(&payload).await.unwrap(), 1316);
+            }
+
+            for _ in 0..10000 {
+                assert_eq!(server_conn.read(&mut buf).await.unwrap(), 1316);
+                assert_eq!(&buf, &payload);
+            }
         }
     }
 
