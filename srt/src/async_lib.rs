@@ -1,12 +1,14 @@
 use super::{
-    check_code, listener_callback, new_io_error, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result,
-    Socket,
+    check_code,
+    epoll_reactor::{EpollReactor, READ_EVENTS, WRITE_EVENTS},
+    listener_callback, new_io_error, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result, Socket,
 };
 use std::{
     future::Future,
     io, mem,
     net::{SocketAddr, ToSocketAddrs},
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tokio::{
@@ -89,13 +91,14 @@ impl<'a, 'c> Future for Accept<'a, 'c> {
             State::Idle => {
                 let sock = self.listener.socket.raw();
                 let api = self.listener.socket.api.clone();
+                // TODO: use epoll instead of spawn_blocking
                 let mut handle = spawn_blocking(move || {
                     let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
                     let mut len = mem::size_of_val(&storage) as sys::socklen_t;
                     let sock = unsafe { sys::srt_accept(sock, &mut storage as *mut _ as *mut _, &mut len as *mut _ as *mut _) };
                     let socket = Socket { api, sock };
                     let addr = sockaddr_from_storage(&storage, len)?;
-                    Ok((AsyncStream::new(socket.get(sys::SRT_SOCKOPT::STREAMID)?, socket), addr))
+                    Ok((AsyncStream::new(socket.get(sys::SRT_SOCKOPT::STREAMID)?, socket)?, addr))
                 });
                 let ret = Pin::new(&mut handle).poll(cx);
                 self.state = State::Busy(handle);
@@ -110,26 +113,21 @@ impl<'a, 'c> Future for Accept<'a, 'c> {
     }
 }
 
-enum IOState {
-    Idle(Option<Vec<u8>>),
-    Busy(JoinHandle<(Vec<u8>, io::Result<usize>)>),
-}
-
 pub struct AsyncStream {
+    epoll_reactor: Arc<EpollReactor>, // must be dropped before socket
     socket: Socket,
-    read_state: IOState,
-    write_state: IOState,
     id: Option<String>,
 }
 
 impl AsyncStream {
-    fn new(id: Option<String>, socket: Socket) -> Self {
-        Self {
-            id,
+    fn new(id: Option<String>, socket: Socket) -> Result<Self> {
+        socket.set(sys::SRT_SOCKOPT::SNDSYN, false)?;
+        socket.set(sys::SRT_SOCKOPT::RCVSYN, false)?;
+        Ok(Self {
+            epoll_reactor: socket.api.get_epoll_reactor()?,
             socket,
-            read_state: IOState::Idle(None),
-            write_state: IOState::Idle(None),
-        }
+            id,
+        })
     }
 
     pub async fn connect<A: ToSocketAddrs>(addr: A, options: &ConnectOptions) -> Result<Self> {
@@ -167,6 +165,7 @@ impl<'a> Future for Connect {
             State::Idle => {
                 let addr = self.addr;
                 let options = self.options.clone();
+                // TODO: use epoll instead of spawn_blocking
                 let mut handle = spawn_blocking(move || {
                     let (addr, len) = to_sockaddr(&addr);
                     let socket = Socket::new()?;
@@ -174,7 +173,7 @@ impl<'a> Future for Connect {
                     unsafe {
                         check_code("srt_connect", sys::srt_connect(socket.raw(), addr, len as _))?;
                     }
-                    Ok(AsyncStream::new(options.stream_id, socket))
+                    Ok(AsyncStream::new(options.stream_id, socket)?)
                 });
                 let ret = Pin::new(&mut handle).poll(cx);
                 self.state = State::Busy(handle);
@@ -190,82 +189,37 @@ impl<'a> Future for Connect {
 }
 
 impl AsyncRead for AsyncStream {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context, buf: &mut ReadBuf) -> Poll<io::Result<()>> {
-        let poll = match &mut self.read_state {
-            IOState::Idle(ref mut recv_buf) => {
-                let mut recv_buf = match recv_buf.take() {
-                    Some(b) => b,
-                    None => Vec::new(),
-                };
-                recv_buf.resize(buf.remaining(), 0);
-                let sock = self.socket.raw();
-                let mut handle = spawn_blocking(move || {
-                    let r = match unsafe { sys::srt_recv(sock, recv_buf.as_mut_ptr() as *mut sys::char, recv_buf.len() as _) } {
-                        len if len >= 0 => Ok(len as usize),
-                        _ => Err(new_io_error("srt_recv")),
-                    };
-                    (recv_buf, r)
-                });
-                let poll = Pin::new(&mut handle).poll(cx);
-                self.read_state = IOState::Busy(handle);
-                poll
+    fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut ReadBuf) -> Poll<io::Result<()>> {
+        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT::EVENT) {
+            if events & READ_EVENTS == 0 {
+                self.epoll_reactor.wake_when_read_ready(&self.socket, cx.waker().clone());
+                return Poll::Pending;
             }
-            IOState::Busy(handle) => Pin::new(handle).poll(cx),
-        };
-
-        match poll {
-            Poll::Ready(Ok((recv_buf, result))) => {
-                if let Ok(n) = result {
-                    let n = n.min(buf.remaining());
-                    buf.put_slice(&recv_buf[..n]);
-                }
-                self.read_state = IOState::Idle(Some(recv_buf));
-                Poll::Ready(result.map(|_| ()))
+        }
+        let sock = self.socket.raw();
+        match unsafe { sys::srt_recv(sock, buf.unfilled_mut().as_mut_ptr() as *mut sys::char, buf.remaining() as _) } {
+            len if len >= 0 => {
+                unsafe { buf.assume_init(len as _) };
+                buf.advance(len as _);
+                Poll::Ready(Ok(()))
             }
-            Poll::Ready(Err(join_error)) => {
-                self.read_state = IOState::Idle(None);
-                Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("join error: {}", join_error))))
-            }
-            Poll::Pending => Poll::Pending,
+            _ => Poll::Ready(Err(new_io_error("srt_recv"))),
         }
     }
 }
 
 impl AsyncWrite for AsyncStream {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, src: &[u8]) -> Poll<io::Result<usize>> {
-        let poll = match &mut self.write_state {
-            IOState::Idle(ref mut send_buf) => {
-                let mut send_buf = match send_buf.take() {
-                    Some(b) => b,
-                    None => Vec::new(),
-                };
-                send_buf.resize(src.len(), 0);
-                send_buf.copy_from_slice(src);
-                let sock = self.socket.raw();
-                let mut handle = spawn_blocking(move || {
-                    let r = match unsafe { sys::srt_send(sock, send_buf.as_ptr() as *const sys::char, send_buf.len() as _) } {
-                        len if len >= 0 => Ok(len as usize),
-                        _ => Err(new_io_error("srt_send")),
-                    };
-                    (send_buf, r)
-                });
-                let poll = Pin::new(&mut handle).poll(cx);
-                self.write_state = IOState::Busy(handle);
-                poll
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, src: &[u8]) -> Poll<io::Result<usize>> {
+        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT::EVENT) {
+            if events & WRITE_EVENTS == 0 {
+                self.epoll_reactor.wake_when_write_ready(&self.socket, cx.waker().clone());
+                return Poll::Pending;
             }
-            IOState::Busy(handle) => Pin::new(handle).poll(cx),
-        };
-
-        match poll {
-            Poll::Ready(Ok((send_buf, result))) => {
-                self.write_state = IOState::Idle(Some(send_buf));
-                Poll::Ready(result)
-            }
-            Poll::Ready(Err(join_error)) => {
-                self.write_state = IOState::Idle(None);
-                Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, format!("join error: {}", join_error))))
-            }
-            Poll::Pending => Poll::Pending,
+        }
+        let sock = self.socket.raw();
+        match unsafe { sys::srt_send(sock, src.as_ptr() as *const sys::char, src.len() as _) } {
+            len if len >= 0 => Poll::Ready(Ok(len as _)),
+            _ => Poll::Ready(Err(new_io_error("srt_send"))),
         }
     }
 
@@ -275,6 +229,12 @@ impl AsyncWrite for AsyncStream {
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Poll::Ready(Ok(()))
+    }
+}
+
+impl Drop for AsyncStream {
+    fn drop(&mut self) {
+        self.epoll_reactor.remove_socket(&self.socket);
     }
 }
 
@@ -291,19 +251,41 @@ mod test {
 
     #[tokio::test]
     async fn test_async_client_server() {
-        let listener = AsyncListener::bind("127.0.0.1:1235").unwrap();
+        let listener = AsyncListener::bind_with_options(
+            "127.0.0.1:1235",
+            [
+                ListenerOption::TimestampBasedPacketDeliveryMode(false),
+                ListenerOption::TooLatePacketDrop(false),
+                ListenerOption::ReceiveBufferSize(36400000),
+            ]
+            .iter()
+            .cloned(),
+        )
+        .unwrap();
 
-        let options = &ConnectOptions::default();
-        let (accept_result, connect_result) = join!(listener.accept(), AsyncStream::connect("127.0.0.1:1235", options));
+        let options = ConnectOptions {
+            timestamp_based_packet_delivery_mode: Some(false),
+            too_late_packet_drop: Some(false),
+            ..Default::default()
+        };
+        let (accept_result, connect_result) = join!(listener.accept(), AsyncStream::connect("127.0.0.1:1235", &options));
         let mut server_conn = accept_result.unwrap().0;
         let mut client_conn = connect_result.unwrap();
         assert_eq!(client_conn.id(), None);
 
-        assert_eq!(client_conn.write(b"foo").await.unwrap(), 3);
-
         let mut buf = [0; 1316];
-        assert_eq!(server_conn.read(&mut buf).await.unwrap(), 3);
-        assert_eq!(&buf[0..3], b"foo");
+        for i in 0..5 {
+            let payload = [i as u8; 1316];
+
+            for _ in 0..10000 {
+                assert_eq!(client_conn.write(&payload).await.unwrap(), 1316);
+            }
+
+            for _ in 0..10000 {
+                assert_eq!(server_conn.read(&mut buf).await.unwrap(), 1316);
+                assert_eq!(&buf, &payload);
+            }
+        }
     }
 
     #[tokio::test]

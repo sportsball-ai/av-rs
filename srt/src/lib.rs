@@ -15,6 +15,8 @@ use std::{
 #[cfg(feature = "async")]
 mod async_lib;
 #[cfg(feature = "async")]
+mod epoll_reactor;
+#[cfg(feature = "async")]
 pub use async_lib::*;
 
 mod sys;
@@ -70,24 +72,43 @@ pub(crate) fn new_io_error(fn_name: &'static str) -> io::Error {
     io::Error::new(io::ErrorKind::Other, Error::SRTError { fn_name, code, errno })
 }
 
+pub(crate) fn new_srt_error(fn_name: &'static str) -> Error {
+    let mut errno = 0;
+    let code = unsafe { sys::srt_getlasterror(&mut errno as _) };
+    Error::SRTError { fn_name, code, errno }
+}
+
 fn check_code(fn_name: &'static str, code: sys::int) -> Result<()> {
     match code {
         0 => Ok(()),
-        _ => {
-            let mut errno = 0;
-            let code = unsafe { sys::srt_getlasterror(&mut errno as _) };
-            Err(Error::SRTError { fn_name, code, errno })
-        }
+        _ => Err(new_srt_error(fn_name)),
     }
 }
 
-struct API;
+#[derive(Default)]
+struct API {
+    #[cfg(feature = "async")]
+    epoll_reactor: Mutex<Option<Arc<epoll_reactor::EpollReactor>>>,
+}
 
 lazy_static! {
     static ref GLOBAL_API: Mutex<Option<Weak<API>>> = Mutex::new(None);
 }
 
 impl API {
+    #[cfg(feature = "async")]
+    fn get_epoll_reactor(&self) -> Result<Arc<epoll_reactor::EpollReactor>> {
+        let mut api_reactor = self.epoll_reactor.lock().expect("the lock should not be poisoned");
+        match &*api_reactor {
+            Some(api_reactor) => Ok(api_reactor.clone()),
+            None => {
+                let r = Arc::new(epoll_reactor::EpollReactor::new()?);
+                *api_reactor = Some(r.clone());
+                Ok(r)
+            }
+        }
+    }
+
     fn get() -> Result<Arc<API>> {
         let mut api = GLOBAL_API.lock().unwrap();
         let existing = (*api).as_ref().and_then(|api| api.upgrade());
@@ -97,7 +118,7 @@ impl API {
                 unsafe {
                     check_code("srt_startup", sys::srt_startup())?;
                 }
-                let new_api = Arc::new(Self);
+                let new_api = Arc::new(Self::default());
                 *api = Some(Arc::downgrade(&new_api));
                 Ok(new_api)
             }
@@ -107,6 +128,13 @@ impl API {
 
 impl Drop for API {
     fn drop(&mut self) {
+        #[cfg(feature = "async")]
+        if let Some(reactor) = self.epoll_reactor.lock().expect("the lock should not be poisoned").take() {
+            if let Err(_) = Arc::try_unwrap(reactor) {
+                panic!("the api must have the last strong reference to the reactor");
+            }
+        }
+
         unsafe {
             sys::srt_cleanup();
         }
@@ -114,7 +142,7 @@ impl Drop for API {
 }
 
 struct Socket {
-    api: Arc<API>,
+    pub(crate) api: Arc<API>,
     sock: sys::SRTSOCKET,
 }
 
@@ -161,6 +189,17 @@ impl FromOption for Option<String> {
             0 => None,
             len => Some(str::from_utf8(&buf[..len])?.to_string()),
         })
+    }
+}
+
+impl FromOption for i32 {
+    fn get(sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<Self> {
+        let mut n = 0i32;
+        let mut n_len = std::mem::size_of::<i32>() as sys::int;
+        check_code("srt_getsockopt", unsafe {
+            sys::srt_getsockopt(sock, 0, opt, &mut n as *mut i32 as _, &mut n_len as *mut _)
+        })?;
+        Ok(n)
     }
 }
 
