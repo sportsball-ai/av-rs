@@ -24,6 +24,15 @@ impl Client {
         })
     }
 
+    /// Creates a new client that accepts invalid server certificates. This is extremely insecure
+    /// and should only be used as a last resort.
+    pub fn new_insecure<S: AsRef<str>>(url: S) -> Result<Self> {
+        Ok(Self {
+            client: reqwest::Client::builder().danger_accept_invalid_certs(true).cookie_store(true).build()?,
+            url: url.as_ref().trim_end_matches('/').to_string(),
+        })
+    }
+
     pub fn authentication(&mut self) -> ClientAuthentication<'_> {
         ClientAuthentication { client: self }
     }
