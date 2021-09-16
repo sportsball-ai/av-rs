@@ -264,6 +264,69 @@ impl<'a> DecoderConfigDescriptorData<'a> {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum AudioDataTransportStreamMPEGVersion {
+    MPEG4,
+    MPEG2,
+}
+
+#[derive(Debug)]
+pub struct AudioDataTransportStream<'a> {
+    pub mpeg_version: AudioDataTransportStreamMPEGVersion,
+    pub mpeg4_audio_object_type: u32,
+    pub channel_count: u32,
+    pub sample_rate: u32,
+    pub frame_length: usize,
+    pub aac_data: &'a [u8],
+}
+
+impl<'a> AudioDataTransportStream<'a> {
+    pub fn parse(b: &'a [u8]) -> io::Result<Self> {
+        if b[0] != 0xff || (b[1] & 0xf0) != 0xf0 {
+            return Err(io::Error::new(io::ErrorKind::Other, "invalid adts syncword"));
+        }
+        let len = (((b[3] & 3) as usize) << 11) | ((b[4] as usize) << 3) | ((b[5] as usize) >> 5);
+        if len < 7 || len > b.len() {
+            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "invalid adts frame length"));
+        }
+        let mpeg_version = if (b[1] & 0x08) == 1 {
+            AudioDataTransportStreamMPEGVersion::MPEG2
+        } else {
+            AudioDataTransportStreamMPEGVersion::MPEG4
+        };
+        let has_crc = (b[1] & 1) == 0;
+        let mpeg4_audio_object_type = (b[2] >> 6) as u32 + 1;
+        let channel_count = match ((b[2] & 1) << 2) | (b[3] >> 6) {
+            7 => 8,
+            c => c as _,
+        };
+        let sample_rate = match (b[2] >> 2) & 0x0f {
+            0 => 96_000,
+            1 => 88_200,
+            2 => 64_000,
+            3 => 48_000,
+            4 => 44_100,
+            5 => 32_000,
+            6 => 24_000,
+            7 => 22_050,
+            8 => 16_000,
+            9 => 12_000,
+            10 => 11_025,
+            11 => 8_000,
+            12 => 7_350,
+            _ => 0,
+        };
+        Ok(Self {
+            mpeg_version,
+            mpeg4_audio_object_type,
+            channel_count,
+            sample_rate,
+            frame_length: len,
+            aac_data: &b[if has_crc { 9 } else { 7 }..len],
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

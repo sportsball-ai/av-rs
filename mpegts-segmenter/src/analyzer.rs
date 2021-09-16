@@ -1,4 +1,5 @@
 use mpeg2::{pes, ts};
+use mpeg4::AudioDataTransportStream;
 
 use std::{collections::VecDeque, error::Error};
 
@@ -135,38 +136,14 @@ impl Stream {
             } => {
                 let mut data = packet.data.as_slice();
                 while data.len() >= 7 {
-                    if data[0] != 0xff || (data[1] & 0xf0) != 0xf0 {
-                        bail!("invalid adts syncword")
-                    }
-                    let len = (((data[3] & 3) as usize) << 11) | ((data[4] as usize) << 3) | ((data[5] as usize) >> 5);
-                    if len < 7 || len > data.len() {
-                        bail!("invalid adts frame length")
-                    }
+                    let adts = AudioDataTransportStream::parse(data)?;
                     *sample_count += 1024;
-                    *channel_count = match ((data[2] & 1) << 2) | (data[3] >> 6) {
-                        7 => 8,
-                        c => c as _,
-                    };
-                    *sample_rate = match (data[2] >> 2) & 0x0f {
-                        0 => 96_000,
-                        1 => 88_200,
-                        2 => 64_000,
-                        3 => 48_000,
-                        4 => 44_100,
-                        5 => 32_000,
-                        6 => 24_000,
-                        7 => 22_050,
-                        8 => 16_000,
-                        9 => 12_000,
-                        10 => 11_025,
-                        11 => 8_000,
-                        12 => 7_350,
-                        _ => 0,
-                    };
-                    if (data[1] & 0x08) == 0 {
-                        *rfc6381_codec = Some(format!("mp4a.{:02x}.{}", object_type_indication, (data[2] >> 6) + 1));
+                    *channel_count = adts.channel_count;
+                    *sample_rate = adts.sample_rate;
+                    if adts.mpeg_version == mpeg4::AudioDataTransportStreamMPEGVersion::MPEG4 {
+                        *rfc6381_codec = Some(format!("mp4a.{:02x}.{}", object_type_indication, adts.mpeg4_audio_object_type));
                     }
-                    data = &data[len..];
+                    data = &data[adts.frame_length..];
                 }
             }
             Self::AVCVideo {
