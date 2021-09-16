@@ -289,10 +289,10 @@ impl<'a> AudioDataTransportStream<'a> {
         if len < 7 || len > b.len() {
             return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "invalid adts frame length"));
         }
-        let mpeg_version = if (b[1] & 0x08) == 1 {
-            AudioDataTransportStreamMPEGVersion::MPEG2
-        } else {
+        let mpeg_version = if (b[1] & 0x08) == 0 {
             AudioDataTransportStreamMPEGVersion::MPEG4
+        } else {
+            AudioDataTransportStreamMPEGVersion::MPEG2
         };
         let has_crc = (b[1] & 1) == 0;
         let mpeg4_audio_object_type = (b[2] >> 6) as u32 + 1;
