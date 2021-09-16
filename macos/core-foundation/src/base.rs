@@ -21,6 +21,12 @@ pub trait CFType {
 #[derive(Copy, Clone, Debug)]
 pub struct OSStatus(sys::OSStatus);
 
+impl OSStatus {
+    pub fn as_sys(&self) -> sys::OSStatus {
+        self.0
+    }
+}
+
 impl fmt::Display for OSStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "os status {}", self.0)
