@@ -60,8 +60,22 @@ impl AudioQueue {
         result(unsafe { sys::AudioQueueStart(self.inner, std::ptr::null()).into() })
     }
 
-    pub fn stop(&mut self) -> Result<(), OSStatus> {
-        result(unsafe { sys::AudioQueueStop(self.inner, 1).into() })
+    pub fn stop(&mut self, immediate: bool) -> Result<(), OSStatus> {
+        result(unsafe { sys::AudioQueueStop(self.inner, if immediate { 1 } else { 0 }).into() })
+    }
+
+    pub fn pause(&mut self) -> Result<(), OSStatus> {
+        result(unsafe { sys::AudioQueuePause(self.inner).into() })
+    }
+
+    pub fn reset(&mut self) -> Result<(), OSStatus> {
+        result(unsafe { sys::AudioQueueReset(self.inner).into() })
+    }
+
+    pub fn prime(&mut self, frames: usize) -> Result<usize, OSStatus> {
+        let mut prepared = 0u32;
+        result(unsafe { sys::AudioQueuePrime(self.inner, frames as _, &mut prepared as _).into() })?;
+        Ok(prepared as _)
     }
 }
 
