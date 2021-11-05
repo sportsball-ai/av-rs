@@ -176,8 +176,10 @@ impl<'a> Packet<'a> {
         let adaptation_field_control = buf[3] & 0x30;
 
         let adaptation_field = if adaptation_field_control & 0x20 != 0 {
-            let mut af = AdaptationField::default();
-            af.length = buf[4];
+            let mut af = AdaptationField {
+                length: buf[4],
+                ..Default::default()
+            };
             if af.length as usize > PACKET_LENGTH - 5 {
                 bail!("adaptation field length too long")
             } else if af.length > 0 {

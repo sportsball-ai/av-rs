@@ -22,6 +22,10 @@ pub trait AVCaptureVideoDataOutputSampleBufferDelegateProtocol {
 
 pub struct AVCaptureVideoDataOutputSampleBufferDelegate {
     raw: *const c_void,
+
+    // we pass a pointer to `Box<dyn AVCaptureVideoDataOutputSampleBufferDelegateProtocol + Send>`
+    // to C land, and the double boxing is necessary here to keep that pointer valid
+    #[allow(clippy::redundant_allocation)]
     _native: Box<Box<dyn AVCaptureVideoDataOutputSampleBufferDelegateProtocol + Send>>,
 }
 

@@ -124,13 +124,13 @@ impl Stream {
                     }
                 }
 
-                let (header, header_size) = PacketHeader::decode(&payload)?;
+                let (header, header_size) = PacketHeader::decode(payload)?;
                 self.pending = Some(Packet {
                     header,
                     data: payload[header_size..].to_vec(),
                 })
             } else if let Some(pending) = &mut self.pending {
-                pending.data.extend_from_slice(&payload);
+                pending.data.extend_from_slice(payload);
             }
         }
 

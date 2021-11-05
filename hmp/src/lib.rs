@@ -77,7 +77,7 @@ impl<'a> ClientSection<'a> {
         let url = format!(
             "{}/apis/_/sections/{}/content?pageSize={}&page={}",
             &self.client.url,
-            utf8_percent_encode(&self.id, QUERY_ESCAPE_SET),
+            utf8_percent_encode(self.id, QUERY_ESCAPE_SET),
             page_size,
             page
         );

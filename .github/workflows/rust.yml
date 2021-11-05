@@ -10,6 +10,11 @@ jobs:
         os: [ubuntu-18.04, macos-10.15]
     steps:
     - uses: actions/checkout@v1
+    - name: Trunk Cache
+      uses: actions/cache@v2
+      with:
+        path: ~/.cache/trunk
+        key: trunk-${{ runner.os }}
     - name: Set Up Linux
       if: startsWith(matrix.os, 'ubuntu-')
       run: |
@@ -23,19 +28,17 @@ jobs:
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: 1.48.0
-        components: clippy
+        toolchain: 1.56.0
         override: true
     - name: Build
       uses: actions-rs/cargo@v1
       with:
         command: build
         args: --verbose
-    - name: Lint
-      run: cargo clippy --all-targets -- --deny warnings
     - name: Test
       uses: actions-rs/cargo@v1
       with:
         command: test
         args: --verbose
-
+    - name: Trunk Check
+      uses: trunk-io/trunk-action@v0.1.0-alpha

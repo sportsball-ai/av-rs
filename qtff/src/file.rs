@@ -436,7 +436,7 @@ impl File {
             }
         }
 
-        let mdat_data_size = mdat.iter().fold(0 as u64, |acc, data| acc + data.len() as u64);
+        let mdat_data_size = mdat.iter().fold(0_u64, |acc, data| acc + data.len() as u64);
         w.write_atom_header(FourCC::from_str("mdat"), AtomSize::ExtendedSize(mdat_data_size))?;
         for mut data in mdat.drain(..) {
             match &mut data {

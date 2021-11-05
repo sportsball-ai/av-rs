@@ -135,7 +135,7 @@ impl<T: AsRef<[u8]>, Iter: Iterator<Item = Result<T, E>>, E: From<io::Error>> In
         let mut skipped_nalus = VecDeque::new();
         let mut sps = None;
         let mut pps = None;
-        while let Some(nalu) = nalus.next() {
+        for nalu in &mut nalus {
             let nalu = nalu?;
             {
                 let bs = Bitstream::new(nalu.as_ref().iter().copied());
