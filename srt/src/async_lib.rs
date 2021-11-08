@@ -304,7 +304,7 @@ mod test {
         options.stream_id = Some("mystreamid".to_string());
 
         options.passphrase = Some("notthepassphrase".to_string());
-        assert_eq!(AsyncStream::connect("127.0.0.1:1237", &options).await.is_err(), true);
+        assert!(AsyncStream::connect("127.0.0.1:1237", &options).await.is_err());
 
         options.passphrase = Some("thepassphrase".to_string());
         let (accept_result, connect_result) = join!(listener.accept(), AsyncStream::connect("127.0.0.1:1237", &options));

@@ -224,7 +224,7 @@ mod test {
         let mut buf = Vec::new();
         let mut packets = Vec::new();
         while data.len() >= 7 {
-            let adts = AudioDataTransportStream::parse(&data).unwrap();
+            let adts = AudioDataTransportStream::parse(data).unwrap();
             if buf.len() + adts.aac_data.len() > BUFFER_SIZE {
                 let mut buffer = queue.new_buffer(BUFFER_SIZE).unwrap();
                 buffer.set_audio_data_length(buf.len());

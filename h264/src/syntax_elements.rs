@@ -113,7 +113,7 @@ mod test {
     fn test_ue() {
         {
             let mut bs = Bitstream::new(vec![0x00]);
-            assert_eq!(UE::decode(&mut bs).is_err(), true);
+            assert!(UE::decode(&mut bs).is_err());
         }
 
         {
@@ -166,7 +166,7 @@ mod test {
     fn test_se() {
         {
             let mut bs = Bitstream::new(vec![0x00]);
-            assert_eq!(SE::decode(&mut bs).is_err(), true);
+            assert!(SE::decode(&mut bs).is_err());
         }
 
         {

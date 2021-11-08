@@ -85,7 +85,7 @@ impl<S: SegmentStorage> Segmenter<S> {
         }
 
         for buf in buf.chunks(PACKET_LENGTH) {
-            let p = Packet::decode(&buf)?;
+            let p = Packet::decode(buf)?;
             self.analyzer.handle_packet(&p)?;
 
             if let Some(af) = &p.adaptation_field {
@@ -164,12 +164,12 @@ impl<S: SegmentStorage> Segmenter<S> {
                 // set the segment's pts if necessary
                 if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
                     if let Some(payload) = p.payload {
-                        let (header, _) = pes::PacketHeader::decode(&payload)?;
+                        let (header, _) = pes::PacketHeader::decode(payload)?;
                         segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
                     }
                 }
 
-                segment.segment.write_all(&buf).await?;
+                segment.segment.write_all(buf).await?;
                 segment.bytes_written += buf.len();
             }
         }
@@ -312,7 +312,7 @@ mod test {
                         ..
                     } => {
                         assert_eq!(*channel_count, 2);
-                        assert_eq!(*sample_count > 0, true);
+                        assert!(*sample_count > 0);
                         assert_eq!(*sample_rate, 48000);
                     }
                     StreamInfo::Video {
@@ -322,8 +322,8 @@ mod test {
                         frame_count,
                         ..
                     } => {
-                        assert_eq!(*frame_count > 0, true);
-                        assert_eq!((*frame_rate - 59.94).abs() < std::f64::EPSILON, true);
+                        assert!(*frame_count > 0);
+                        assert!((*frame_rate - 59.94).abs() < std::f64::EPSILON);
                         assert_eq!(*width, 1280);
                         assert_eq!(*height, 720);
                     }

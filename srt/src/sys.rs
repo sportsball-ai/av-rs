@@ -1,3 +1,6 @@
+// our naming mimicks the srt library
+#![allow(clippy::upper_case_acronyms)]
+
 pub use libc::{c_char as char, c_int as int, c_void as void, sockaddr, sockaddr_storage, socklen_t};
 
 pub type SRTSOCKET = int;
