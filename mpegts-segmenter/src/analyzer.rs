@@ -662,7 +662,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -698,7 +698,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -734,7 +734,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -770,7 +770,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -806,7 +806,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![StreamInfo::Video {
@@ -834,7 +834,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![StreamInfo::Video {
@@ -862,7 +862,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![

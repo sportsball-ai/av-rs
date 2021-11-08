@@ -506,11 +506,13 @@ mod test {
             assert_eq!(&buf[0..3], b"foo");
         });
 
-        let mut options = ConnectOptions::default();
-        options.stream_id = Some("mystreamid".to_string());
+        let mut options = ConnectOptions {
+            stream_id: Some("mystreamid".to_string()),
+            passphrase: Some("notthepassphrase".to_string()),
+            ..Default::default()
+        };
 
-        options.passphrase = Some("notthepassphrase".to_string());
-        assert_eq!(Stream::connect("127.0.0.1:1236", &options).is_err(), true);
+        assert!(Stream::connect("127.0.0.1:1236", &options).is_err());
 
         options.passphrase = Some("thepassphrase".to_string());
         let mut conn = Stream::connect("127.0.0.1:1236", &options).unwrap();

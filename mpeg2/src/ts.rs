@@ -314,7 +314,7 @@ mod test {
                     rais += 1;
                 }
                 if let Some(pcr) = f.program_clock_reference_27mhz {
-                    assert_eq!(pcr > last_pcr, true);
+                    assert!(pcr > last_pcr);
                     last_pcr = pcr;
                 }
             }

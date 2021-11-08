@@ -312,7 +312,7 @@ mod test {
                         ..
                     } => {
                         assert_eq!(*channel_count, 2);
-                        assert_eq!(*sample_count > 0, true);
+                        assert!(*sample_count > 0);
                         assert_eq!(*sample_rate, 48000);
                     }
                     StreamInfo::Video {
@@ -322,8 +322,8 @@ mod test {
                         frame_count,
                         ..
                     } => {
-                        assert_eq!(*frame_count > 0, true);
-                        assert_eq!((*frame_rate - 59.94).abs() < std::f64::EPSILON, true);
+                        assert!(*frame_count > 0);
+                        assert!((*frame_rate - 59.94).abs() < std::f64::EPSILON);
                         assert_eq!(*width, 1280);
                         assert_eq!(*height, 720);
                     }

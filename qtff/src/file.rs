@@ -564,7 +564,7 @@ mod tests {
             .iter()
             {
                 let values = metadata.get(&(*k).to_string());
-                assert_eq!(values.is_some(), true, "{}", k);
+                assert!(values.is_some(), "{}", k);
                 let values = values.unwrap();
                 assert_eq!(values.len(), 1, "{}", k);
                 assert_eq!(values[0].value, *v, "{}", k);
