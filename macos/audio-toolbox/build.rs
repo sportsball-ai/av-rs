@@ -15,6 +15,7 @@ fn main() {
             .clang_arg(format!("-isysroot{}", sdk_root))
             .header("src/lib.hpp")
             .whitelist_function("AudioQueue.+")
+            .whitelist_var("kAudioQueueParam_.+")
             .generate()
             .expect("unable to generate bindings");
 
