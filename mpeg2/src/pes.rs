@@ -75,7 +75,6 @@ impl PacketHeader {
 #[derive(Clone, Debug, PartialEq)]
 pub struct OptionalHeader {
     pub data_alignment_indicator: bool,
-    pub original: bool,
     pub pts: Option<u64>,
     pub dts: Option<u64>,
 }
@@ -118,7 +117,6 @@ impl OptionalHeader {
         };
         Ok((
             Self {
-                original: (buf[0] & 1) != 0,
                 data_alignment_indicator: (buf[0] & 4) != 0,
                 pts,
                 dts,
@@ -131,10 +129,6 @@ impl OptionalHeader {
         let mut buf = [0u8; MAX_ENCODED_OPTIONAL_HEADER_LENGTH];
         let mut len = 3;
         buf[0] = 0x80; // marker
-
-        if self.original {
-            buf[0] |= 1;
-        }
 
         if self.data_alignment_indicator {
             buf[0] |= 0b100;
@@ -251,7 +245,6 @@ mod test {
                 stream_id: 0xe0,
                 optional_header: Some(OptionalHeader {
                     data_alignment_indicator: false,
-                    original: false,
                     pts: Some(129_003),
                     dts: Some(126_000),
                 }),
