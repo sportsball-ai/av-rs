@@ -1,6 +1,8 @@
 use super::ts;
-
-use std::error::Error;
+use std::{
+    error::Error,
+    io::{self, Write},
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -50,13 +52,34 @@ impl PacketHeader {
             data_offset,
         ))
     }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut buf = [0u8; 6 + MAX_ENCODED_OPTIONAL_HEADER_LENGTH];
+        buf[2] = 1; // start code prefix
+        buf[3] = self.stream_id;
+        let optional_header_length = match &self.optional_header {
+            Some(h) => h.encode(&mut buf[6..])?,
+            None => 0,
+        };
+        if self.data_length > 0 {
+            let packet_length = optional_header_length + self.data_length;
+            buf[4] = (packet_length >> 8) as u8;
+            buf[5] = packet_length as u8;
+        }
+        let len = 6 + optional_header_length;
+        w.write_all(&buf[..len])?;
+        Ok(len)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct OptionalHeader {
+    pub data_alignment_indicator: bool,
     pub pts: Option<u64>,
     pub dts: Option<u64>,
 }
+
+const MAX_ENCODED_OPTIONAL_HEADER_LENGTH: usize = 13;
 
 impl OptionalHeader {
     pub fn decode(buf: &[u8]) -> Result<(Self, usize)> {
@@ -92,7 +115,49 @@ impl OptionalHeader {
         } else {
             None
         };
-        Ok((Self { pts, dts }, len))
+        Ok((
+            Self {
+                data_alignment_indicator: (buf[0] & 4) != 0,
+                pts,
+                dts,
+            },
+            len,
+        ))
+    }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut buf = [0u8; MAX_ENCODED_OPTIONAL_HEADER_LENGTH];
+        let mut len = 3;
+        buf[0] = 0x80; // marker
+
+        if self.data_alignment_indicator {
+            buf[0] |= 0b100;
+        }
+
+        if let Some(pts) = self.pts {
+            buf[1] |= 0x80;
+            buf[3] = 0b00100001 | (pts >> 30) as u8;
+            buf[4] = (pts >> 22) as u8;
+            buf[5] = (pts >> 14) as u8 | 1;
+            buf[6] = (pts >> 7) as u8;
+            buf[7] = (pts << 1) as u8 | 1;
+            len = 8;
+        }
+
+        if let Some(dts) = self.dts {
+            buf[1] |= 0x40;
+            buf[3] |= 0b00010000;
+            buf[8] = 0b00010001 | (dts >> 30) as u8;
+            buf[9] = (dts >> 22) as u8;
+            buf[10] = (dts >> 14) as u8 | 1;
+            buf[11] = (dts >> 7) as u8;
+            buf[12] = (dts << 1) as u8 | 1;
+            len = 13;
+        }
+
+        buf[2] = len - 3;
+        w.write_all(&buf[..len as usize])?;
+        Ok(len as _)
     }
 }
 
@@ -167,23 +232,28 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_packet_header_decode() {
-        let buf = &[
+    fn test_packet_header_decode_encode() {
+        let buf = vec![
             0x00, 0x00, 0x01, 0xE0, 0x00, 0x00, 0x80, 0xC0, 0x0A, 0x31, 0x00, 0x07, 0xEF, 0xD7, 0x11, 0x00, 0x07, 0xD8, 0x61,
         ];
 
-        let (header, n) = PacketHeader::decode(buf).unwrap();
+        let (header, n) = PacketHeader::decode(&buf).unwrap();
         assert_eq!(n, buf.len());
         assert_eq!(
             header,
             PacketHeader {
                 stream_id: 0xe0,
                 optional_header: Some(OptionalHeader {
+                    data_alignment_indicator: false,
                     pts: Some(129_003),
                     dts: Some(126_000),
                 }),
                 data_length: 0,
             }
         );
+
+        let mut encoded = vec![];
+        header.encode(&mut encoded).unwrap();
+        assert_eq!(buf, encoded);
     }
 }
