@@ -97,8 +97,8 @@ impl<'a> TableSection<'a> {
             let crc = crc::Crc::<u32>::new(&crc::CRC_32_MPEG_2);
             let mut crc = crc.digest();
             crc.update(&buf);
-            w.write_all(&self.data_without_crc)?;
-            crc.update(&self.data_without_crc);
+            w.write_all(self.data_without_crc)?;
+            crc.update(self.data_without_crc);
             let crc = crc.finalize().to_be_bytes();
             w.write_all(&crc)?;
             Ok(buf.len() + self.data_without_crc.len() + 4)
@@ -131,7 +131,7 @@ impl<'a> TableSyntaxSection<'a> {
         buf[1] = self.table_id_extension as _;
         buf[2] = 0b11000001;
         w.write_all(&buf)?;
-        w.write_all(&self.data)?;
+        w.write_all(self.data)?;
         Ok(buf.len() + self.data.len())
     }
 }
