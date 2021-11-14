@@ -1,4 +1,7 @@
-use std::error::Error;
+use std::{
+    error::Error,
+    io::{self, Write},
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -27,7 +30,7 @@ pub const TABLE_ID_PMT: u8 = 2;
 pub struct TableSection<'a> {
     pub table_id: u8,
     pub section_syntax_indicator: bool,
-    pub data: &'a [u8],
+    pub data_without_crc: &'a [u8],
 }
 
 const TABLE_SECTION_HEADER_LENGTH: usize = 3;
@@ -37,19 +40,71 @@ impl<'a> TableSection<'a> {
         if buf.len() < TABLE_SECTION_HEADER_LENGTH {
             bail!("not enough bytes for table section header")
         }
-        let length = ((buf[1] & 0x03) as usize) << 8 | buf[2] as usize;
+        let mut length = ((buf[1] & 0x03) as usize) << 8 | buf[2] as usize;
         if buf.len() < TABLE_SECTION_HEADER_LENGTH + length {
             bail!("not enough bytes for data")
+        }
+        if length >= 4 {
+            // chop off the crc
+            length -= 4;
         }
         Ok(Self {
             table_id: buf[0],
             section_syntax_indicator: buf[1] & 0x80 != 0,
-            data: &buf[TABLE_SECTION_HEADER_LENGTH..TABLE_SECTION_HEADER_LENGTH + length],
+            data_without_crc: &buf[TABLE_SECTION_HEADER_LENGTH..TABLE_SECTION_HEADER_LENGTH + length],
         })
     }
 
     pub fn decode_syntax_section(&self) -> Result<TableSyntaxSection> {
-        TableSyntaxSection::decode(self.data)
+        TableSyntaxSection::decode_without_crc(self.data_without_crc)
+    }
+
+    pub fn encoded_len(&self) -> usize {
+        TABLE_SECTION_HEADER_LENGTH
+            + self.data_without_crc.len()
+            + if self.data_without_crc.is_empty() {
+                0
+            } else {
+                // add 4 bytes for the crc
+                4
+            }
+    }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut buf = [0u8; TABLE_SECTION_HEADER_LENGTH];
+        buf[0] = self.table_id;
+
+        let data_len = self.data_without_crc.len()
+            + if self.data_without_crc.is_empty() {
+                0
+            } else {
+                // add 4 bytes for the crc
+                4
+            };
+
+        buf[1] = 0b00110000 | (data_len >> 8) as u8;
+        if self.section_syntax_indicator {
+            buf[1] |= 0b10000000;
+        } else {
+            buf[1] |= 0b01000000;
+        }
+
+        buf[2] = data_len as _;
+
+        w.write_all(&buf)?;
+
+        if !self.data_without_crc.is_empty() {
+            let crc = crc::Crc::<u32>::new(&crc::CRC_32_MPEG_2);
+            let mut crc = crc.digest();
+            crc.update(&buf);
+            w.write_all(&self.data_without_crc)?;
+            crc.update(&self.data_without_crc);
+            let crc = crc.finalize().to_be_bytes();
+            w.write_all(&crc)?;
+            Ok(buf.len() + self.data_without_crc.len() + 4)
+        } else {
+            Ok(buf.len())
+        }
     }
 }
 
@@ -60,14 +115,24 @@ pub struct TableSyntaxSection<'a> {
 }
 
 impl<'a> TableSyntaxSection<'a> {
-    pub fn decode(buf: &'a [u8]) -> Result<Self> {
+    pub fn decode_without_crc(buf: &'a [u8]) -> Result<Self> {
         if buf.len() < 9 {
             bail!("not enough bytes for table syntax section")
         }
         Ok(Self {
             table_id_extension: (buf[0] as u16) << 8 | buf[1] as u16,
-            data: &buf[5..buf.len() - 4],
+            data: &buf[5..buf.len()],
         })
+    }
+
+    pub fn encode_without_crc<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut buf = [0u8; 5];
+        buf[0] = (self.table_id_extension >> 8) as _;
+        buf[1] = self.table_id_extension as _;
+        buf[2] = 0b11000001;
+        w.write_all(&buf)?;
+        w.write_all(&self.data)?;
+        Ok(buf.len() + self.data.len())
     }
 }
 
@@ -235,7 +300,7 @@ impl<'a> Packet<'a> {
         let mut buf = &payload[1 + padding..];
         while !buf.is_empty() && buf[0] != 0xff {
             let section = TableSection::decode(buf)?;
-            buf = &buf[TABLE_SECTION_HEADER_LENGTH + section.data.len()..];
+            buf = &buf[section.encoded_len()..];
             ret.push(section);
         }
 
@@ -253,7 +318,7 @@ mod test {
     use std::{fs::File, io::Read};
 
     #[test]
-    fn test_decode() {
+    fn test_decode_encode() {
         let mut f = File::open("src/testdata/pro-bowl.ts").unwrap();
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
@@ -279,9 +344,19 @@ mod test {
                 let table_sections = p.decode_table_sections().unwrap();
                 assert_eq!(table_sections.len(), 1);
                 assert_eq!(table_sections[0].table_id, TABLE_ID_PAT);
+                {
+                    let mut encoded = vec![];
+                    table_sections[0].encode(&mut encoded).unwrap();
+                    assert_eq!(p.payload.unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
+                }
 
                 let syntax_section = table_sections[0].decode_syntax_section().unwrap();
                 assert_eq!(syntax_section.table_id_extension, 1);
+                {
+                    let mut encoded = vec![];
+                    syntax_section.encode_without_crc(&mut encoded).unwrap();
+                    assert_eq!(table_sections[0].data_without_crc, encoded);
+                }
 
                 let pat = PATData::decode(syntax_section.data).unwrap();
 
@@ -301,9 +376,19 @@ mod test {
                 let table_sections = p.decode_table_sections().unwrap();
                 assert_eq!(table_sections.len(), 1);
                 assert_eq!(table_sections[0].table_id, TABLE_ID_PMT);
+                {
+                    let mut encoded = vec![];
+                    table_sections[0].encode(&mut encoded).unwrap();
+                    assert_eq!(p.payload.unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
+                }
 
                 let syntax_section = table_sections[0].decode_syntax_section().unwrap();
                 assert_eq!(syntax_section.table_id_extension, 1);
+                {
+                    let mut encoded = vec![];
+                    syntax_section.encode_without_crc(&mut encoded).unwrap();
+                    assert_eq!(table_sections[0].data_without_crc, encoded);
+                }
 
                 let pmt = PMTData::decode(syntax_section.data).unwrap();
                 assert_eq!(pmt.elementary_stream_info.len(), 2);
