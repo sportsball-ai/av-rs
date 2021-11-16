@@ -1,0 +1,7 @@
+# github doesn't support pushing lfs objects to public forks, but these should be enabled:
+# *.a filter=lfs diff=lfs merge=lfs -text
+# *.braw filter=lfs diff=lfs merge=lfs -text
+# *.h264 filter=lfs diff=lfs merge=lfs -text
+# *.mov filter=lfs diff=lfs merge=lfs -text
+# *.mp4 filter=lfs diff=lfs merge=lfs -text
+# *.ts filter=lfs diff=lfs merge=lfs -text

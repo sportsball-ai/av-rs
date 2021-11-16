@@ -9,33 +9,38 @@ jobs:
       matrix:
         os: [ubuntu-18.04, macos-10.15]
     steps:
-    - uses: actions/checkout@v1
-    - name: Set Up Linux
-      if: startsWith(matrix.os, 'ubuntu-')
-      run: |
-        git clone https://github.com/ultravideo/kvazaar.git
-        (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure && make -j && sudo make install)
-    - name: Set Up macOS
-      if: startsWith(matrix.os, 'macos-')
-      run: |
-        echo "LIBCLANG_PATH=/Library/Developer/CommandLineTools/usr/lib/libclang.dylib" >> $GITHUB_ENV
-        brew install kvazaar
-    - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: 1.48.0
-        components: clippy
-        override: true
-    - name: Build
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --verbose
-    - name: Lint
-      run: cargo clippy --all-targets -- --deny warnings
-    - name: Test
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
-        args: --verbose
-
+      - uses: actions/checkout@v1
+      - name: Cache Linters/Formatters
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/trunk
+          key: trunk-${{ runner.os }}
+      - name: Set Up Linux
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: |
+          git clone https://github.com/ultravideo/kvazaar.git
+          (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure && make -j && sudo make install)
+      - name: Set Up macOS
+        if: startsWith(matrix.os, 'macos-')
+        run: |
+          echo "LIBCLANG_PATH=/Library/Developer/CommandLineTools/usr/lib/libclang.dylib" >> $GITHUB_ENV
+          brew install kvazaar
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.56.0
+          override: true
+      - name: Build
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --verbose
+      - name: Trunk Check
+        uses: trunk-io/trunk-action@v0.2.0-alpha
+        with:
+          label: ${{ runner.os }}
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose
