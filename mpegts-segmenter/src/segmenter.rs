@@ -104,7 +104,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                 // start a new segment if this is a keyframe
                                 if p.adaptation_field.and_then(|af| af.random_access_indicator).unwrap_or(false) {
                                     true
-                                } else if let Some(payload) = p.payload {
+                                } else if let Some(payload) = &p.payload {
                                     // some muxers don't set RAI bits. if possible, see if this
                                     // packet includes the start of a keyframe
                                     let mut is_keyframe = false;
@@ -164,7 +164,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                 // set the segment's pts if necessary
                 if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
                     if let Some(payload) = p.payload {
-                        let (header, _) = pes::PacketHeader::decode(payload)?;
+                        let (header, _) = pes::PacketHeader::decode(&payload)?;
                         segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
                     }
                 }

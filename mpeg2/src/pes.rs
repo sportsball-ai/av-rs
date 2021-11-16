@@ -1,5 +1,6 @@
 use super::ts;
 use std::{
+    borrow::Cow,
     error::Error,
     io::{self, Write},
 };
@@ -7,9 +8,78 @@ use std::{
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Packet {
+pub struct Packet<'a> {
     pub header: PacketHeader,
-    pub data: Vec<u8>,
+    pub data: Cow<'a, [u8]>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PacketizationConfig {
+    pub packet_id: u16,
+    pub random_access_indicator: bool,
+    pub continuity_counter: u8,
+}
+
+impl<'a> Packet<'a> {
+    pub fn packetize(&self, config: PacketizationConfig) -> Packetize {
+        Packetize {
+            header: Some(&self.header),
+            data: &self.data,
+            config,
+        }
+    }
+}
+
+pub struct Packetize<'a> {
+    header: Option<&'a PacketHeader>,
+    data: &'a [u8],
+    config: PacketizationConfig,
+}
+
+impl<'a> Iterator for Packetize<'a> {
+    type Item = ts::Packet<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let adaptation_field = self.header.map(|header| {
+            let mut af = ts::AdaptationField {
+                random_access_indicator: if self.config.random_access_indicator { Some(true) } else { None },
+                ..Default::default()
+            };
+            if let Some(dts) = header.optional_header.as_ref().and_then(|h| h.dts.or(h.pts)) {
+                af.program_clock_reference_27mhz = Some(dts * 300);
+            }
+            af
+        });
+
+        if adaptation_field.is_none() && self.data.is_empty() {
+            None
+        } else {
+            let max_payload_len = ts::Packet::max_payload_len(adaptation_field.as_ref());
+
+            let mut data_consumed = max_payload_len.min(self.data.len());
+            let mut payload = Cow::Borrowed(&self.data[..data_consumed]);
+            if let Some(header) = self.header.take() {
+                let mut buffer = Vec::with_capacity(ts::PACKET_LENGTH);
+                let header_len = header.encode(&mut buffer).expect("encoding to the buffer should never fail");
+                data_consumed -= header_len.min(data_consumed);
+                buffer.extend_from_slice(&self.data[..data_consumed]);
+                payload = buffer.into();
+            }
+
+            let p = ts::Packet {
+                packet_id: self.config.packet_id,
+                payload_unit_start_indicator: adaptation_field.is_some(),
+                adaptation_field: adaptation_field.or_else(|| if payload.len() < max_payload_len { Some(Default::default()) } else { None }),
+                continuity_counter: self.config.continuity_counter,
+                payload: if !payload.is_empty() { Some(payload) } else { None },
+            };
+            if p.payload.is_some() {
+                self.config.continuity_counter = (self.config.continuity_counter + 1) % 16;
+                self.data = &self.data[data_consumed..];
+            }
+            Some(p)
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -163,7 +233,7 @@ impl OptionalHeader {
 
 #[derive(Clone)]
 pub struct Stream {
-    pending: Option<Packet>,
+    pending: Option<Packet<'static>>,
 }
 
 impl Default for Stream {
@@ -178,10 +248,10 @@ impl Stream {
     }
 
     /// Writes transport packets to the stream. Whenever a PES packet is completed, it is returned.
-    pub fn write(&mut self, packet: &ts::Packet) -> Result<Vec<Packet>> {
+    pub fn write(&mut self, packet: &ts::Packet) -> Result<Vec<Packet<'static>>> {
         let mut completed = Vec::new();
 
-        if let Some(payload) = packet.payload {
+        if let Some(payload) = &packet.payload {
             if packet.payload_unit_start_indicator {
                 if let Some(pending) = self.pending.take() {
                     if pending.header.data_length == 0 {
@@ -192,10 +262,10 @@ impl Stream {
                 let (header, header_size) = PacketHeader::decode(payload)?;
                 self.pending = Some(Packet {
                     header,
-                    data: payload[header_size..].to_vec(),
+                    data: payload[header_size..].to_vec().into(),
                 })
             } else if let Some(pending) = &mut self.pending {
-                pending.data.extend_from_slice(payload);
+                pending.data.to_mut().extend_from_slice(payload);
             }
         }
 
@@ -205,7 +275,7 @@ impl Stream {
         } {
             if let Some(mut pending) = self.pending.take() {
                 if pending.header.data_length > 0 {
-                    pending.data.truncate(pending.header.data_length);
+                    pending.data.to_mut().truncate(pending.header.data_length);
                 }
                 completed.push(pending);
             }
@@ -214,7 +284,7 @@ impl Stream {
         Ok(completed)
     }
 
-    pub fn flush(&mut self) -> Result<Vec<Packet>> {
+    pub fn flush(&mut self) -> Result<Vec<Packet<'static>>> {
         let mut completed = Vec::new();
 
         if let Some(pending) = self.pending.take() {
