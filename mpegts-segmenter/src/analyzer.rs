@@ -130,7 +130,7 @@ impl Stream {
                 object_type_indication,
                 ..
             } => {
-                let mut data = packet.data.as_slice();
+                let mut data = packet.data.as_ref();
                 while data.len() >= 7 {
                     let adts = AudioDataTransportStream::parse(data)?;
                     *sample_count += 1024;

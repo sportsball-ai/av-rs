@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     error::Error,
     io::{self, Write},
 };
@@ -13,7 +14,7 @@ pub struct Packet<'a> {
     pub payload_unit_start_indicator: bool,
     pub continuity_counter: u8,
     pub adaptation_field: Option<AdaptationField>,
-    pub payload: Option<&'a [u8]>,
+    pub payload: Option<Cow<'a, [u8]>>,
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -44,7 +45,7 @@ impl AdaptationField {
     }
 
     pub fn encoded_len(&self) -> usize {
-        1 + if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() {
+        1 + if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() || self.program_clock_reference_27mhz.is_some() {
             1
         } else {
             0
@@ -54,6 +55,10 @@ impl AdaptationField {
     pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> io::Result<usize> {
         let mut ret = 1usize;
         let mut buf = [0u8; 20];
+
+        if pad_to_length >= 2 {
+            ret = 2;
+        }
 
         if let Some(discontinuity_indicator) = self.discontinuity_indicator {
             if discontinuity_indicator {
@@ -69,8 +74,12 @@ impl AdaptationField {
             ret = 2;
         }
 
-        if let Some(program_clock_reference_27mhz) = self.program_clock_reference_27mhz {
+        if self.program_clock_reference_27mhz.is_some() {
             buf[1] |= 0b00010000;
+            ret = 2;
+        }
+
+        if let Some(program_clock_reference_27mhz) = self.program_clock_reference_27mhz {
             let base = program_clock_reference_27mhz / 300;
             let ext = program_clock_reference_27mhz % 300;
             buf[2] = (base >> 25) as _;
@@ -107,6 +116,20 @@ pub struct TableSection<'a> {
 }
 
 const TABLE_SECTION_HEADER_LENGTH: usize = 3;
+
+pub fn encode_table_sections<'a, I: IntoIterator<Item = TableSection<'a>>, W: Write>(sections: I, mut w: W, pad_to_length: usize) -> io::Result<usize> {
+    w.write_all(&[0])?;
+    let mut len = 1;
+    for section in sections.into_iter() {
+        len += section.encode(&mut w)?;
+    }
+    if len < pad_to_length {
+        let padding = vec![0xff; pad_to_length - len];
+        w.write_all(&padding)?;
+        len = pad_to_length;
+    }
+    Ok(len)
+}
 
 impl<'a> TableSection<'a> {
     pub fn decode(buf: &'a [u8]) -> Result<Self> {
@@ -338,6 +361,7 @@ impl<'a> PMTData<'a> {
     }
 }
 
+const PACKET_HEADER_LENGTH: usize = 4;
 pub const PACKET_LENGTH: usize = 188;
 
 impl<'a> Packet<'a> {
@@ -355,13 +379,16 @@ impl<'a> Packet<'a> {
         let adaptation_field_control = buf[3] & 0x30;
 
         let (adaptation_field, adaptation_field_length) = if adaptation_field_control & 0x20 != 0 {
-            (Some(AdaptationField::decode(&buf[4..])?), buf[4] as usize + 1)
+            (
+                Some(AdaptationField::decode(&buf[PACKET_HEADER_LENGTH..])?),
+                buf[PACKET_HEADER_LENGTH] as usize + 1,
+            )
         } else {
             (None, 0)
         };
 
         let payload = if adaptation_field_control & 0x10 != 0 {
-            Some(&buf[4 + adaptation_field_length..])
+            Some(&buf[PACKET_HEADER_LENGTH + adaptation_field_length..])
         } else {
             None
         };
@@ -371,12 +398,12 @@ impl<'a> Packet<'a> {
             payload_unit_start_indicator: buf[1] & 0x40 != 0,
             continuity_counter: buf[3] & 0x0f,
             adaptation_field,
-            payload,
+            payload: payload.map(Cow::Borrowed),
         })
     }
 
-    pub fn decode_table_sections(&self) -> Result<Vec<TableSection<'a>>> {
-        let payload = match self.payload {
+    pub fn decode_table_sections(&self) -> Result<Vec<TableSection<'_>>> {
+        let payload = match &self.payload {
             Some(p) => p,
             None => return Ok(vec![]),
         };
@@ -403,7 +430,7 @@ impl<'a> Packet<'a> {
     }
 
     pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
-        let mut buf = [0u8; 4];
+        let mut buf = [0u8; PACKET_HEADER_LENGTH];
         buf[0] = 0x47;
 
         if self.payload_unit_start_indicator {
@@ -422,11 +449,11 @@ impl<'a> Packet<'a> {
             buf[3] |= 0b00010000;
         }
 
-        let mut ret = 4;
+        let mut ret = PACKET_HEADER_LENGTH;
         w.write_all(&buf)?;
 
         if let Some(af) = &self.adaptation_field {
-            ret += af.encode(&mut w, PACKET_LENGTH - ret - self.payload.map(|p| p.len()).unwrap_or(0))?;
+            ret += af.encode(&mut w, PACKET_LENGTH - ret - self.payload.as_ref().map(|p| p.len()).unwrap_or(0))?;
         }
 
         if let Some(payload) = &self.payload {
@@ -434,7 +461,16 @@ impl<'a> Packet<'a> {
             ret += payload.len();
         }
 
-        Ok(ret)
+        if ret != PACKET_LENGTH {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid data length"))
+        } else {
+            Ok(ret)
+        }
+    }
+
+    /// Returns the maximum possible data length for a packet with the given adaptation field.
+    pub fn max_payload_len(af: Option<&AdaptationField>) -> usize {
+        PACKET_LENGTH - PACKET_HEADER_LENGTH - af.map(|af| af.encoded_len()).unwrap_or(0)
     }
 }
 
@@ -488,7 +524,7 @@ mod test {
                 {
                     let mut encoded = vec![];
                     table_sections[0].encode(&mut encoded).unwrap();
-                    assert_eq!(p.payload.unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
+                    assert_eq!(p.payload.as_ref().unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
                 }
 
                 let syntax_section = table_sections[0].decode_syntax_section().unwrap();
@@ -525,7 +561,7 @@ mod test {
                 {
                     let mut encoded = vec![];
                     table_sections[0].encode(&mut encoded).unwrap();
-                    assert_eq!(p.payload.unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
+                    assert_eq!(p.payload.as_ref().unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
                 }
 
                 let syntax_section = table_sections[0].decode_syntax_section().unwrap();
