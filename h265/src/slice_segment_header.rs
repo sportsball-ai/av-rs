@@ -217,7 +217,7 @@ impl SliceSegmentHeader {
 
         bs.decode(&mut ret.first_slice_segment_in_pic_flag)?;
 
-        if nal_unit_type >= NAL_UNIT_TYPE_BLA_W_LP && nal_unit_type <= NAL_UNIT_TYPE_RSV_IRAP_VCL23 {
+        if (NAL_UNIT_TYPE_BLA_W_LP..=NAL_UNIT_TYPE_RSV_IRAP_VCL23).contains(&nal_unit_type) {
             bs.decode(&mut ret.no_output_of_prior_pics_flag)?;
         }
 
@@ -407,7 +407,7 @@ impl SliceSegmentHeader {
 
         bs.encode(&self.first_slice_segment_in_pic_flag)?;
 
-        if nal_unit_type >= NAL_UNIT_TYPE_BLA_W_LP && nal_unit_type <= NAL_UNIT_TYPE_RSV_IRAP_VCL23 {
+        if (NAL_UNIT_TYPE_BLA_W_LP..=NAL_UNIT_TYPE_RSV_IRAP_VCL23).contains(&nal_unit_type) {
             bs.encode(&self.no_output_of_prior_pics_flag)?;
         }
 

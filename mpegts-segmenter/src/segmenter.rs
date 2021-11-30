@@ -85,7 +85,7 @@ impl<S: SegmentStorage> Segmenter<S> {
         }
 
         for buf in buf.chunks(PACKET_LENGTH) {
-            let p = Packet::decode(&buf)?;
+            let p = Packet::decode(buf)?;
             self.analyzer.handle_packet(&p)?;
 
             if let Some(af) = &p.adaptation_field {
@@ -104,7 +104,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                 // start a new segment if this is a keyframe
                                 if p.adaptation_field.and_then(|af| af.random_access_indicator).unwrap_or(false) {
                                     true
-                                } else if let Some(payload) = p.payload {
+                                } else if let Some(payload) = &p.payload {
                                     // some muxers don't set RAI bits. if possible, see if this
                                     // packet includes the start of a keyframe
                                     let mut is_keyframe = false;
@@ -169,7 +169,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     }
                 }
 
-                segment.segment.write_all(&buf).await?;
+                segment.segment.write_all(buf).await?;
                 segment.bytes_written += buf.len();
             }
         }
@@ -312,7 +312,7 @@ mod test {
                         ..
                     } => {
                         assert_eq!(*channel_count, 2);
-                        assert_eq!(*sample_count > 0, true);
+                        assert!(*sample_count > 0);
                         assert_eq!(*sample_rate, 48000);
                     }
                     StreamInfo::Video {
@@ -322,8 +322,8 @@ mod test {
                         frame_count,
                         ..
                     } => {
-                        assert_eq!(*frame_count > 0, true);
-                        assert_eq!((*frame_rate - 59.94).abs() < std::f64::EPSILON, true);
+                        assert!(*frame_count > 0);
+                        assert!((*frame_rate - 59.94).abs() < std::f64::EPSILON);
                         assert_eq!(*width, 1280);
                         assert_eq!(*height, 720);
                     }

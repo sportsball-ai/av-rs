@@ -8,6 +8,9 @@ fn main() {
 
     let bindings = bindgen::Builder::default();
 
+    // the "whilelist_" functions have been renamed in newer bindgen versions, but we use the old
+    // names for wider compatibility
+    #[allow(deprecated)]
     let bindings = bindings
         .header("src/lib.hpp")
         .whitelist_function("kvz_.+")

@@ -390,7 +390,7 @@ impl SampleSizeData {
         }
     }
 
-    pub fn iter_sample_sizes<'a>(&'a self) -> impl 'a + Iterator<Item = u32> {
+    pub fn iter_sample_sizes(&self) -> impl '_ + Iterator<Item = u32> {
         match self.constant_sample_size {
             0 => either::Left(self.sample_sizes.iter().copied()),
             _ => either::Right(std::iter::repeat(self.constant_sample_size)),
@@ -1267,7 +1267,7 @@ impl<M: MediaType> SampleTableData<M> {
         let sample_description = self.sample_description(chunk_info.sample_description)?;
 
         let sample_size = self.sample_size.as_ref()?;
-        let constant_sample_size = M::constant_sample_size(&sample_description).or(if sample_size.constant_sample_size > 0 {
+        let constant_sample_size = M::constant_sample_size(sample_description).or(if sample_size.constant_sample_size > 0 {
             Some(sample_size.constant_sample_size)
         } else {
             None
@@ -1293,7 +1293,7 @@ impl<M: MediaType> SampleTableData<M> {
         let sample_description = self.sample_description(chunk_info.sample_description)?;
 
         let sample_size = self.sample_size.as_ref()?;
-        let constant_sample_size = M::constant_sample_size(&sample_description).or(if sample_size.constant_sample_size > 0 {
+        let constant_sample_size = M::constant_sample_size(sample_description).or(if sample_size.constant_sample_size > 0 {
             Some(sample_size.constant_sample_size)
         } else {
             None
@@ -1323,13 +1323,11 @@ impl<M: MediaType> SampleTableData<M> {
         Some(&sample_descriptions[id as usize])
     }
 
-    pub fn iter_chunk_offsets<'a>(&'a self) -> Option<impl 'a + Iterator<Item = u64>> {
+    pub fn iter_chunk_offsets(&self) -> Option<impl '_ + Iterator<Item = u64>> {
         if let Some(co) = &self.chunk_offset_64 {
             Some(either::Left(co.offsets.iter().copied()))
-        } else if let Some(co) = &self.chunk_offset {
-            Some(either::Right(co.offsets.iter().map(|&n| n as u64)))
         } else {
-            None
+            self.chunk_offset.as_ref().map(|co| either::Right(co.offsets.iter().map(|&n| n as u64)))
         }
     }
 

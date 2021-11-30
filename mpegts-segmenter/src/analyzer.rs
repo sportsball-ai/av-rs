@@ -51,11 +51,7 @@ pub enum Stream {
 
 impl Stream {
     pub fn is_video(&self) -> bool {
-        match *self {
-            Stream::AVCVideo { .. } => true,
-            Stream::HEVCVideo { .. } => true,
-            _ => false,
-        }
+        matches!(*self, Stream::AVCVideo { .. } | Stream::HEVCVideo { .. })
     }
 
     pub fn info(&self) -> StreamInfo {
@@ -134,7 +130,7 @@ impl Stream {
                 object_type_indication,
                 ..
             } => {
-                let mut data = packet.data.as_slice();
+                let mut data = packet.data.as_ref();
                 while data.len() >= 7 {
                     let adts = AudioDataTransportStream::parse(data)?;
                     *sample_count += 1024;
@@ -207,7 +203,7 @@ impl Stream {
                                 let mut pic_timings = vec![];
                                 for message in sei.sei_message {
                                     let mut bs = h264::Bitstream::new(message.payload);
-                                    let timing = h264::PicTiming::decode(&mut bs, &vui_params)?;
+                                    let timing = h264::PicTiming::decode(&mut bs, vui_params)?;
                                     pic_timings.extend_from_slice(timing.timecodes.as_slice());
                                 }
 
@@ -372,16 +368,16 @@ pub enum StreamInfo {
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
-enum PIDState {
+enum PidState {
     Unused,
-    PAT,
-    PMT,
-    PES { stream: Stream },
+    Pat,
+    Pmt,
+    Pes { stream: Stream },
 }
 
 /// Analyzer processes packets in real-time, performing cheap analysis on the streams.
 pub struct Analyzer {
-    pids: Vec<PIDState>,
+    pids: Vec<PidState>,
     has_video: bool,
 }
 
@@ -389,8 +385,8 @@ impl Analyzer {
     pub fn new() -> Self {
         Self {
             pids: {
-                let mut v = vec![PIDState::Unused; 0x10000];
-                v[ts::PID_PAT as usize] = PIDState::PAT;
+                let mut v = vec![PidState::Unused; 0x10000];
+                v[ts::PID_PAT as usize] = PidState::Pat;
                 v
             },
             has_video: false,
@@ -399,25 +395,25 @@ impl Analyzer {
 
     pub fn handle_packets(&mut self, packets: &[ts::Packet<'_>]) -> Result<()> {
         for packet in packets {
-            self.handle_packet(&packet)?;
+            self.handle_packet(packet)?;
         }
         Ok(())
     }
 
     pub fn is_pes(&self, pid: u16) -> bool {
-        matches!(self.pids[pid as usize], PIDState::PES { .. })
+        matches!(self.pids[pid as usize], PidState::Pes { .. })
     }
 
     pub fn stream(&self, pid: u16) -> Option<&Stream> {
         match &self.pids[pid as usize] {
-            PIDState::PES { stream } => Some(stream),
+            PidState::Pes { stream } => Some(stream),
             _ => None,
         }
     }
 
     pub fn is_video(&self, pid: u16) -> bool {
         match &self.pids[pid as usize] {
-            PIDState::PES { stream } => stream.is_video(),
+            PidState::Pes { stream } => stream.is_video(),
             _ => false,
         }
     }
@@ -430,7 +426,7 @@ impl Analyzer {
         self.pids
             .iter()
             .filter_map(|pid| match pid {
-                PIDState::PES { stream } => Some(stream.info()),
+                PidState::Pes { stream } => Some(stream.info()),
                 _ => None,
             })
             .collect()
@@ -438,7 +434,7 @@ impl Analyzer {
 
     pub fn reset_timecodes(&mut self) {
         for pid in &mut self.pids {
-            if let PIDState::PES { stream } = pid {
+            if let PidState::Pes { stream } = pid {
                 stream.reset_timecode();
             }
         }
@@ -446,21 +442,21 @@ impl Analyzer {
 
     pub fn handle_packet(&mut self, packet: &ts::Packet<'_>) -> Result<()> {
         match &mut self.pids[packet.packet_id as usize] {
-            PIDState::PAT => {
+            PidState::Pat => {
                 let table_sections = packet.decode_table_sections()?;
                 let syntax_section = table_sections[0].decode_syntax_section()?;
                 let pat = ts::PATData::decode(syntax_section.data)?;
                 for entry in pat.entries {
-                    self.pids[entry.program_map_pid as usize] = PIDState::PMT;
+                    self.pids[entry.program_map_pid as usize] = PidState::Pmt;
                 }
             }
-            PIDState::PMT => {
+            PidState::Pmt => {
                 let table_sections = packet.decode_table_sections()?;
                 let syntax_section = table_sections[0].decode_syntax_section()?;
                 let pmt = ts::PMTData::decode(syntax_section.data)?;
                 for pes in pmt.elementary_stream_info {
                     match &mut self.pids[pes.elementary_pid as usize] {
-                        PIDState::PES { .. } => {}
+                        PidState::Pes { .. } => {}
                         state => {
                             let stream = match pes.stream_type {
                                 0x0f => Stream::ADTSAudio {
@@ -498,15 +494,15 @@ impl Analyzer {
                             if stream.is_video() {
                                 self.has_video = true;
                             }
-                            *state = PIDState::PES { stream }
+                            *state = PidState::Pes { stream }
                         }
                     };
                 }
             }
-            PIDState::PES { ref mut stream } => {
+            PidState::Pes { ref mut stream } => {
                 stream.write(packet)?;
             }
-            PIDState::Unused => {}
+            PidState::Unused => {}
         }
 
         Ok(())
@@ -516,7 +512,7 @@ impl Analyzer {
     /// to them. Otherwise, the last packet might not be evaluated.
     pub fn flush(&mut self) -> Result<()> {
         for pid in self.pids.iter_mut() {
-            if let PIDState::PES { ref mut stream } = pid {
+            if let PidState::Pes { ref mut stream } = pid {
                 stream.flush()?;
             }
         }
@@ -666,7 +662,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -702,7 +698,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -738,7 +734,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -774,7 +770,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![
@@ -810,7 +806,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![StreamInfo::Video {
@@ -838,7 +834,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![StreamInfo::Video {
@@ -866,7 +862,7 @@ mod test {
             analyzer.flush().unwrap();
         }
 
-        assert_eq!(analyzer.has_video(), true);
+        assert!(analyzer.has_video());
         assert_eq!(
             analyzer.streams(),
             vec![

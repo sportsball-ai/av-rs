@@ -1,4 +1,8 @@
-use std::error::Error;
+use std::{
+    borrow::Cow,
+    error::Error,
+    io::{self, Write},
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -8,16 +12,97 @@ pub const PID_PAT: u16 = 0x00;
 pub struct Packet<'a> {
     pub packet_id: u16,
     pub payload_unit_start_indicator: bool,
+    pub continuity_counter: u8,
     pub adaptation_field: Option<AdaptationField>,
-    pub payload: Option<&'a [u8]>,
+    pub payload: Option<Cow<'a, [u8]>>,
 }
 
 #[derive(Debug, Default, PartialEq)]
 pub struct AdaptationField {
-    pub length: u8,
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
+}
+
+impl AdaptationField {
+    pub fn decode(buf: &[u8]) -> Result<Self> {
+        let mut af = Self::default();
+        let af_length = buf[0];
+        if af_length as usize > buf.len() - 1 {
+            bail!("adaptation field length too long")
+        } else if buf[0] > 0 {
+            af.discontinuity_indicator = Some(buf[1] & 0x80 != 0);
+            af.random_access_indicator = Some(buf[1] & 0x40 != 0);
+            af.program_clock_reference_27mhz = if af_length >= 7 && buf[1] & 0x10 != 0 {
+                let base = (buf[2] as u64) << 25 | (buf[3] as u64) << 17 | (buf[4] as u64) << 9 | (buf[5] as u64) << 1 | (buf[6] as u64) >> 7;
+                let ext = ((buf[6] as u64) & 1) << 8 | (buf[7] as u64);
+                Some(base * 300 + ext)
+            } else {
+                None
+            };
+        }
+        Ok(af)
+    }
+
+    pub fn encoded_len(&self) -> usize {
+        1 + if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() || self.program_clock_reference_27mhz.is_some() {
+            1
+        } else {
+            0
+        } + if self.program_clock_reference_27mhz.is_some() { 6 } else { 0 }
+    }
+
+    pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> io::Result<usize> {
+        let mut ret = 1usize;
+        let mut buf = [0u8; 20];
+
+        if pad_to_length >= 2 {
+            ret = 2;
+        }
+
+        if let Some(discontinuity_indicator) = self.discontinuity_indicator {
+            if discontinuity_indicator {
+                buf[1] |= 0b10000000;
+            }
+            ret = 2;
+        }
+
+        if let Some(random_access_indicator) = self.random_access_indicator {
+            if random_access_indicator {
+                buf[1] |= 0b01000000;
+            }
+            ret = 2;
+        }
+
+        if self.program_clock_reference_27mhz.is_some() {
+            buf[1] |= 0b00010000;
+            ret = 2;
+        }
+
+        if let Some(program_clock_reference_27mhz) = self.program_clock_reference_27mhz {
+            let base = program_clock_reference_27mhz / 300;
+            let ext = program_clock_reference_27mhz % 300;
+            buf[2] = (base >> 25) as _;
+            buf[3] = (base >> 17) as _;
+            buf[4] = (base >> 9) as _;
+            buf[5] = (base >> 1) as _;
+            buf[6] = (base << 7) as u8 | 0b01111110 | (ext >> 8) as u8;
+            buf[7] = ext as _;
+            ret += 6;
+        }
+
+        if ret < pad_to_length {
+            buf[0] = (pad_to_length - 1) as _;
+            w.write_all(&buf[..ret])?;
+            let padding = vec![0xff; pad_to_length - ret];
+            w.write_all(&padding)?;
+            Ok(pad_to_length)
+        } else {
+            buf[0] = (ret - 1) as _;
+            w.write_all(&buf[..ret])?;
+            Ok(ret)
+        }
+    }
 }
 
 pub const TABLE_ID_PAT: u8 = 0;
@@ -27,29 +112,95 @@ pub const TABLE_ID_PMT: u8 = 2;
 pub struct TableSection<'a> {
     pub table_id: u8,
     pub section_syntax_indicator: bool,
-    pub data: &'a [u8],
+    pub data_without_crc: &'a [u8],
 }
 
 const TABLE_SECTION_HEADER_LENGTH: usize = 3;
+
+pub fn encode_table_sections<'a, I: IntoIterator<Item = TableSection<'a>>, W: Write>(sections: I, mut w: W, pad_to_length: usize) -> io::Result<usize> {
+    w.write_all(&[0])?;
+    let mut len = 1;
+    for section in sections.into_iter() {
+        len += section.encode(&mut w)?;
+    }
+    if len < pad_to_length {
+        let padding = vec![0xff; pad_to_length - len];
+        w.write_all(&padding)?;
+        len = pad_to_length;
+    }
+    Ok(len)
+}
 
 impl<'a> TableSection<'a> {
     pub fn decode(buf: &'a [u8]) -> Result<Self> {
         if buf.len() < TABLE_SECTION_HEADER_LENGTH {
             bail!("not enough bytes for table section header")
         }
-        let length = ((buf[1] & 0x03) as usize) << 8 | buf[2] as usize;
+        let mut length = ((buf[1] & 0x03) as usize) << 8 | buf[2] as usize;
         if buf.len() < TABLE_SECTION_HEADER_LENGTH + length {
             bail!("not enough bytes for data")
+        }
+        if length >= 4 {
+            // chop off the crc
+            length -= 4;
         }
         Ok(Self {
             table_id: buf[0],
             section_syntax_indicator: buf[1] & 0x80 != 0,
-            data: &buf[TABLE_SECTION_HEADER_LENGTH..TABLE_SECTION_HEADER_LENGTH + length],
+            data_without_crc: &buf[TABLE_SECTION_HEADER_LENGTH..TABLE_SECTION_HEADER_LENGTH + length],
         })
     }
 
     pub fn decode_syntax_section(&self) -> Result<TableSyntaxSection> {
-        TableSyntaxSection::decode(self.data)
+        TableSyntaxSection::decode_without_crc(self.data_without_crc)
+    }
+
+    pub fn encoded_len(&self) -> usize {
+        TABLE_SECTION_HEADER_LENGTH
+            + self.data_without_crc.len()
+            + if self.data_without_crc.is_empty() {
+                0
+            } else {
+                // add 4 bytes for the crc
+                4
+            }
+    }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut buf = [0u8; TABLE_SECTION_HEADER_LENGTH];
+        buf[0] = self.table_id;
+
+        let data_len = self.data_without_crc.len()
+            + if self.data_without_crc.is_empty() {
+                0
+            } else {
+                // add 4 bytes for the crc
+                4
+            };
+
+        buf[1] = 0b00110000 | (data_len >> 8) as u8;
+        if self.section_syntax_indicator {
+            buf[1] |= 0b10000000;
+        } else {
+            buf[1] |= 0b01000000;
+        }
+
+        buf[2] = data_len as _;
+
+        w.write_all(&buf)?;
+
+        if !self.data_without_crc.is_empty() {
+            let crc = crc::Crc::<u32>::new(&crc::CRC_32_MPEG_2);
+            let mut crc = crc.digest();
+            crc.update(&buf);
+            w.write_all(self.data_without_crc)?;
+            crc.update(self.data_without_crc);
+            let crc = crc.finalize().to_be_bytes();
+            w.write_all(&crc)?;
+            Ok(buf.len() + self.data_without_crc.len() + 4)
+        } else {
+            Ok(buf.len())
+        }
     }
 }
 
@@ -60,14 +211,24 @@ pub struct TableSyntaxSection<'a> {
 }
 
 impl<'a> TableSyntaxSection<'a> {
-    pub fn decode(buf: &'a [u8]) -> Result<Self> {
+    pub fn decode_without_crc(buf: &'a [u8]) -> Result<Self> {
         if buf.len() < 9 {
             bail!("not enough bytes for table syntax section")
         }
         Ok(Self {
             table_id_extension: (buf[0] as u16) << 8 | buf[1] as u16,
-            data: &buf[5..buf.len() - 4],
+            data: &buf[5..buf.len()],
         })
+    }
+
+    pub fn encode_without_crc<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut buf = [0u8; 5];
+        buf[0] = (self.table_id_extension >> 8) as _;
+        buf[1] = self.table_id_extension as _;
+        buf[2] = 0b11000001;
+        w.write_all(&buf)?;
+        w.write_all(self.data)?;
+        Ok(buf.len() + self.data.len())
     }
 }
 
@@ -87,6 +248,16 @@ impl PATEntry {
             program_map_pid: ((buf[2] & 0x1f) as u16) << 8 | buf[3] as u16,
         })
     }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        w.write_all(&[
+            (self.program_number >> 8) as _,
+            self.program_number as _,
+            0b11100000 | (self.program_map_pid >> 8) as u8,
+            self.program_map_pid as _,
+        ])?;
+        Ok(4)
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -99,6 +270,14 @@ impl PATData {
         Ok(Self {
             entries: buf.chunks(4).map(PATEntry::decode).collect::<Result<Vec<PATEntry>>>()?,
         })
+    }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut ret = 0;
+        for e in &self.entries {
+            ret += e.encode(&mut w)?;
+        }
+        Ok(ret)
     }
 }
 
@@ -126,10 +305,23 @@ impl<'a> PMTElementaryStreamInfo<'a> {
             data: &buf[PMT_ELEMENTARY_STREAM_INFO_HEADER_LENGTH..PMT_ELEMENTARY_STREAM_INFO_HEADER_LENGTH + length],
         })
     }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        w.write_all(&[
+            self.stream_type,
+            0b11100000 | (self.elementary_pid >> 8) as u8,
+            self.elementary_pid as _,
+            0b11110000 | (self.data.len() >> 8) as u8,
+            self.data.len() as _,
+        ])?;
+        w.write_all(self.data)?;
+        Ok(PMT_ELEMENTARY_STREAM_INFO_HEADER_LENGTH + self.data.len())
+    }
 }
 
 #[derive(Debug, PartialEq)]
 pub struct PMTData<'a> {
+    pub pcr_pid: u16,
     pub elementary_stream_info: Vec<PMTElementaryStreamInfo<'a>>,
 }
 
@@ -145,6 +337,7 @@ impl<'a> PMTData<'a> {
             bail!("not enough bytes for pmt program descriptors")
         }
         Ok(Self {
+            pcr_pid: ((buf[0] & 0x1f) as u16) << 8 | buf[1] as u16,
             elementary_stream_info: {
                 let mut infos = Vec::new();
                 let mut buf = &buf[PMT_HEADER_LENGTH + descs_length..];
@@ -157,8 +350,18 @@ impl<'a> PMTData<'a> {
             },
         })
     }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        w.write_all(&[0b11100000 | (self.pcr_pid >> 8) as u8, self.pcr_pid as _, 0xf0, 0])?;
+        let mut ret = PMT_HEADER_LENGTH;
+        for info in &self.elementary_stream_info {
+            ret += info.encode(&mut w)?;
+        }
+        Ok(ret)
+    }
 }
 
+const PACKET_HEADER_LENGTH: usize = 4;
 pub const PACKET_LENGTH: usize = 188;
 
 impl<'a> Packet<'a> {
@@ -175,32 +378,17 @@ impl<'a> Packet<'a> {
 
         let adaptation_field_control = buf[3] & 0x30;
 
-        let adaptation_field = if adaptation_field_control & 0x20 != 0 {
-            let mut af = AdaptationField::default();
-            af.length = buf[4];
-            if af.length as usize > PACKET_LENGTH - 5 {
-                bail!("adaptation field length too long")
-            } else if af.length > 0 {
-                af.discontinuity_indicator = Some(buf[5] & 0x80 != 0);
-                af.random_access_indicator = Some(buf[5] & 0x40 != 0);
-                af.program_clock_reference_27mhz = if af.length >= 7 && buf[5] & 0x10 != 0 {
-                    let base = (buf[6] as u64) << 25 | (buf[7] as u64) << 17 | (buf[8] as u64) << 9 | (buf[9] as u64) << 1 | (buf[10] as u64) >> 7;
-                    let ext = (buf[10] as u64) & 0x80 << 1 | (buf[11] as u64);
-                    Some(base * 300 + ext)
-                } else {
-                    None
-                };
-            }
-            Some(af)
+        let (adaptation_field, adaptation_field_length) = if adaptation_field_control & 0x20 != 0 {
+            (
+                Some(AdaptationField::decode(&buf[PACKET_HEADER_LENGTH..])?),
+                buf[PACKET_HEADER_LENGTH] as usize + 1,
+            )
         } else {
-            None
+            (None, 0)
         };
 
         let payload = if adaptation_field_control & 0x10 != 0 {
-            Some(match &adaptation_field {
-                Some(f) => &buf[4 + 1 + f.length as usize..],
-                None => &buf[4..],
-            })
+            Some(&buf[PACKET_HEADER_LENGTH + adaptation_field_length..])
         } else {
             None
         };
@@ -208,13 +396,14 @@ impl<'a> Packet<'a> {
         Ok(Self {
             packet_id,
             payload_unit_start_indicator: buf[1] & 0x40 != 0,
+            continuity_counter: buf[3] & 0x0f,
             adaptation_field,
-            payload,
+            payload: payload.map(Cow::Borrowed),
         })
     }
 
-    pub fn decode_table_sections(&self) -> Result<Vec<TableSection<'a>>> {
-        let payload = match self.payload {
+    pub fn decode_table_sections(&self) -> Result<Vec<TableSection<'_>>> {
+        let payload = match &self.payload {
             Some(p) => p,
             None => return Ok(vec![]),
         };
@@ -233,11 +422,55 @@ impl<'a> Packet<'a> {
         let mut buf = &payload[1 + padding..];
         while !buf.is_empty() && buf[0] != 0xff {
             let section = TableSection::decode(buf)?;
-            buf = &buf[TABLE_SECTION_HEADER_LENGTH + section.data.len()..];
+            buf = &buf[section.encoded_len()..];
             ret.push(section);
         }
 
         Ok(ret)
+    }
+
+    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+        let mut buf = [0u8; PACKET_HEADER_LENGTH];
+        buf[0] = 0x47;
+
+        if self.payload_unit_start_indicator {
+            buf[1] |= 0x40;
+        }
+
+        buf[1] |= (self.packet_id >> 8) as u8;
+        buf[2] = self.packet_id as _;
+        buf[3] = self.continuity_counter as _;
+
+        if self.adaptation_field.is_some() {
+            buf[3] |= 0b00100000;
+        }
+
+        if self.payload.is_some() {
+            buf[3] |= 0b00010000;
+        }
+
+        let mut ret = PACKET_HEADER_LENGTH;
+        w.write_all(&buf)?;
+
+        if let Some(af) = &self.adaptation_field {
+            ret += af.encode(&mut w, PACKET_LENGTH - ret - self.payload.as_ref().map(|p| p.len()).unwrap_or(0))?;
+        }
+
+        if let Some(payload) = &self.payload {
+            w.write_all(payload)?;
+            ret += payload.len();
+        }
+
+        if ret != PACKET_LENGTH {
+            Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid data length"))
+        } else {
+            Ok(ret)
+        }
+    }
+
+    /// Returns the maximum possible data length for a packet with the given adaptation field.
+    pub fn max_payload_len(af: Option<&AdaptationField>) -> usize {
+        PACKET_LENGTH - PACKET_HEADER_LENGTH - af.map(|af| af.encoded_len()).unwrap_or(0)
     }
 }
 
@@ -251,7 +484,7 @@ mod test {
     use std::{fs::File, io::Read};
 
     #[test]
-    fn test_decode() {
+    fn test_decode_encode() {
         let mut f = File::open("src/testdata/pro-bowl.ts").unwrap();
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
@@ -262,26 +495,52 @@ mod test {
         assert_eq!(
             packets[3].adaptation_field,
             Some(AdaptationField {
-                length: 7,
                 discontinuity_indicator: Some(false),
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
             })
         );
+        {
+            let mut encoded = vec![];
+            packets[3].adaptation_field.as_ref().unwrap().encode(&mut encoded, 0).unwrap();
+            assert_eq!(buf[188 * 3 + 4..188 * 3 + 12], encoded);
+            assert_eq!(packets[3].adaptation_field.as_ref().unwrap().encoded_len(), encoded.len());
+        }
 
         let mut last_pcr = 0;
         let mut rais = 0;
-        for p in &packets {
+        for (i, p) in packets.iter().enumerate() {
+            {
+                let mut encoded = vec![];
+                p.encode(&mut encoded).unwrap();
+                assert_eq!(buf[188 * i..188 * (i + 1)], encoded);
+            }
+
             // PAT
             if p.packet_id == PID_PAT {
                 let table_sections = p.decode_table_sections().unwrap();
                 assert_eq!(table_sections.len(), 1);
                 assert_eq!(table_sections[0].table_id, TABLE_ID_PAT);
+                {
+                    let mut encoded = vec![];
+                    table_sections[0].encode(&mut encoded).unwrap();
+                    assert_eq!(p.payload.as_ref().unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
+                }
 
                 let syntax_section = table_sections[0].decode_syntax_section().unwrap();
                 assert_eq!(syntax_section.table_id_extension, 1);
+                {
+                    let mut encoded = vec![];
+                    syntax_section.encode_without_crc(&mut encoded).unwrap();
+                    assert_eq!(table_sections[0].data_without_crc, encoded);
+                }
 
                 let pat = PATData::decode(syntax_section.data).unwrap();
+                {
+                    let mut encoded = vec![];
+                    pat.encode(&mut encoded).unwrap();
+                    assert_eq!(syntax_section.data, encoded);
+                }
 
                 assert_eq!(
                     pat,
@@ -299,11 +558,27 @@ mod test {
                 let table_sections = p.decode_table_sections().unwrap();
                 assert_eq!(table_sections.len(), 1);
                 assert_eq!(table_sections[0].table_id, TABLE_ID_PMT);
+                {
+                    let mut encoded = vec![];
+                    table_sections[0].encode(&mut encoded).unwrap();
+                    assert_eq!(p.payload.as_ref().unwrap()[1..1 + table_sections[0].encoded_len()], encoded);
+                }
 
                 let syntax_section = table_sections[0].decode_syntax_section().unwrap();
                 assert_eq!(syntax_section.table_id_extension, 1);
+                {
+                    let mut encoded = vec![];
+                    syntax_section.encode_without_crc(&mut encoded).unwrap();
+                    assert_eq!(table_sections[0].data_without_crc, encoded);
+                }
 
                 let pmt = PMTData::decode(syntax_section.data).unwrap();
+                {
+                    let mut encoded = vec![];
+                    pmt.encode(&mut encoded).unwrap();
+                    assert_eq!(syntax_section.data, encoded);
+                }
+
                 assert_eq!(pmt.elementary_stream_info.len(), 2);
             }
 
@@ -312,7 +587,7 @@ mod test {
                     rais += 1;
                 }
                 if let Some(pcr) = f.program_clock_reference_27mhz {
-                    assert_eq!(pcr > last_pcr, true);
+                    assert!(pcr > last_pcr);
                     last_pcr = pcr;
                 }
             }

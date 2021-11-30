@@ -2,7 +2,7 @@
 
 This program will combine multiple untiled videos into a single video via tiling.
 
-```
+```bash
 cargo run --features bin -- -i ./test/tiles/*.h265 -o ./test/out.h265
 ```
 

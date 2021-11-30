@@ -91,7 +91,7 @@ impl<T: Iterator<Item = u8>> Bitstream<T> {
             Some(0) => true,
             Some(_) => {
                 // if there's more than one byte left, this is not the rbsp_stop_one_bit
-                self.next_bits_length > 8 
+                self.next_bits_length > 8
                     // if there's more than one set bit left, this is not the rbsp_stop_one_bit
                     || self.next_bits(self.next_bits_length) != Some(1 << (self.next_bits_length - 1))
                     // if there is additional data after the byte alignment, this is not the rbsp_stop_one_bit

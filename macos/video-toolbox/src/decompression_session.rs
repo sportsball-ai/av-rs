@@ -84,7 +84,7 @@ mod test {
         f.read_to_end(&mut buf).unwrap();
 
         let nalus: Vec<_> = h264::iterate_annex_b(&buf).collect();
-        let format_desc = VideoFormatDescription::with_h264_parameter_sets(&[&nalus[0], &nalus[1]], 4).unwrap();
+        let format_desc = VideoFormatDescription::with_h264_parameter_sets(&[nalus[0], nalus[1]], 4).unwrap();
         let mut sess = DecompressionSession::new(&format_desc).unwrap();
 
         // This file is encoded as exactly one NALU per frame.

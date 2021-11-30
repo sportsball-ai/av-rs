@@ -5,3 +5,4 @@ edition = "2018"
 
 [dependencies]
 simple-error = "0.2.1"
+crc = "2.0.0"

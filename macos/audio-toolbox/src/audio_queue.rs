@@ -77,6 +77,11 @@ impl AudioQueue {
         result(unsafe { sys::AudioQueuePrime(self.inner, frames as _, &mut prepared as _).into() })?;
         Ok(prepared as _)
     }
+
+    /// Sets the volume. 0.0 is silent, 1.0 is full volume.
+    pub fn set_volume(&mut self, volume: f64) -> Result<(), OSStatus> {
+        result(unsafe { sys::AudioQueueSetParameter(self.inner, sys::kAudioQueueParam_Volume, volume as _).into() })
+    }
 }
 
 impl Drop for AudioQueue {
@@ -176,6 +181,7 @@ mod test {
             },
         )
         .unwrap();
+        queue.set_volume(0.0).unwrap();
 
         for _ in 0..3 {
             let mut buffer = queue.new_buffer(BUFFER_SIZE).unwrap();
@@ -211,6 +217,7 @@ mod test {
             |_buffer| {},
         )
         .unwrap();
+        queue.set_volume(0.0).unwrap();
 
         const BUFFER_SIZE: usize = 4096;
 
@@ -224,7 +231,7 @@ mod test {
         let mut buf = Vec::new();
         let mut packets = Vec::new();
         while data.len() >= 7 {
-            let adts = AudioDataTransportStream::parse(&data).unwrap();
+            let adts = AudioDataTransportStream::parse(data).unwrap();
             if buf.len() + adts.aac_data.len() > BUFFER_SIZE {
                 let mut buffer = queue.new_buffer(BUFFER_SIZE).unwrap();
                 buffer.set_audio_data_length(buf.len());

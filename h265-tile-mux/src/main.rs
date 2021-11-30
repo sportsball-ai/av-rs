@@ -37,11 +37,7 @@ fn main() -> Result<(), BoxError> {
         .version(env!("CARGO_PKG_VERSION"))
         .get_matches();
 
-    let inputs = matches
-        .values_of("input")
-        .unwrap()
-        .map(File::open)
-        .collect::<Result<Vec<_>, _>>()?;
+    let inputs = matches.values_of("input").unwrap().map(File::open).collect::<Result<Vec<_>, _>>()?;
 
     let selection = matches
         .values_of("selection")

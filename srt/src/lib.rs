@@ -86,16 +86,16 @@ fn check_code(fn_name: &'static str, code: sys::int) -> Result<()> {
 }
 
 #[derive(Default)]
-struct API {
+struct Api {
     #[cfg(feature = "async")]
     epoll_reactor: Mutex<Option<Arc<epoll_reactor::EpollReactor>>>,
 }
 
 lazy_static! {
-    static ref GLOBAL_API: Mutex<Option<Weak<API>>> = Mutex::new(None);
+    static ref GLOBAL_API: Mutex<Option<Weak<Api>>> = Mutex::new(None);
 }
 
-impl API {
+impl Api {
     #[cfg(feature = "async")]
     fn get_epoll_reactor(&self) -> Result<Arc<epoll_reactor::EpollReactor>> {
         let mut api_reactor = self.epoll_reactor.lock().expect("the lock should not be poisoned");
@@ -109,7 +109,7 @@ impl API {
         }
     }
 
-    fn get() -> Result<Arc<API>> {
+    fn get() -> Result<Arc<Api>> {
         let mut api = GLOBAL_API.lock().unwrap();
         let existing = (*api).as_ref().and_then(|api| api.upgrade());
         match existing {
@@ -126,7 +126,7 @@ impl API {
     }
 }
 
-impl Drop for API {
+impl Drop for Api {
     fn drop(&mut self) {
         #[cfg(feature = "async")]
         if let Some(reactor) = self.epoll_reactor.lock().expect("the lock should not be poisoned").take() {
@@ -142,7 +142,7 @@ impl Drop for API {
 }
 
 struct Socket {
-    pub(crate) api: Arc<API>,
+    pub(crate) api: Arc<Api>,
     sock: sys::SRTSOCKET,
 }
 
@@ -206,7 +206,7 @@ impl FromOption for i32 {
 impl Socket {
     fn new() -> Result<Socket> {
         Ok(Socket {
-            api: API::get()?,
+            api: Api::get()?,
             sock: unsafe { sys::srt_create_socket() },
         })
     }
@@ -299,6 +299,10 @@ pub enum ListenerCallbackAction {
 
 pub struct Listener<'c> {
     socket: Socket,
+
+    // we pass a pointer to `Box<dyn ListenerCallback + 'c>` to C land, and the double boxing is
+    // necessary here to keep that pointer valid
+    #[allow(clippy::redundant_allocation)]
     _callback: Option<Pin<Box<Box<dyn ListenerCallback + 'c>>>>,
 }
 
@@ -419,7 +423,7 @@ impl Stream {
         for addr in addr.to_socket_addrs()? {
             let (addr, len) = to_sockaddr(&addr);
             let socket = Socket::new()?;
-            socket.set_connect_options(&options)?;
+            socket.set_connect_options(options)?;
             unsafe {
                 match check_code("srt_connect", sys::srt_connect(socket.raw(), addr, len as _)) {
                     Err(e) => last_err = e,
@@ -502,11 +506,13 @@ mod test {
             assert_eq!(&buf[0..3], b"foo");
         });
 
-        let mut options = ConnectOptions::default();
-        options.stream_id = Some("mystreamid".to_string());
+        let mut options = ConnectOptions {
+            stream_id: Some("mystreamid".to_string()),
+            passphrase: Some("notthepassphrase".to_string()),
+            ..Default::default()
+        };
 
-        options.passphrase = Some("notthepassphrase".to_string());
-        assert_eq!(Stream::connect("127.0.0.1:1236", &options).is_err(), true);
+        assert!(Stream::connect("127.0.0.1:1236", &options).is_err());
 
         options.passphrase = Some("thepassphrase".to_string());
         let mut conn = Stream::connect("127.0.0.1:1236", &options).unwrap();
