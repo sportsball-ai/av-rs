@@ -1,0 +1,130 @@
+use crate::sys::*;
+use crate::xlnx_dec_utils::*;
+use crate::XlnxDecodeError;
+use simple_error::{bail, SimpleError};
+
+pub struct XlnxDecoder {
+    pub dec_session: *mut XmaDecoderSession,
+    pub frame_props: XmaFrameProperties,
+    in_buf: *mut XmaDataBuffer,
+    pub out_frame: *mut XmaFrame,
+    pub flush_sent: bool,
+}
+
+impl XlnxDecoder {
+    pub fn new(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<Self, SimpleError> {
+        // reserve the required decoding resources and assign reserve ID
+        xlnx_reserve_dec_resource(xlnx_dec_ctx)?;
+
+        let dec_session = xlnx_create_dec_session(xma_dec_props, xlnx_dec_ctx)?;
+
+        let mut frame_props: XmaFrameProperties = Default::default();
+        let ret = unsafe { xma_dec_session_get_properties(dec_session, &mut frame_props) };
+        if ret != XMA_SUCCESS as i32 {
+            bail!("Unable to get frame properties from decoder session")
+        }
+
+        let in_buf = unsafe { xma_data_buffer_alloc(0, true) };
+
+        let out_frame = unsafe { xma_frame_alloc(&mut frame_props, false) };
+
+        Ok(Self {
+            dec_session,
+            frame_props,
+            in_buf,
+            out_frame,
+            flush_sent: false,
+        })
+    }
+
+    /// Sends data to xilinx decoder using xma plugin.
+    ///
+    /// @buf: buffer of input data.
+    /// @size: size of input data.
+    pub fn xlnx_dec_send_pkt(&mut self, buf: &mut [u8]) -> Result<(), XlnxDecodeError> {
+        let mut data_used = 0;
+        let mut index = 0;
+        let mut ret;
+
+        let size = buf.len();
+        while index < size {
+            unsafe {
+                self.in_buf = xma_data_from_buffer_clone(buf.as_mut_ptr(), size as u64);
+                (*self.in_buf).pts = 0; //no need to assign pts on input keep track of this elsewhere
+
+                ret = xma_dec_session_send_data(self.dec_session, self.in_buf, &mut data_used);
+
+                xma_data_buffer_free(self.in_buf);
+            }
+
+            if ret != XMA_SUCCESS as i32 {
+                return Err(XlnxDecodeError::new(ret, None));
+            }
+
+            index += data_used as usize;
+        }
+
+        Ok(())
+    }
+
+    /// Receives decoded frame into internal out_frame object
+    pub fn xlnx_dec_recv_frame(&mut self) -> Result<(), XlnxDecodeError> {
+        let ret = unsafe { xma_dec_session_recv_frame(self.dec_session, self.out_frame) };
+        if ret != XMA_SUCCESS as i32 {
+            return Err(XlnxDecodeError::new(ret, None));
+        }
+        Ok(())
+    }
+
+    /// Sends a null frame to the decoder with eof flag to start decoder flush
+    pub fn xlnx_send_flush_frame(&mut self) -> Result<(), XlnxDecodeError> {
+        let mut buffer: XmaDataBuffer = Default::default();
+        let mut data_used = 0;
+
+        //fill empty buffer data
+        buffer.data.buffer = std::ptr::null_mut();
+        buffer.alloc_size = 0;
+        buffer.is_eof = 1;
+
+        let ret = unsafe { xma_dec_session_send_data(self.dec_session, &mut buffer, &mut data_used) };
+        if ret != XMA_SUCCESS as i32 {
+            return Err(XlnxDecodeError::new(ret, None));
+        }
+        Ok(())
+    }
+
+    /// Sends a null frame to the decoder with eof flag to start decoder flush
+    pub fn xlnx_dec_send_null_frame(&mut self) -> Result<(), XlnxDecodeError> {
+        let mut buffer: XmaDataBuffer = Default::default();
+        let mut data_used = 0;
+
+        //fill empty buffer data
+        buffer.data.buffer = std::ptr::null_mut();
+        buffer.alloc_size = 0;
+        buffer.is_eof = 0;
+        buffer.pts = -1;
+
+        let ret = unsafe { xma_dec_session_send_data(self.dec_session, &mut buffer, &mut data_used) };
+        if ret != XMA_SUCCESS as i32 {
+            return Err(XlnxDecodeError::new(ret, None));
+        }
+        self.flush_sent = true;
+        Ok(())
+    }
+}
+
+impl Drop for XlnxDecoder {
+    fn drop(&mut self) {
+        unsafe {
+            if !self.dec_session.is_null() {
+                xma_dec_session_destroy(self.dec_session);
+            }
+            if !self.out_frame.is_null() {
+                xma_frame_free(self.out_frame);
+            }
+            if !self.in_buf.is_null() {
+                xma_data_buffer_free(self.in_buf);
+            }
+        }
+    }
+}
