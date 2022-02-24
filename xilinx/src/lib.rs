@@ -15,7 +15,7 @@ pub use xlnx_dec_props::*;
 pub mod xlnx_error;
 pub use xlnx_error::*;
 
-const XCLBIN_FILENAME: &str = "/opt/xilinx/xcdr/xclbins/transcode.xclbin";
+const XCLBIN_FILENAME: &[u8] = b"/opt/xilinx/xcdr/xclbins/transcode.xclbin\0";
 
 /// initalized the number of devices specified with the default xclbin_name
 ///
@@ -23,12 +23,9 @@ const XCLBIN_FILENAME: &str = "/opt/xilinx/xcdr/xclbins/transcode.xclbin";
 pub fn xlnx_init_all_devices(device_count: i32) -> Result<(), simple_error::SimpleError> {
     let mut xclbin_params = Vec::new();
 
-    let fname = std::ffi::CString::new(XCLBIN_FILENAME).expect("CString::new failed");
-    let fname_ptr = fname.into_raw();
-
     for i in 0..device_count {
         xclbin_params.push(XmaXclbinParameter {
-            xclbin_name: fname_ptr,
+            xclbin_name: XCLBIN_FILENAME.as_ptr() as *mut i8,
             device_id: i,
         });
     }
@@ -46,16 +43,16 @@ pub fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
 }
 
 // performs a strcpy from string literal to existing output array. ensures null termination.
-pub fn strcpy_to_arr_i8(buff: &mut [i8], buff_len: usize, in_str: &str) -> Result<(), simple_error::SimpleError> {
+pub fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simple_error::SimpleError> {
     //check string length is smaller than buffer size. requires one byte for null termination
-    if in_str.len() > buff_len - 1 {
+    if in_str.len() > buf.len() - 1 {
         simple_error::bail!("Input str exceeds output buffer size")
     }
 
-    for (i, c) in in_str.chars().enumerate() {
-        buff[i] = c as i8;
-    }
-    buff[in_str.len()] = '\0' as i8;
+    let src: Vec<i8> = in_str.as_bytes().iter().map(|c| *c as i8).collect();
+    buf[..src.len()].copy_from_slice(&src[..]);
+    buf[in_str.len()] = 0;
+
     Ok(())
 }
 

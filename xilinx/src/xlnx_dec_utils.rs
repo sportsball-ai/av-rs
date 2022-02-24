@@ -65,17 +65,14 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
 pub fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, dec_load: i32) -> Result<(), SimpleError> {
     cu_pool_prop.cuListProp.sameDevice = true;
     cu_pool_prop.cuListNum = 1;
-    let mut buff_len = cu_pool_prop.cuListProp.cuProps[0].kernelName.len();
-    strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelName, buff_len, "decoder")?;
-    buff_len = cu_pool_prop.cuListProp.cuProps[0].kernelAlias.len();
-    strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelAlias, buff_len, "DECODER_MPSOC")?;
+
+    strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelName, "decoder")?;
+    strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelAlias, "DECODER_MPSOC")?;
     cu_pool_prop.cuListProp.cuProps[0].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[0].requestLoad = xrm_precision_1000000_bitmask(dec_load);
 
-    buff_len = cu_pool_prop.cuListProp.cuProps[0].kernelName.len();
-    strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[1].kernelName, buff_len, "kernel_vcu_decoder")?;
-    buff_len = cu_pool_prop.cuListProp.cuProps[0].kernelAlias.len();
-    strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[1].kernelAlias, buff_len, "")?;
+    strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[1].kernelName, "kernel_vcu_decoder")?;
+
     cu_pool_prop.cuListProp.cuProps[1].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[1].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
     // we defined 2 cu requests to the properties.
@@ -113,15 +110,12 @@ pub fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xln
     let mut decode_cu_hw_prop: xrmCuProperty = Default::default();
     let mut decode_cu_sw_prop: xrmCuProperty = Default::default();
 
-    let mut buff_len = decode_cu_hw_prop.kernelName.len();
-    strcpy_to_arr_i8(&mut decode_cu_hw_prop.kernelName, buff_len, "decoder")?;
-    buff_len = decode_cu_hw_prop.kernelAlias.len();
-    strcpy_to_arr_i8(&mut decode_cu_hw_prop.kernelAlias, buff_len, "DECODER_MPSOC")?;
+    strcpy_to_arr_i8(&mut decode_cu_hw_prop.kernelName, "decoder")?;
+    strcpy_to_arr_i8(&mut decode_cu_hw_prop.kernelAlias, "DECODER_MPSOC")?;
     decode_cu_hw_prop.devExcl = false;
     decode_cu_hw_prop.requestLoad = xrm_precision_1000000_bitmask(xlnx_dec_ctx.dec_load);
 
-    decode_cu_sw_prop.kernelName.len();
-    strcpy_to_arr_i8(&mut decode_cu_sw_prop.kernelName, buff_len, "kernel_vcu_decoder")?;
+    strcpy_to_arr_i8(&mut decode_cu_sw_prop.kernelName, "kernel_vcu_decoder")?;
     decode_cu_sw_prop.devExcl = false;
     decode_cu_sw_prop.requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
 
@@ -166,18 +160,14 @@ pub fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xl
     // Allocate xrm decoder
     let mut decode_cu_list_prop: xrmCuListProperty = Default::default();
     decode_cu_list_prop.cuNum = 2;
-    let mut buff_len = decode_cu_list_prop.cuProps[0].kernelName.len();
-    strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelName, buff_len, "decoder")?;
-    buff_len = decode_cu_list_prop.cuProps[0].kernelAlias.len();
-    strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelAlias, buff_len, "DECODER_MPSOC")?;
+
+    strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelName, "decoder")?;
+    strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelAlias, "DECODER_MPSOC")?;
     decode_cu_list_prop.cuProps[0].devExcl = false;
     decode_cu_list_prop.cuProps[0].requestLoad = xrm_precision_1000000_bitmask(xlnx_dec_ctx.dec_load);
     decode_cu_list_prop.cuProps[0].poolId = xlnx_dec_ctx.xrm_reserve_id;
 
-    buff_len = decode_cu_list_prop.cuProps[1].kernelName.len();
-    strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[1].kernelName, buff_len, "kernel_vcu_decoder")?;
-    buff_len = decode_cu_list_prop.cuProps[1].kernelAlias.len();
-    strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[1].kernelAlias, buff_len, "")?;
+    strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[1].kernelName, "kernel_vcu_decoder")?;
     decode_cu_list_prop.cuProps[1].devExcl = false;
     decode_cu_list_prop.cuProps[1].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
     decode_cu_list_prop.cuProps[1].poolId = xlnx_dec_ctx.xrm_reserve_id;
