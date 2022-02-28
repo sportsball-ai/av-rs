@@ -1,0 +1,12 @@
+[package]
+name = "encoders"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+fdk_aac = []
+x264 = []
+
+[dependencies]
+futures = { version = "0.3", default-features = false }
+snafu = { version = "0.7.0", default-features = false }

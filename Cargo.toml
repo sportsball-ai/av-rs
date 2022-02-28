@@ -20,5 +20,6 @@ members = [
     "mpeg4",
     "qtff",
     "rfc6381",
-    "kvazaar-sys"
+    "kvazaar-sys",
+    "encoders",
 ]
