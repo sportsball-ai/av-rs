@@ -55,12 +55,3 @@ pub fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simple_error
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
-    }
-}

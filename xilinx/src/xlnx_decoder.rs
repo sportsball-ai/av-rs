@@ -15,8 +15,8 @@ impl XlnxDecoder {
     pub fn new(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<Self, SimpleError> {
         // reserve the required decoding resources and assign reserve ID
         xlnx_reserve_dec_resource(xlnx_dec_ctx)?;
-        
 
+        
         let dec_session = xlnx_create_dec_session(xma_dec_props, xlnx_dec_ctx)?;
 
         let mut frame_props: XmaFrameProperties = Default::default();
@@ -42,7 +42,7 @@ impl XlnxDecoder {
     ///
     /// @buf: buffer of input data.
     /// @size: size of input data.
-    pub fn xlnx_dec_send_pkt(&mut self, buf: &mut [u8]) -> Result<(), XlnxDecodeError> {
+    pub fn xlnx_dec_send_pkt(&mut self, buf: &mut [u8], pts: i32) -> Result<(), XlnxDecodeError> {
         let mut data_used = 0;
         let mut index = 0;
         let mut ret;
@@ -50,12 +50,12 @@ impl XlnxDecoder {
         let size = buf.len();
         while index < size {
             unsafe {
-                self.in_buf = xma_data_from_buffer_clone(buf.as_mut_ptr(), size as u64);
-                (*self.in_buf).pts = 0; //no need to assign pts on input keep track of this elsewhere
+                self.in_buf = xma_data_buffer_alloc(size as u64, false);
+                (*self.in_buf).data.buffer = buf.as_mut_ptr() as *mut _ as *mut std::ffi::c_void;
+                (*self.in_buf).pts = pts - 133200;
+                (*self.in_buf).is_eof = 0;
 
                 ret = xma_dec_session_send_data(self.dec_session, self.in_buf, &mut data_used);
-
-                xma_data_buffer_free(self.in_buf);
             }
 
             if ret != XMA_SUCCESS as i32 {
@@ -64,7 +64,6 @@ impl XlnxDecoder {
 
             index += data_used as usize;
         }
-
         Ok(())
     }
 
@@ -77,7 +76,7 @@ impl XlnxDecoder {
         Ok(())
     }
 
-    /// Sends a null frame to the decoder with eof flag to start decoder flush
+    /// Sends a flush frame to the decoder with eof flag to start decoder flush
     pub fn xlnx_send_flush_frame(&mut self) -> Result<(), XlnxDecodeError> {
         let mut buffer: XmaDataBuffer = Default::default();
         let mut data_used = 0;
@@ -94,7 +93,7 @@ impl XlnxDecoder {
         Ok(())
     }
 
-    /// Sends a null frame to the decoder with eof flag to start decoder flush
+    /// Sends a null frame to the decoder
     pub fn xlnx_dec_send_null_frame(&mut self) -> Result<(), XlnxDecodeError> {
         let mut buffer: XmaDataBuffer = Default::default();
         let mut data_used = 0;
@@ -135,6 +134,7 @@ impl Drop for XlnxDecoder {
 mod tests {
     use crate::{xlnx_init_all_devices, xlnx_dec_props::*, xlnx_decoder::*, xlnx_error::*};
     const H265_TEST_FILE_PATH: &[u8] = b"src/testdata/hvc1.1.6.L150.90.ts";
+    const H264_TEST_FILE_PATH: &[u8] = b"src/testdata/h264.ts";
     const MAX_DEC_PARAMS: usize = 11;
 
     use std::sync::Once;
@@ -147,10 +147,9 @@ mod tests {
         });
     }
 
-    #[test]
-    fn test_hevc_decode() {
+    pub fn decode_file(file_path: &[u8], codec_type: u32, profile: u32, level: u32) -> (i32, i32) {
         initialize();
-        let input_path = std::ffi::CString::new(H265_TEST_FILE_PATH).unwrap();
+        let input_path = std::ffi::CString::new(file_path).unwrap();
         let mut opts: *mut ffmpeg_sys::AVDictionary = std::ptr::null_mut();
         let mut input_ctx: *mut ffmpeg_sys::AVFormatContext = std::ptr::null_mut();
 
@@ -159,12 +158,12 @@ mod tests {
             width: 1280,
             height: 720,
             bitdepth: 8,
-            codec_type: 1,
+            codec_type: codec_type,
             low_latency: 0,
             entropy_buffers_count: 2,
             zero_copy: 1,
-            profile: 1,
-            level: 93,
+            profile: profile,
+            level: level,
             chroma_mode: 420,
             scan_type: 1,
             latency_logging: 1,
@@ -195,9 +194,12 @@ mod tests {
         
         // create Xlnx decoder 
         let mut decoder = XlnxDecoder::new(&mut *xma_dec_props, &mut xlnx_dec_ctx).unwrap();
+        let mut frames_decoded = 0;
+        let mut packets_sent = 0;
 
         // handle opening the stream with avformat.
         unsafe {
+
             if ffmpeg_sys::avformat_open_input(&mut input_ctx, input_path.as_ptr(), 0 as _, &mut opts) != 0  {
                 ffmpeg_sys::av_dict_free(&mut opts);
                 panic!("unable to open test file");
@@ -211,12 +213,9 @@ mod tests {
             let input_streams = std::slice::from_raw_parts((*input_ctx).streams, (*input_ctx).nb_streams as _);
 
             let mut pkt = std::mem::zeroed::<ffmpeg_sys::AVPacket>();
-            let mut frame_count = 0;
-            let mut packets_sent = 0;
             loop {
                 match ffmpeg_sys::av_read_frame(input_ctx, &mut pkt) {
                     ffmpeg_sys::AVERROR_EOF => {
-                        println!("Got AVERROR_EOF");
                         break
                     },
                     err if err < 0 => panic!("Error reading input frame."),
@@ -228,37 +227,46 @@ mod tests {
                 match (*(**stream).codecpar).codec_type {
                     ffmpeg_sys::AVMediaType::AVMEDIA_TYPE_VIDEO => {
                         let data = std::slice::from_raw_parts_mut(pkt.data, pkt.size as usize);
-                        match decoder.xlnx_dec_send_pkt(data) {
-                            Ok(_) => {
-                                packets_sent += 1;
-                            },
-                            Err(e) => {
-                                match e.err {
-                                    XlnxDecodeErrorType::XlnxError => panic!("Error sending packet to xilinx decoder: {}", e.message),
-                                    _ => {},
-                                }
-                            }
-                        };
                         loop {
-                            match decoder.xlnx_dec_recv_frame() {
+                            let mut packet_send_success = false;
+                            match decoder.xlnx_dec_send_pkt(data, pkt.pts as i32) {
                                 Ok(_) => {
-                                    //the frame was decoded. do nothing yet.
-                                    frame_count += 1;
+                                    packets_sent += 1;
+                                    packet_send_success = true;
                                 },
                                 Err(e) => {
                                     match e.err {
-                                        XlnxDecodeErrorType::XlnxTryAgain => break,
-                                        _ => panic!("Error receiving frame from decoder.")
-                                    };
-                                },
+                                        XlnxDecodeErrorType::XlnxError => panic!("Error sending packet to xilinx decoder: {}", e.message),
+                                        _ => {},
+                                    }
+                                }
                             };
+                            loop {
+                                match decoder.xlnx_dec_recv_frame() {
+                                    Ok(_) => {
+                                        //the frame was decoded. do nothing yet.
+                                        frames_decoded += 1;
+                                        // throw away the frame. Clear XVBM buffer
+                                        let handle: XvbmBufferHandle = (*decoder.out_frame).data[0].buffer;
+                                        xvbm_buffer_pool_entry_free(handle);
+                                    },
+                                    Err(e) => {
+                                        match e.err {
+                                            XlnxDecodeErrorType::XlnxTryAgain => break,
+                                            _ => panic!("Error receiving frame from decoder.")
+                                        };
+                                    },
+                                };
+                            }
+                            if packet_send_success {
+                                break
+                            }
                         }
                     },
                     _ => {}
                 };                
             }
-            println!("**** sent {} packets ****", packets_sent);
-            println!("**** frames decoded: {} ****", frame_count);
+
             // flush decoder
             decoder.xlnx_send_flush_frame().unwrap();
             decoder.flush_sent = true;
@@ -266,11 +274,11 @@ mod tests {
             loop {
                 decoder.xlnx_dec_send_null_frame().unwrap();
                 let mut finished = false;
-                //println!("flushing");
                 loop {
                     match decoder.xlnx_dec_recv_frame() {
                         Ok(_) => {
-                            //the frame was decoded. do nothing yet.
+                            frames_decoded += 1;
+                            // The frame was successfully decoded.
                         },
                         Err(e) => {
                             match e.err {
@@ -288,12 +296,22 @@ mod tests {
                     break
                 }
             }
+            ffmpeg_sys::avformat_close_input(&mut input_ctx);
         }
+        return (packets_sent, frames_decoded)
     }
 
-    // #[test]
-    // fn test_h264_decode() {
-        
-    //     todo!();
-    // }
+    #[test]
+    fn test_hevc_decode() {
+        let (packets_sent, frames_decoded) = decode_file(H265_TEST_FILE_PATH, 1, 1, 93);
+        assert_eq!(packets_sent, 739);
+        assert_eq!(frames_decoded, 739);
+    }
+
+    #[test]
+    fn test_h264_decode() {
+        let (packets_sent, frames_decoded) = decode_file(H264_TEST_FILE_PATH, 0, 100, 31);
+        assert_eq!(packets_sent, 739);
+        assert_eq!(frames_decoded, 739);
+    }
 }
