@@ -21,5 +21,6 @@ members = [
     "qtff",
     "rfc6381",
     "kvazaar-sys",
+    "x264-sys",
     "encoders",
 ]
