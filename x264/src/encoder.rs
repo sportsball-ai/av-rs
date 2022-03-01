@@ -84,21 +84,21 @@ impl X264Encoder {
                 },
                 &mut pic_out as _,
             );
-            if nal_bytes < 0 {
-                Err(X264EncoderError::Unknown)
-            } else if nal_bytes == 0 {
-                Ok(None)
-            } else {
-                let input: Box<VideoEncoderInput<F, C>> = Box::from_raw(pic_out.opaque as _);
-                let nals = std::slice::from_raw_parts(nals, nal_count as _);
-                let mut data = Vec::with_capacity(nal_bytes as _);
-                for nal in nals {
-                    data.extend_from_slice(std::slice::from_raw_parts(nal.p_payload, nal.i_payload as _));
+            match nal_bytes {
+                0 => Ok(None),
+                nal_bytes if nal_bytes < 0 => Err(X264EncoderError::Unknown),
+                nal_bytes => {
+                    let input: Box<VideoEncoderInput<F, C>> = Box::from_raw(pic_out.opaque as _);
+                    let nals = std::slice::from_raw_parts(nals, nal_count as _);
+                    let mut data = Vec::with_capacity(nal_bytes as _);
+                    for nal in nals {
+                        data.extend_from_slice(std::slice::from_raw_parts(nal.p_payload, nal.i_payload as _));
+                    }
+                    Ok(Some(VideoEncoderOutput {
+                        frame: EncodedVideoFrame { data },
+                        context: input.context,
+                    }))
                 }
-                Ok(Some(VideoEncoderOutput {
-                    frame: EncodedVideoFrame { data },
-                    context: input.context,
-                }))
             }
         }
     }
