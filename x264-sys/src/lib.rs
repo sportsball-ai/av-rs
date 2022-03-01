@@ -8,6 +8,9 @@
 )]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+/// # Safety
+/// This wraps the C library's `x264_encoder_open` function and comes with all the same safety
+/// concerns.
 pub unsafe fn x264_encoder_open(params: *mut x264_param_t) -> *mut x264_t {
     x264_encoder_open_wrapper(params)
 }
