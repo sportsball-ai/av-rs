@@ -1,4 +1,4 @@
-use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderInput, VideoEncoderOutput};
+use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use snafu::Snafu;
 use std::{marker::PhantomData, mem};
 use x264_sys as sys;
@@ -10,17 +10,16 @@ pub enum X264EncoderError {
 
 type Result<T> = core::result::Result<T, X264EncoderError>;
 
-pub struct X264Encoder<F, C> {
+pub struct X264Encoder<F> {
     config: X264EncoderConfig,
     encoder: *mut sys::x264_t,
     frame_count: u64,
 
-    // raw frames and contexts are sent to the c library and stored there during encoding
+    // raw frames are sent to the c library and stored there during encoding
     frame: PhantomData<F>,
-    context: PhantomData<C>,
 }
 
-impl<F, C> Drop for X264Encoder<F, C> {
+impl<F> Drop for X264Encoder<F> {
     fn drop(&mut self) {
         unsafe {
             sys::x264_encoder_close(self.encoder);
@@ -51,7 +50,7 @@ pub struct X264EncoderConfig {
     pub input_format: X264EncoderInputFormat,
 }
 
-impl<F, C> X264Encoder<F, C> {
+impl<F> X264Encoder<F> {
     pub fn new(config: X264EncoderConfig) -> Result<Self> {
         unsafe {
             let mut params: mem::MaybeUninit<sys::x264_param_t> = mem::MaybeUninit::uninit();
@@ -81,13 +80,12 @@ impl<F, C> X264Encoder<F, C> {
                     encoder,
                     frame_count: 0,
                     frame: PhantomData,
-                    context: PhantomData,
                 })
             }
         }
     }
 
-    fn do_encode(&mut self, pic: Option<sys::x264_picture_t>) -> Result<Option<VideoEncoderOutput<C>>> {
+    fn do_encode(&mut self, pic: Option<sys::x264_picture_t>) -> Result<Option<VideoEncoderOutput<F>>> {
         let mut nals: *mut sys::x264_nal_t = std::ptr::null_mut();
         let mut nal_count = 0;
         unsafe {
@@ -110,15 +108,15 @@ impl<F, C> X264Encoder<F, C> {
                 0 => Ok(None),
                 nal_bytes if nal_bytes < 0 => Err(X264EncoderError::Unknown),
                 nal_bytes => {
-                    let input: Box<VideoEncoderInput<F, C>> = Box::from_raw(pic_out.opaque as _);
+                    let input: Box<F> = Box::from_raw(pic_out.opaque as _);
                     let nals = std::slice::from_raw_parts(nals, nal_count as _);
                     let mut data = Vec::with_capacity(nal_bytes as _);
                     for nal in nals {
                         data.extend_from_slice(std::slice::from_raw_parts(nal.p_payload, nal.i_payload as _));
                     }
                     Ok(Some(VideoEncoderOutput {
-                        frame: EncodedVideoFrame { data },
-                        context: input.context,
+                        raw_frame: *input,
+                        encoded_frame: EncodedVideoFrame { data },
                     }))
                 }
             }
@@ -126,12 +124,11 @@ impl<F, C> X264Encoder<F, C> {
     }
 }
 
-impl<F: RawVideoFrame<u8>, C> VideoEncoder for X264Encoder<F, C> {
-    type Context = C;
+impl<F: RawVideoFrame<u8>> VideoEncoder for X264Encoder<F> {
     type Error = X264EncoderError;
     type RawVideoFrame = F;
 
-    fn encode(&mut self, input: VideoEncoderInput<F, C>) -> Result<Option<VideoEncoderOutput<C>>> {
+    fn encode(&mut self, input: F) -> Result<Option<VideoEncoderOutput<F>>> {
         let mut pic = unsafe {
             let mut pic: mem::MaybeUninit<sys::x264_picture_t> = mem::MaybeUninit::uninit();
             sys::x264_picture_init(pic.as_mut_ptr());
@@ -143,14 +140,14 @@ impl<F: RawVideoFrame<u8>, C> VideoEncoder for X264Encoder<F, C> {
             X264EncoderInputFormat::Yuv420Planar => {
                 pic.img.i_plane = 3;
                 for i in 0..3 {
-                    pic.img.plane[i] = input.frame.samples(i).as_ptr() as _;
+                    pic.img.plane[i] = input.samples(i).as_ptr() as _;
                     pic.img.i_stride[i] = if i == 0 { self.config.width } else { self.config.width / 2 } as _;
                 }
             }
             X264EncoderInputFormat::Yuv444Planar => {
                 pic.img.i_plane = 3;
                 for i in 0..3 {
-                    pic.img.plane[i] = input.frame.samples(i).as_ptr() as _;
+                    pic.img.plane[i] = input.samples(i).as_ptr() as _;
                     pic.img.i_stride[i] = self.config.width as _;
                 }
             }
@@ -161,7 +158,7 @@ impl<F: RawVideoFrame<u8>, C> VideoEncoder for X264Encoder<F, C> {
         self.do_encode(Some(pic))
     }
 
-    fn flush(&mut self) -> Result<Option<VideoEncoderOutput<C>>> {
+    fn flush(&mut self) -> Result<Option<VideoEncoderOutput<F>>> {
         self.do_encode(None)
     }
 }
@@ -209,13 +206,13 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(mut output) = encoder.encode(VideoEncoderInput { frame, context: () }).unwrap() {
-                encoded.append(&mut output.frame.data);
+            if let Some(mut output) = encoder.encode(frame).unwrap() {
+                encoded.append(&mut output.encoded_frame.data);
                 encoded_frames += 1;
             }
         }
         while let Some(mut output) = encoder.flush().unwrap() {
-            encoded.append(&mut output.frame.data);
+            encoded.append(&mut output.encoded_frame.data);
             encoded_frames += 1;
         }
 

@@ -10,42 +10,35 @@ pub struct EncodedVideoFrame {
     pub data: Vec<u8>,
 }
 
-pub struct VideoEncoderInput<F, C> {
-    pub frame: F,
-    pub context: C,
+pub struct VideoEncoderOutput<F> {
+    pub raw_frame: F,
+    pub encoded_frame: EncodedVideoFrame,
 }
 
-pub struct VideoEncoderOutput<C> {
-    pub frame: EncodedVideoFrame,
-    pub context: C,
-}
-
-/// Implements basic video encoding behavior. Arbitrary context associated with each frame can be
-/// passed through video encoders.
+/// Implements basic video encoding behavior.
 ///
 /// Typical usage should look like this:
 ///
 /// ```
-/// # use av_traits::{RawVideoFrame, VideoEncoder, VideoEncoderInput};
+/// # use av_traits::{RawVideoFrame, VideoEncoder};
 /// fn encode<S, E>(mut source: S, mut encoder: E) -> Result<(), E::Error>
 ///     where S: Iterator<Item = Box<dyn RawVideoFrame<u8>>>,
-///     E: VideoEncoder<Context = (), RawVideoFrame = Box<dyn RawVideoFrame<u8>>>
+///     E: VideoEncoder<RawVideoFrame = Box<dyn RawVideoFrame<u8>>>
 /// {
 ///     while let Some(frame) = source.next() {
-///         if let Some(encoded_frame) = encoder.encode(VideoEncoderInput{frame, context: ()})? {
-///             // do something with encoded_frame
+///         if let Some(output) = encoder.encode(frame)? {
+///             // do something with output  
 ///         }
 ///     }
 ///
-///     while let Some(encoded_frame) = encoder.flush()? {
-///         // do something with encoded_frame
+///     while let Some(output) = encoder.flush()? {
+///         // do something with output  
 ///     }
 ///
 ///     Ok(())
 /// }
 /// ```
 pub trait VideoEncoder {
-    type Context;
     type Error;
     type RawVideoFrame;
 
@@ -56,11 +49,11 @@ pub trait VideoEncoder {
     ///
     /// Because output may be delayed, the returned frame is not necessarily the same as the input
     /// frame.
-    fn encode(&mut self, frame: VideoEncoderInput<Self::RawVideoFrame, Self::Context>) -> Result<Option<VideoEncoderOutput<Self::Context>>, Self::Error>;
+    fn encode(&mut self, frame: Self::RawVideoFrame) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error>;
 
     /// Indicates to the encoder that no more input will be provided and it should emit any delayed
     /// frames. This should be invoked until no more frames are returned.
-    fn flush(&mut self) -> Result<Option<VideoEncoderOutput<Self::Context>>, Self::Error>;
+    fn flush(&mut self) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error>;
 }
 
 #[cfg(test)]
@@ -69,6 +62,6 @@ mod test {
 
     #[test]
     fn test_video_encoder_object_safety() {
-        let _e: *const dyn VideoEncoder<Context = (), Error = (), RawVideoFrame = ()>;
+        let _e: *const dyn VideoEncoder<Error = (), RawVideoFrame = ()>;
     }
 }
