@@ -1,4 +1,3 @@
-#![no_std]
 #![allow(
     deref_nullptr,
     non_snake_case,

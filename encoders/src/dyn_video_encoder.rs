@@ -1,7 +1,9 @@
 use super::{AvcConfig, EncodedVideoFrame, RawVideoFrame, VideoEncoder};
 use snafu::Snafu;
 
-/// A video encoder implemented by any of this crate's included implementations.
+/// A video encoder implemented by any of this crate's included implementations. You can create it
+/// manually, or you can use `new` to automatically select the best encoder available in the
+/// current environment.
 pub enum DynVideoEncoder {
     #[cfg(feature = "x264")]
     X264Encoder(crate::x264_encoder::X264Encoder),

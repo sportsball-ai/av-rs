@@ -1,7 +1,9 @@
 use super::{AacConfig, AudioEncoder, EncodedAudioPacket, RawAudioPacket};
 use snafu::Snafu;
 
-/// A video encoder implemented by any of this crate's included implementations.
+/// An audio encoder implemented by any of this crate's included implementations. You can create it
+/// manually, or you can use `new` to automatically select the best encoder available in the
+/// current environment.
 pub enum DynAudioEncoder {
     #[cfg(feature = "fdk_aac")]
     FdkAacEncoder(crate::fdk_aac_encoder::FdkAacEncoder),
@@ -24,6 +26,7 @@ pub enum DynAudioEncoderConfig {
 }
 
 impl DynAudioEncoder {
+    /// Creates a new encoder using the best available implementation for the given configuration.
     pub fn new(config: DynAudioEncoderConfig) -> Result<Self> {
         #[cfg(feature = "fdk_aac")]
         {
