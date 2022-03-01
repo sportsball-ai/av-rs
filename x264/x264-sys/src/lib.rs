@@ -14,3 +14,16 @@ include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 pub unsafe fn x264_encoder_open(params: *mut x264_param_t) -> *mut x264_t {
     x264_encoder_open_wrapper(params)
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_x264_param_default() {
+        let mut params: std::mem::MaybeUninit<x264_param_t> = std::mem::MaybeUninit::uninit();
+        unsafe {
+            x264_param_default(params.as_mut_ptr());
+        }
+    }
+}

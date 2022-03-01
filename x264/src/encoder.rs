@@ -1,6 +1,6 @@
 use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderInput, VideoEncoderOutput};
 use snafu::Snafu;
-use std::mem;
+use std::{marker::PhantomData, mem};
 use x264_sys as sys;
 
 #[derive(Debug, Snafu)]
@@ -10,12 +10,17 @@ pub enum X264EncoderError {
 
 type Result<T> = core::result::Result<T, X264EncoderError>;
 
-pub struct X264Encoder {
+pub struct X264Encoder<F, C> {
     config: X264EncoderConfig,
     encoder: *mut sys::x264_t,
+    frame_count: u64,
+
+    // raw frames and contexts are sent to the c library and stored there during encoding
+    frame: PhantomData<F>,
+    context: PhantomData<C>,
 }
 
-impl Drop for X264Encoder {
+impl<F, C> Drop for X264Encoder<F, C> {
     fn drop(&mut self) {
         unsafe {
             sys::x264_encoder_close(self.encoder);
@@ -42,10 +47,11 @@ impl X264EncoderInputFormat {
 pub struct X264EncoderConfig {
     pub height: u16,
     pub width: u16,
+    pub fps: f64,
     pub input_format: X264EncoderInputFormat,
 }
 
-impl X264Encoder {
+impl<F, C> X264Encoder<F, C> {
     pub fn new(config: X264EncoderConfig) -> Result<Self> {
         unsafe {
             let mut params: mem::MaybeUninit<sys::x264_param_t> = mem::MaybeUninit::uninit();
@@ -55,17 +61,33 @@ impl X264Encoder {
             params.i_csp = config.input_format.csp();
             params.i_width = config.width as _;
             params.i_height = config.height as _;
+            params.i_fps_den = if config.fps.fract() == 0.0 {
+                1000
+            } else {
+                // a denominator of 1001 for 29.97 or 59.94 is more
+                // conventional
+                1001
+            };
+            params.i_fps_num = (config.fps * params.i_fps_den as f64).round() as _;
+            params.i_timebase_num = params.i_fps_den;
+            params.i_timebase_den = params.i_fps_num;
 
             let encoder = sys::x264_encoder_open(&mut params as _);
             if encoder.is_null() {
                 Err(X264EncoderError::Unknown)
             } else {
-                Ok(Self { config, encoder })
+                Ok(Self {
+                    config,
+                    encoder,
+                    frame_count: 0,
+                    frame: PhantomData,
+                    context: PhantomData,
+                })
             }
         }
     }
 
-    fn do_encode<F, C>(&mut self, pic: Option<sys::x264_picture_t>) -> Result<Option<VideoEncoderOutput<C>>> {
+    fn do_encode(&mut self, pic: Option<sys::x264_picture_t>) -> Result<Option<VideoEncoderOutput<C>>> {
         let mut nals: *mut sys::x264_nal_t = std::ptr::null_mut();
         let mut nal_count = 0;
         unsafe {
@@ -104,8 +126,10 @@ impl X264Encoder {
     }
 }
 
-impl<F: RawVideoFrame<u8>, C> VideoEncoder<F, C> for X264Encoder {
+impl<F: RawVideoFrame<u8>, C> VideoEncoder for X264Encoder<F, C> {
+    type Context = C;
     type Error = X264EncoderError;
+    type RawVideoFrame = F;
 
     fn encode(&mut self, input: VideoEncoderInput<F, C>) -> Result<Option<VideoEncoderOutput<C>>> {
         let mut pic = unsafe {
@@ -114,29 +138,88 @@ impl<F: RawVideoFrame<u8>, C> VideoEncoder<F, C> for X264Encoder {
             pic.assume_init()
         };
         let input = Box::new(input);
-        let samples = input.frame.samples();
         pic.img.i_csp = self.config.input_format.csp();
-        pic.img.i_plane = samples.len() as _;
-        for (i, plane) in samples.iter().enumerate() {
-            pic.img.plane[i] = plane.as_ptr() as _;
-        }
         match self.config.input_format {
             X264EncoderInputFormat::Yuv420Planar => {
+                pic.img.i_plane = 3;
                 for i in 0..3 {
+                    pic.img.plane[i] = input.frame.samples(i).as_ptr() as _;
                     pic.img.i_stride[i] = if i == 0 { self.config.width } else { self.config.width / 2 } as _;
                 }
             }
             X264EncoderInputFormat::Yuv444Planar => {
+                pic.img.i_plane = 3;
                 for i in 0..3 {
+                    pic.img.plane[i] = input.frame.samples(i).as_ptr() as _;
                     pic.img.i_stride[i] = self.config.width as _;
                 }
             }
         }
         pic.opaque = Box::into_raw(input) as _;
-        self.do_encode::<F, C>(Some(pic))
+        pic.i_pts = self.frame_count as _;
+        self.frame_count += 1;
+        self.do_encode(Some(pic))
     }
 
     fn flush(&mut self) -> Result<Option<VideoEncoderOutput<C>>> {
-        self.do_encode::<F, C>(None)
+        self.do_encode(None)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    struct TestFrame {
+        samples: Vec<Vec<u8>>,
+    }
+
+    impl RawVideoFrame<u8> for TestFrame {
+        fn samples(&self, plane: usize) -> &[u8] {
+            &self.samples[plane]
+        }
+    }
+
+    #[test]
+    fn test_video_encoder() {
+        let mut encoder = X264Encoder::new(X264EncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 29.97,
+            input_format: X264EncoderInputFormat::Yuv420Planar,
+        })
+        .unwrap();
+
+        let mut encoded = vec![];
+        let mut encoded_frames = 0;
+
+        let u = vec![200u8; 1920 * 1080 / 4];
+        let v = vec![128u8; 1920 * 1080 / 4];
+        for i in 0..90 {
+            let mut y = Vec::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    16
+                } else {
+                    (16.0 + (line as f64 / 1080.0) * 219.0).round() as u8
+                };
+                y.resize(y.len() + 1920, sample);
+            }
+            let frame = TestFrame {
+                samples: vec![y, u.clone(), v.clone()],
+            };
+            if let Some(mut output) = encoder.encode(VideoEncoderInput { frame, context: () }).unwrap() {
+                encoded.append(&mut output.frame.data);
+                encoded_frames += 1;
+            }
+        }
+        while let Some(mut output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.frame.data);
+            encoded_frames += 1;
+        }
+
+        assert_eq!(encoded_frames, 90);
+        assert!(encoded.len() > 5000);
     }
 }

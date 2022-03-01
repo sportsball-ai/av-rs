@@ -6,7 +6,7 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rustc-link-lib=x264");
 
-    cc::Build::new().file("src/lib.c").compile("x264");
+    cc::Build::new().file("src/lib.c").compile("x264-sys");
 
     let bindings = bindgen::Builder::default();
 
