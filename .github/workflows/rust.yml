@@ -15,11 +15,13 @@ jobs:
       run: |
         git clone https://github.com/ultravideo/kvazaar.git
         (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure && make -j && sudo make install)
+        git clone https://code.videolan.org/videolan/x264.git
+        (cd x264 && git checkout bfc87b7a330f75f5c9a21e56081e4b20344f139e && ./configure --disable-cli --enable-static && make && sudo make install)
     - name: Set Up macOS
       if: startsWith(matrix.os, 'macos-')
       run: |
         echo "LIBCLANG_PATH=/Library/Developer/CommandLineTools/usr/lib/libclang.dylib" >> $GITHUB_ENV
-        brew install kvazaar
+        brew install kvazaar x264
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
