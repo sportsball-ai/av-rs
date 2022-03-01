@@ -1,12 +1,9 @@
 [package]
-name = "encoders"
+name = "x264"
 version = "0.1.0"
 edition = "2021"
 
-[features]
-fdk_aac = []
-x264 = ["x264-sys"]
-
 [dependencies]
+av-traits = { path = "../av-traits" }
 snafu = { version = "0.7.0", default-features = false }
-x264-sys = { path = "../x264-sys", optional = true }
+x264-sys = { path = "x264-sys" }

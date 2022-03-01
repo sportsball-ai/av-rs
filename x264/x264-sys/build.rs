@@ -17,6 +17,7 @@ fn main() {
         .header("src/lib.h")
         .whitelist_function("x264_.+")
         .whitelist_type("x264_.+")
+        .whitelist_var("X264_.+")
         .generate()
         .expect("unable to generate bindings");
 
