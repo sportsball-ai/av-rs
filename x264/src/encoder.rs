@@ -57,6 +57,9 @@ impl<F> X264Encoder<F> {
             sys::x264_param_default(params.as_mut_ptr());
             let mut params = params.assume_init();
 
+            // disable b-frames to minimize latency and keep things simple
+            params.i_bframe = 0;
+
             params.i_csp = config.input_format.csp();
             params.i_width = config.width as _;
             params.i_height = config.height as _;
@@ -116,7 +119,10 @@ impl<F> X264Encoder<F> {
                     }
                     Ok(Some(VideoEncoderOutput {
                         raw_frame: *input,
-                        encoded_frame: EncodedVideoFrame { data },
+                        encoded_frame: EncodedVideoFrame {
+                            data,
+                            is_keyframe: pic_out.b_keyframe != 0,
+                        },
                     }))
                 }
             }

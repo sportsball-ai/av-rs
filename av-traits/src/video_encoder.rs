@@ -8,6 +8,7 @@ pub trait RawVideoFrame<S> {
 
 pub struct EncodedVideoFrame {
     pub data: Vec<u8>,
+    pub is_keyframe: bool,
 }
 
 pub struct VideoEncoderOutput<F> {
