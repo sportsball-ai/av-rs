@@ -1,5 +1,13 @@
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
+
+#[macro_use]
+extern crate alloc;
+
+use alloc::vec::Vec;
 use byteorder::{BigEndian, ReadBytesExt};
-use std::io::{self, Read};
+
+pub use core2::io;
+use core2::io::Read;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AVCDecoderConfigurationRecord {
