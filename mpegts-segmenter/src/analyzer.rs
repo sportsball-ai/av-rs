@@ -338,7 +338,7 @@ impl Stream {
 
     pub fn flush(&mut self) -> Result<()> {
         if let Some(pes) = self.pes() {
-            for packet in pes.flush()? {
+            for packet in pes.flush() {
                 self.handle_pes_packet(packet)?;
             }
         }
