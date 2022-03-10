@@ -3,7 +3,6 @@ use std::env;
 extern crate bindgen;
 use std::path::PathBuf;
 
-
 fn main() {
     //builds with xilinx libraries for vt1 instances if paths are provided by XILINX_LIBS_PATH env var
     #[cfg(target_os = "linux")]

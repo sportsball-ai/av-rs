@@ -1,4 +1,3 @@
-
 use simple_error::SimpleError;
 
 use crate::{strcpy_to_arr_i8, sys::*};
@@ -105,6 +104,8 @@ pub fn xlnx_create_xma_dec_props(
     xma_dec_props.height = dec_props.height;
     xma_dec_props.bits_per_pixel = dec_props.bitdepth as i32;
     xma_dec_props.framerate = dec_props.framerate;
+
+    xlnx_fill_dec_params(dec_props, dec_params);
 
     Ok(xma_dec_props)
 }

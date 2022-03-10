@@ -93,7 +93,7 @@ pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result
     unsafe {
         let num_cu_pool = xrmCheckCuPoolAvailableNum(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
         if num_cu_pool <= 0 {
-            bail!("No resources avaliable for allocation")
+            bail!("No decoder resources available for allocation")
         }
 
         xlnx_dec_ctx.xrm_reserve_id = xrmCuPoolReserve(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
@@ -173,7 +173,7 @@ pub fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xl
     decode_cu_list_prop.cuProps[1].poolId = xlnx_dec_ctx.xrm_reserve_id;
 
     if unsafe { xrmCuListAlloc(xlnx_dec_ctx.xrm_ctx, &mut decode_cu_list_prop, &mut xlnx_dec_ctx.cu_list_res) } != 0 {
-        bail!("Failed to allocate cu list from reserve id {}", xlnx_dec_ctx.xrm_reserve_id)
+        bail!("Failed to allocate decode cu list from reserve id {}", xlnx_dec_ctx.xrm_reserve_id)
     }
 
     // Set XMA plugin shared object and device index.
