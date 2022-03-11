@@ -52,7 +52,7 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
     }
     // parse the load from the output buffer of plugin param.
     let output_bytes = &plugin_param.output.map(|i| i as u8);
-    let dec_plugin_output = from_utf8(output_bytes).unwrap_or("-1").split(" ").collect::<Vec<&str>>()[0];
+    let dec_plugin_output = from_utf8(output_bytes).unwrap_or("-1").split(' ').collect::<Vec<&str>>()[0];
     let load = dec_plugin_output.parse::<i32>().unwrap_or(-1);
 
     if load == -1 {
@@ -158,8 +158,7 @@ pub fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xln
 /// Allocates decoder CU based on reserve_id
 pub fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm decoder
-    let mut decode_cu_list_prop: xrmCuListProperty = Default::default();
-    decode_cu_list_prop.cuNum = 2;
+    let mut decode_cu_list_prop= xrmCuListProperty { cuNum: 2, ..Default::default() };
 
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelName, "decoder")?;
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelAlias, "DECODER_MPSOC")?;

@@ -36,7 +36,7 @@ impl XlnxError {
             None => String::from("Error occured during xilinx operation"),
         };
 
-        return Self { err, message };
+        Self { err, message }
     }
 }
 

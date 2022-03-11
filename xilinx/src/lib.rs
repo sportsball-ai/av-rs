@@ -39,7 +39,7 @@ pub fn xlnx_init_all_devices(device_count: i32) -> Result<(), simple_error::Simp
 }
 
 pub fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
-    return val << 8;
+    val << 8
 }
 
 // performs a strcpy from string literal to existing output array. ensures null termination.
