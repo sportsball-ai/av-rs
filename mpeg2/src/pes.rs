@@ -1,11 +1,6 @@
-use super::ts;
-use std::{
-    borrow::Cow,
-    error::Error,
-    io::{self, Write},
-};
-
-pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+use super::{ts, DecodeError, EncodeError};
+use alloc::{borrow::Cow, vec::Vec};
+use core2::io::Write;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Packet<'a> {
@@ -90,12 +85,12 @@ pub struct PacketHeader {
 }
 
 impl PacketHeader {
-    pub fn decode(buf: &[u8]) -> Result<(Self, usize)> {
+    pub fn decode(buf: &[u8]) -> Result<(Self, usize), DecodeError> {
         if buf.len() < 6 {
-            bail!("not enough bytes for pes header")
+            return Err(DecodeError::new("not enough bytes for pes header"));
         }
         if buf[0] != 0 || buf[1] != 0 || buf[2] != 1 {
-            bail!("incorrect start code for pes header")
+            return Err(DecodeError::new("incorrect start code for pes header"));
         }
         let stream_id = buf[3];
         let (optional_header, optional_header_length) = match stream_id {
@@ -108,7 +103,7 @@ impl PacketHeader {
         let packet_length = (buf[4] as usize) << 8 | (buf[5] as usize);
         let data_offset = 6 + optional_header_length;
         if data_offset > buf.len() {
-            bail!("not enough bytes for pes optional header length")
+            return Err(DecodeError::new("not enough bytes for pes optional header length"));
         }
         Ok((
             Self {
@@ -123,7 +118,7 @@ impl PacketHeader {
         ))
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         let mut buf = [0u8; 6 + MAX_ENCODED_OPTIONAL_HEADER_LENGTH];
         buf[2] = 1; // start code prefix
         buf[3] = self.stream_id;
@@ -152,15 +147,15 @@ pub struct OptionalHeader {
 const MAX_ENCODED_OPTIONAL_HEADER_LENGTH: usize = 13;
 
 impl OptionalHeader {
-    pub fn decode(buf: &[u8]) -> Result<(Self, usize)> {
+    pub fn decode(buf: &[u8]) -> Result<(Self, usize), DecodeError> {
         if buf.len() < 3 {
-            bail!("not enough bytes for pes optional header")
+            return Err(DecodeError::new("not enough bytes for pes optional header"));
         }
         let len = 3 + buf[2] as usize;
         let mut offset = 3;
         let pts = if buf[1] & 0x80 != 0 {
             if buf.len() < offset + 5 {
-                bail!("not enough bytes for pes pts")
+                return Err(DecodeError::new("not enough bytes for pes pts"));
             }
             let pts = ((buf[offset] as u64 >> 1) & 7) << 30
                 | (buf[offset + 1] as u64) << 22
@@ -174,7 +169,7 @@ impl OptionalHeader {
         };
         let dts = if buf[1] & 0x40 != 0 {
             if buf.len() < offset + 5 {
-                bail!("not enough bytes for pes dts")
+                return Err(DecodeError::new("not enough bytes for pes dts"));
             }
             let dts = ((buf[offset] as u64 >> 1) & 7) << 30
                 | (buf[offset + 1] as u64) << 22
@@ -195,7 +190,7 @@ impl OptionalHeader {
         ))
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         let mut buf = [0u8; MAX_ENCODED_OPTIONAL_HEADER_LENGTH];
         let mut len = 3;
         buf[0] = 0x80; // marker
@@ -248,7 +243,7 @@ impl Stream {
     }
 
     /// Writes transport packets to the stream. Whenever a PES packet is completed, it is returned.
-    pub fn write(&mut self, packet: &ts::Packet) -> Result<Vec<Packet<'static>>> {
+    pub fn write(&mut self, packet: &ts::Packet) -> Result<Vec<Packet<'static>>, DecodeError> {
         let mut completed = Vec::new();
 
         if let Some(payload) = &packet.payload {
@@ -284,7 +279,7 @@ impl Stream {
         Ok(completed)
     }
 
-    pub fn flush(&mut self) -> Result<Vec<Packet<'static>>> {
+    pub fn flush(&mut self) -> Vec<Packet<'static>> {
         let mut completed = Vec::new();
 
         if let Some(pending) = self.pending.take() {
@@ -293,7 +288,7 @@ impl Stream {
             }
         }
 
-        Ok(completed)
+        completed
     }
 }
 
