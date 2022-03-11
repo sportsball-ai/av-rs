@@ -22,7 +22,7 @@ members = [
     "qtff",
     "rfc6381",
     "kvazaar-sys",
-    "xilinx"
+    "xilinx",
     "x264",
     "x264/x264-sys",
 ]
