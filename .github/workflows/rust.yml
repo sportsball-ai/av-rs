@@ -32,7 +32,7 @@ jobs:
         command: build
         args: --verbose --workspace --exclude xilinx
     - name: Lint
-      run: cargo clippy --all-targets -- --deny warnings
+      run: cargo clippy --workspace --exclude xilinx --all-targets -- --deny warnings
     - name: Test
       uses: actions-rs/cargo@v1
       with:
