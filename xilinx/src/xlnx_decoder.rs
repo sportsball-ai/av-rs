@@ -6,7 +6,7 @@ use simple_error::{bail, SimpleError};
 pub struct XlnxDecoder {
     pub dec_session: *mut XmaDecoderSession,
     pub frame_props: XmaFrameProperties,
-    in_buf: *mut XmaDataBuffer,
+    in_buf: XmaDataBuffer,
     pub out_frame: *mut XmaFrame,
     pub flush_sent: bool,
 }
@@ -21,10 +21,10 @@ impl XlnxDecoder {
         let mut frame_props: XmaFrameProperties = Default::default();
         let ret = unsafe { xma_dec_session_get_properties(dec_session, &mut frame_props) };
         if ret != XMA_SUCCESS as i32 {
-            bail!("Unable to get frame properties from decoder session")
+            bail!("unable to get frame properties from decoder session")
         }
 
-        let in_buf = unsafe { xma_data_buffer_alloc(0, true) };
+        let in_buf: XmaDataBuffer = Default::default();//unsafe { xma_data_buffer_alloc(0, true) };
 
         let out_frame = unsafe { xma_frame_alloc(&mut frame_props, false) };
 
@@ -49,16 +49,16 @@ impl XlnxDecoder {
         let size = buf.len();
         while index < size {
             unsafe {
-                self.in_buf = xma_data_buffer_alloc(size as u64, false);
-                (*self.in_buf).data.buffer = buf.as_mut_ptr() as *mut _ as *mut std::ffi::c_void;
-                (*self.in_buf).pts = pts - 133200;
-                (*self.in_buf).is_eof = 0;
+                self.in_buf.data.buffer = buf.as_mut_ptr() as *mut _ as *mut std::ffi::c_void;
+                self.in_buf.alloc_size = buf.len() as i32;
+                self.in_buf.pts = pts;
+                self.in_buf.is_eof = 0;
 
-                ret = xma_dec_session_send_data(self.dec_session, self.in_buf, &mut data_used);
+                ret = xma_dec_session_send_data(self.dec_session, &mut self.in_buf, &mut data_used);
             }
 
             if ret != XMA_SUCCESS as i32 {
-                return Err(XlnxError::new(ret, Some("Error sending packet to decoder".to_string())));
+                return Err(XlnxError::new(ret, Some("error sending packet to decoder".to_string())));
             }
 
             index += data_used as usize;
@@ -70,7 +70,7 @@ impl XlnxDecoder {
     pub fn xlnx_dec_recv_frame(&mut self) -> Result<(), XlnxError> {
         let ret = unsafe { xma_dec_session_recv_frame(self.dec_session, self.out_frame) };
         if ret != XMA_SUCCESS as i32 {
-            return Err(XlnxError::new(ret, Some("Error receiving decoded frame from decoder".to_string())));
+            return Err(XlnxError::new(ret, Some("error receiving decoded frame from decoder".to_string())));
         }
         Ok(())
     }
@@ -87,7 +87,7 @@ impl XlnxDecoder {
 
         let ret = unsafe { xma_dec_session_send_data(self.dec_session, &mut buffer, &mut data_used) };
         if ret != XMA_SUCCESS as i32 {
-            return Err(XlnxError::new(ret, Some("Error sending flush frame".to_string())));
+            return Err(XlnxError::new(ret, Some("error sending flush frame".to_string())));
         }
         Ok(())
     }
@@ -105,7 +105,7 @@ impl XlnxDecoder {
 
         let ret = unsafe { xma_dec_session_send_data(self.dec_session, &mut buffer, &mut data_used) };
         if ret != XMA_SUCCESS as i32 {
-            return Err(XlnxError::new(ret, Some("Error sending null frame.".to_string())));
+            return Err(XlnxError::new(ret, Some("error sending null frame".to_string())));
         }
         self.flush_sent = true;
         Ok(())
@@ -120,9 +120,6 @@ impl Drop for XlnxDecoder {
             }
             if !self.out_frame.is_null() {
                 xma_frame_free(self.out_frame);
-            }
-            if !self.in_buf.is_null() {
-                xma_data_buffer_free(self.in_buf);
             }
         }
     }
@@ -218,7 +215,7 @@ mod tests {
                         packet_send_success = true;
                     }
                     Err(e) => match e.err {
-                        XlnxErrorType::XlnxErr => panic!("Error sending packet to xilinx decoder: {}", e.message),
+                        XlnxErrorType::XlnxErr => panic!("error sending packet to xilinx decoder: {}", e.message),
                         _ => {}
                     },
                 };
@@ -236,7 +233,7 @@ mod tests {
                         Err(e) => {
                             match e.err {
                                 XlnxErrorType::XlnxTryAgain => break,
-                                _ => panic!("Error receiving frame from decoder."),
+                                _ => panic!("error receiving frame from decoder"),
                             };
                         }
                     };
@@ -266,7 +263,7 @@ mod tests {
                             break;
                         }
                         XlnxErrorType::XlnxTryAgain => break,
-                        _ => panic!("Error receiving frame from decoder while flushing. Got Error"),
+                        _ => panic!("error receiving frame from decoder while flushing. Got error"),
                     },
                 }
             }
@@ -277,7 +274,6 @@ mod tests {
         println!("finished decoding. num packets sent: {}, num frames recieved: {}", packets_sent, frames_decoded);
         //this has already been freed by xvbm_buffer_pool_entry_free. Not safe.
         //If we don't set it to null, the decoder will attempt to free it again.
-        decoder.in_buf = std::ptr::null_mut();
         return (packets_sent, frames_decoded);
     }
 

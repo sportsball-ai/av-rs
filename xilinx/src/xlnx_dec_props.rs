@@ -32,7 +32,7 @@ pub struct XlnxDecoderProperties {
     pub framerate: XmaFraction,
 }
 
-pub fn xlnx_fill_dec_params(dec_props: &mut Box<XlnxDecoderProperties>, dec_params: &mut Box<[XmaParameter; MAX_DEC_PARAMS]>) {
+fn xlnx_fill_dec_params(dec_props: &mut Box<XlnxDecoderProperties>, dec_params: &mut Box<[XmaParameter; MAX_DEC_PARAMS]>) {
     dec_params[0].name = BIT_DEPTH_PARAM_NAME.as_ptr() as *mut i8;
     dec_params[0].type_ = XmaDataType_XMA_UINT32;
     dec_params[0].length = 4;

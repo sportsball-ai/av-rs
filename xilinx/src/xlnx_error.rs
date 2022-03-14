@@ -33,7 +33,7 @@ impl XlnxError {
 
         let message = match message {
             Some(m) => m,
-            None => String::from("Error occured during xilinx operation"),
+            None => String::from("error occured during xilinx operation"),
         };
 
         return Self { err, message };

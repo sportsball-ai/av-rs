@@ -32,21 +32,21 @@ pub fn xlnx_init_all_devices(device_count: i32) -> Result<(), simple_error::Simp
 
     let ret = unsafe { xma_initialize(xclbin_params.as_mut_ptr(), device_count) };
     if ret as u32 != XMA_SUCCESS {
-        simple_error::bail!("Xma initalization failed")
+        simple_error::bail!("xma initalization failed")
     }
 
     Ok(())
 }
 
-pub fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
+pub(crate) fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
     return val << 8;
 }
 
 // performs a strcpy from string literal to existing output array. ensures null termination.
-pub fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simple_error::SimpleError> {
+pub(crate) fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simple_error::SimpleError> {
     //check string length is smaller than buffer size. requires one byte for null termination
     if in_str.len() > buf.len() - 1 {
-        simple_error::bail!("Input str exceeds output buffer size")
+        simple_error::bail!("input str exceeds output buffer size")
     }
 
     let src: Vec<i8> = in_str.as_bytes().iter().map(|c| *c as i8).collect();

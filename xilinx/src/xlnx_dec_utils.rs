@@ -52,17 +52,17 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
     }
     // parse the load from the output buffer of plugin param.
     let output_bytes = &plugin_param.output.map(|i| i as u8);
-    let dec_plugin_output = from_utf8(output_bytes).unwrap_or("-1").split(" ").collect::<Vec<&str>>()[0];
+    let dec_plugin_output = from_utf8(output_bytes).unwrap_or("-1").split(" ").next().expect("split should emit at least one item");
     let load = dec_plugin_output.parse::<i32>().unwrap_or(-1);
 
     if load == -1 {
-        bail!("Unable to parse load calculation from XRM decoder plugin");
+        bail!("unable to parse load calculation from XRM decoder plugin");
     }
 
     Ok(load)
 }
 
-pub fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, dec_load: i32) -> Result<(), SimpleError> {
+fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, dec_load: i32) -> Result<(), SimpleError> {
     cu_pool_prop.cuListProp.sameDevice = true;
     cu_pool_prop.cuListNum = 1;
 
@@ -81,7 +81,7 @@ pub fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, dec_load: 
     Ok(())
 }
 
-pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
+pub(crate) fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // a device has already been chosen, there is no need to assign a reserve id.
     if xlnx_dec_ctx.device_id >= 0 {
         return Ok(());
@@ -93,7 +93,7 @@ pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result
     unsafe {
         let num_cu_pool = xrmCheckCuPoolAvailableNum(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
         if num_cu_pool <= 0 {
-            bail!("No decoder resources available for allocation")
+            bail!("no decoder resources available for allocation")
         }
 
         xlnx_dec_ctx.xrm_reserve_id = xrmCuPoolReserve(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
@@ -106,7 +106,7 @@ pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result
 }
 
 /// Allocates decoder CU based on device_id
-pub fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
+fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     let mut decode_cu_hw_prop: xrmCuProperty = Default::default();
     let mut decode_cu_sw_prop: xrmCuProperty = Default::default();
 
@@ -156,7 +156,7 @@ pub fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xln
 }
 
 /// Allocates decoder CU based on reserve_id
-pub fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
+fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm decoder
     let mut decode_cu_list_prop: xrmCuListProperty = Default::default();
     decode_cu_list_prop.cuNum = 2;
@@ -173,7 +173,7 @@ pub fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xl
     decode_cu_list_prop.cuProps[1].poolId = xlnx_dec_ctx.xrm_reserve_id;
 
     if unsafe { xrmCuListAlloc(xlnx_dec_ctx.xrm_ctx, &mut decode_cu_list_prop, &mut xlnx_dec_ctx.cu_list_res) } != 0 {
-        bail!("Failed to allocate decode cu list from reserve id {}", xlnx_dec_ctx.xrm_reserve_id)
+        bail!("failed to allocate decode cu list from reserve id {}", xlnx_dec_ctx.xrm_reserve_id)
     }
 
     // Set XMA plugin shared object and device index.
@@ -189,7 +189,7 @@ pub fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xl
 }
 
 /// Allocates decoder CU
-pub fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
+fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     if xlnx_dec_ctx.device_id >= 0 {
         xlnx_dec_cu_alloc_device_id(xma_dec_props, xlnx_dec_ctx)?;
     } else {
@@ -200,12 +200,12 @@ pub fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx:
 }
 
 /// Attempts to create decoder session
-pub fn xlnx_create_dec_session(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<*mut XmaDecoderSession, SimpleError> {
+pub(crate) fn xlnx_create_dec_session(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<*mut XmaDecoderSession, SimpleError> {
     xlnx_dec_cu_alloc(xma_dec_props, xlnx_dec_ctx)?;
 
     let dec_session = unsafe { xma_dec_session_create(xma_dec_props) };
     if dec_session.is_null() {
-        bail!("Failed to create decoder session. Session is null")
+        bail!("failed to create decoder session. Session is null")
     }
 
     Ok(dec_session)
