@@ -1,10 +1,6 @@
-use std::{
-    borrow::Cow,
-    error::Error,
-    io::{self, Write},
-};
-
-pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+use super::{DecodeError, EncodeError};
+use alloc::{borrow::Cow, vec::Vec};
+use core2::io::Write;
 
 pub const PID_PAT: u16 = 0x00;
 
@@ -25,11 +21,11 @@ pub struct AdaptationField {
 }
 
 impl AdaptationField {
-    pub fn decode(buf: &[u8]) -> Result<Self> {
+    pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         let mut af = Self::default();
         let af_length = buf[0];
         if af_length as usize > buf.len() - 1 {
-            bail!("adaptation field length too long")
+            return Err(DecodeError::new("adaptation field length too long"));
         } else if buf[0] > 0 {
             af.discontinuity_indicator = Some(buf[1] & 0x80 != 0);
             af.random_access_indicator = Some(buf[1] & 0x40 != 0);
@@ -52,7 +48,7 @@ impl AdaptationField {
         } + if self.program_clock_reference_27mhz.is_some() { 6 } else { 0 }
     }
 
-    pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> Result<usize, EncodeError> {
         let mut ret = 1usize;
         let mut buf = [0u8; 20];
 
@@ -117,7 +113,11 @@ pub struct TableSection<'a> {
 
 const TABLE_SECTION_HEADER_LENGTH: usize = 3;
 
-pub fn encode_table_sections<'a, I: IntoIterator<Item = TableSection<'a>>, W: Write>(sections: I, mut w: W, pad_to_length: usize) -> io::Result<usize> {
+pub fn encode_table_sections<'a, I: IntoIterator<Item = TableSection<'a>>, W: Write>(
+    sections: I,
+    mut w: W,
+    pad_to_length: usize,
+) -> Result<usize, EncodeError> {
     w.write_all(&[0])?;
     let mut len = 1;
     for section in sections.into_iter() {
@@ -132,13 +132,13 @@ pub fn encode_table_sections<'a, I: IntoIterator<Item = TableSection<'a>>, W: Wr
 }
 
 impl<'a> TableSection<'a> {
-    pub fn decode(buf: &'a [u8]) -> Result<Self> {
+    pub fn decode(buf: &'a [u8]) -> Result<Self, DecodeError> {
         if buf.len() < TABLE_SECTION_HEADER_LENGTH {
-            bail!("not enough bytes for table section header")
+            return Err(DecodeError::new("not enough bytes for table section header"));
         }
         let mut length = ((buf[1] & 0x03) as usize) << 8 | buf[2] as usize;
         if buf.len() < TABLE_SECTION_HEADER_LENGTH + length {
-            bail!("not enough bytes for data")
+            return Err(DecodeError::new("not enough bytes for data"));
         }
         if length >= 4 {
             // chop off the crc
@@ -151,7 +151,7 @@ impl<'a> TableSection<'a> {
         })
     }
 
-    pub fn decode_syntax_section(&self) -> Result<TableSyntaxSection> {
+    pub fn decode_syntax_section(&self) -> Result<TableSyntaxSection, DecodeError> {
         TableSyntaxSection::decode_without_crc(self.data_without_crc)
     }
 
@@ -166,7 +166,7 @@ impl<'a> TableSection<'a> {
             }
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         let mut buf = [0u8; TABLE_SECTION_HEADER_LENGTH];
         buf[0] = self.table_id;
 
@@ -211,9 +211,9 @@ pub struct TableSyntaxSection<'a> {
 }
 
 impl<'a> TableSyntaxSection<'a> {
-    pub fn decode_without_crc(buf: &'a [u8]) -> Result<Self> {
+    pub fn decode_without_crc(buf: &'a [u8]) -> Result<Self, DecodeError> {
         if buf.len() < 9 {
-            bail!("not enough bytes for table syntax section")
+            return Err(DecodeError::new("not enough bytes for table syntax section"));
         }
         Ok(Self {
             table_id_extension: (buf[0] as u16) << 8 | buf[1] as u16,
@@ -221,7 +221,7 @@ impl<'a> TableSyntaxSection<'a> {
         })
     }
 
-    pub fn encode_without_crc<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode_without_crc<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         let mut buf = [0u8; 5];
         buf[0] = (self.table_id_extension >> 8) as _;
         buf[1] = self.table_id_extension as _;
@@ -239,9 +239,9 @@ pub struct PATEntry {
 }
 
 impl PATEntry {
-    pub fn decode(buf: &[u8]) -> Result<Self> {
+    pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         if buf.len() != 4 {
-            bail!("unexpected number of bytes for pat entry")
+            return Err(DecodeError::new("unexpected number of bytes for pat entry"));
         }
         Ok(Self {
             program_number: (buf[0] as u16) << 8 | buf[1] as u16,
@@ -249,7 +249,7 @@ impl PATEntry {
         })
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         w.write_all(&[
             (self.program_number >> 8) as _,
             self.program_number as _,
@@ -266,13 +266,13 @@ pub struct PATData {
 }
 
 impl PATData {
-    pub fn decode(buf: &[u8]) -> Result<Self> {
+    pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         Ok(Self {
-            entries: buf.chunks(4).map(PATEntry::decode).collect::<Result<Vec<PATEntry>>>()?,
+            entries: buf.chunks(4).map(PATEntry::decode).collect::<Result<Vec<PATEntry>, DecodeError>>()?,
         })
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         let mut ret = 0;
         for e in &self.entries {
             ret += e.encode(&mut w)?;
@@ -291,13 +291,13 @@ pub struct PMTElementaryStreamInfo<'a> {
 const PMT_ELEMENTARY_STREAM_INFO_HEADER_LENGTH: usize = 5;
 
 impl<'a> PMTElementaryStreamInfo<'a> {
-    pub fn decode(buf: &'a [u8]) -> Result<Self> {
+    pub fn decode(buf: &'a [u8]) -> Result<Self, DecodeError> {
         if buf.len() < PMT_ELEMENTARY_STREAM_INFO_HEADER_LENGTH {
-            bail!("not enough bytes for pmt elementary stream info header")
+            return Err(DecodeError::new("not enough bytes for pmt elementary stream info header"));
         }
         let length = ((buf[3] & 0x03) as usize) << 8 | buf[4] as usize;
         if buf.len() < PMT_ELEMENTARY_STREAM_INFO_HEADER_LENGTH + length {
-            bail!("not enough bytes for pmt elementary stream info")
+            return Err(DecodeError::new("not enough bytes for pmt elementary stream info"));
         }
         Ok(Self {
             stream_type: buf[0],
@@ -306,7 +306,7 @@ impl<'a> PMTElementaryStreamInfo<'a> {
         })
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         w.write_all(&[
             self.stream_type,
             0b11100000 | (self.elementary_pid >> 8) as u8,
@@ -328,13 +328,13 @@ pub struct PMTData<'a> {
 const PMT_HEADER_LENGTH: usize = 4;
 
 impl<'a> PMTData<'a> {
-    pub fn decode(buf: &'a [u8]) -> Result<Self> {
+    pub fn decode(buf: &'a [u8]) -> Result<Self, DecodeError> {
         if buf.len() < PMT_HEADER_LENGTH {
-            bail!("not enough bytes for pmt header")
+            return Err(DecodeError::new("not enough bytes for pmt header"));
         }
         let descs_length = ((buf[2] & 0x03) as usize) << 8 | buf[3] as usize;
         if buf.len() < PMT_HEADER_LENGTH + descs_length {
-            bail!("not enough bytes for pmt program descriptors")
+            return Err(DecodeError::new("not enough bytes for pmt program descriptors"));
         }
         Ok(Self {
             pcr_pid: ((buf[0] & 0x1f) as u16) << 8 | buf[1] as u16,
@@ -351,7 +351,7 @@ impl<'a> PMTData<'a> {
         })
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         w.write_all(&[0b11100000 | (self.pcr_pid >> 8) as u8, self.pcr_pid as _, 0xf0, 0])?;
         let mut ret = PMT_HEADER_LENGTH;
         for info in &self.elementary_stream_info {
@@ -365,13 +365,13 @@ const PACKET_HEADER_LENGTH: usize = 4;
 pub const PACKET_LENGTH: usize = 188;
 
 impl<'a> Packet<'a> {
-    pub fn decode(buf: &'a [u8]) -> Result<Self> {
+    pub fn decode(buf: &'a [u8]) -> Result<Self, DecodeError> {
         if buf.len() != PACKET_LENGTH {
-            bail!("incorrect packet length")
+            return Err(DecodeError::new("incorrect packet length"));
         }
 
         if buf[0] != 0x47 {
-            bail!("incorrect sync byte")
+            return Err(DecodeError::new("incorrect sync byte"));
         }
 
         let packet_id = ((buf[1] & 0x1f) as u16) << 8 | buf[2] as u16;
@@ -402,7 +402,7 @@ impl<'a> Packet<'a> {
         })
     }
 
-    pub fn decode_table_sections(&self) -> Result<Vec<TableSection<'_>>> {
+    pub fn decode_table_sections(&self) -> Result<Vec<TableSection<'_>>, DecodeError> {
         let payload = match &self.payload {
             Some(p) => p,
             None => return Ok(vec![]),
@@ -414,7 +414,7 @@ impl<'a> Packet<'a> {
 
         let padding = payload[0] as usize;
         if 1 + padding > payload.len() {
-            bail!("padding too long for payload");
+            return Err(DecodeError::new("padding too long for payload"));
         }
 
         let mut ret = Vec::new();
@@ -429,7 +429,7 @@ impl<'a> Packet<'a> {
         Ok(ret)
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> io::Result<usize> {
+    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         let mut buf = [0u8; PACKET_HEADER_LENGTH];
         buf[0] = 0x47;
 
@@ -462,7 +462,7 @@ impl<'a> Packet<'a> {
         }
 
         if ret != PACKET_LENGTH {
-            Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid data length"))
+            Err(EncodeError::other("invalid data length"))
         } else {
             Ok(ret)
         }
@@ -474,7 +474,7 @@ impl<'a> Packet<'a> {
     }
 }
 
-pub fn decode_packets(buf: &[u8]) -> Result<Vec<Packet>> {
+pub fn decode_packets(buf: &[u8]) -> Result<Vec<Packet>, DecodeError> {
     buf.chunks(PACKET_LENGTH).map(Packet::decode).collect()
 }
 

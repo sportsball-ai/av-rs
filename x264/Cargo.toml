@@ -1,0 +1,9 @@
+[package]
+name = "x264"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+av-traits = { path = "../av-traits" }
+snafu = { version = "0.7.0", default-features = false }
+x264-sys = { path = "x264-sys" }

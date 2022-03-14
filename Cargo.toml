@@ -1,6 +1,7 @@
 [workspace]
 
 members = [
+    "av-traits",
     "srt",
     "h264",
     "h265",
@@ -21,5 +22,7 @@ members = [
     "qtff",
     "rfc6381",
     "kvazaar-sys",
-    "xilinx"
+    "xilinx",
+    "x264",
+    "x264/x264-sys",
 ]

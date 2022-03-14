@@ -21,7 +21,8 @@ pub struct SegmenterConfig {
 
 #[derive(Debug)]
 pub enum Error {
-    IO(io::Error),
+    Io(io::Error),
+    Mpeg2Decode(mpeg2::DecodeError),
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -30,7 +31,8 @@ impl std::error::Error for Error {}
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::IO(e) => write!(f, "io error: {}", e),
+            Self::Io(e) => write!(f, "io error: {}", e),
+            Self::Mpeg2Decode(e) => write!(f, "mpeg2 decode error: {}", e),
             Self::Other(e) => e.fmt(f),
         }
     }
@@ -38,7 +40,13 @@ impl fmt::Display for Error {
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
-        Self::IO(e)
+        Self::Io(e)
+    }
+}
+
+impl From<mpeg2::DecodeError> for Error {
+    fn from(e: mpeg2::DecodeError) -> Self {
+        Self::Mpeg2Decode(e)
     }
 }
 

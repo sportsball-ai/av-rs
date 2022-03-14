@@ -1,8 +1,7 @@
-use super::{pes, ts};
-use std::{
-    cell::RefCell,
-    io::{Result, Write},
-};
+use super::{pes, ts, EncodeError};
+use alloc::vec::Vec;
+use core::cell::RefCell;
+use core2::io::Write;
 
 struct StreamState {
     stream_type: u8,
@@ -62,7 +61,7 @@ impl<W: Write> Muxer<W> {
         }
     }
 
-    fn write(&self, p: ts::Packet) -> Result<()> {
+    fn write(&self, p: ts::Packet) -> Result<(), EncodeError> {
         let mut state = self.state.borrow_mut();
 
         if !state.did_write_headers {
@@ -165,7 +164,7 @@ pub struct Stream<'a, W> {
 }
 
 impl<'a, W: Write> Stream<'a, W> {
-    pub fn write(&mut self, p: Packet) -> Result<()> {
+    pub fn write(&mut self, p: Packet) -> Result<(), EncodeError> {
         let pes_packet = pes::Packet {
             header: pes::PacketHeader {
                 stream_id: self.stream_id,

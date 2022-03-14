@@ -151,12 +151,12 @@ mod tests {
             width: 1280,
             height: 720,
             bitdepth: 8,
-            codec_type: codec_type,
+            codec_type,
             low_latency: 0,
             entropy_buffers_count: 2,
             zero_copy: 1,
-            profile: profile,
-            level: level,
+            profile,
+            level,
             chroma_mode: 420,
             scan_type: 1,
             latency_logging: 1,
@@ -199,9 +199,8 @@ mod tests {
         } else {
             nalus = h265::iterate_annex_b(&buf).collect();
         }
-        let mut frame_count = 0;
 
-        for nalu in nalus {
+        for (frame_count, nalu) in nalus.into_iter().enumerate() {
             let pts = ((dec_props.framerate.numerator as f64 / dec_props.framerate.denominator as f64) * 90000.0 * frame_count as f64) as i32;
             let mut data = vec![0, 0, 0, 1];
             data.extend_from_slice(nalu);
@@ -214,10 +213,7 @@ mod tests {
                         packets_sent += 1;
                         packet_send_success = true;
                     }
-                    Err(e) => match e.err {
-                        XlnxErrorType::XlnxErr => panic!("error sending packet to xilinx decoder: {}", e.message),
-                        _ => {}
-                    },
+                    Err(e) => if let XlnxErrorType::XlnxErr = e.err { panic!("error sending packet to xilinx decoder: {}", e.message) },
                 };
                 loop {
                     match decoder.xlnx_dec_recv_frame() {
@@ -242,7 +238,6 @@ mod tests {
                     break;
                 }
             }
-            frame_count += 1
         }
         // flush decoder
         decoder.xlnx_send_flush_frame().unwrap();

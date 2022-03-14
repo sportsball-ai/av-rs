@@ -158,8 +158,7 @@ fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_de
 /// Allocates decoder CU based on reserve_id
 fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm decoder
-    let mut decode_cu_list_prop: xrmCuListProperty = Default::default();
-    decode_cu_list_prop.cuNum = 2;
+    let mut decode_cu_list_prop= xrmCuListProperty { cuNum: 2, ..Default::default() };
 
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelName, "decoder")?;
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelAlias, "DECODER_MPSOC")?;

@@ -13,13 +13,14 @@ jobs:
     - name: Set Up Linux
       if: startsWith(matrix.os, 'ubuntu-')
       run: |
+        sudo apt-get update && sudo apt-get install -y libx264-dev
         git clone https://github.com/ultravideo/kvazaar.git
         (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure && make -j && sudo make install)
     - name: Set Up macOS
       if: startsWith(matrix.os, 'macos-')
       run: |
         echo "LIBCLANG_PATH=/Library/Developer/CommandLineTools/usr/lib/libclang.dylib" >> $GITHUB_ENV
-        brew install kvazaar
+        brew install kvazaar x264
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
@@ -30,12 +31,12 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: build
-        args: --verbose
+        args: --verbose --workspace --exclude xilinx
     - name: Lint
-      run: cargo clippy --all-targets -- --deny warnings
+      run: cargo clippy --workspace --exclude xilinx --all-targets -- --deny warnings
     - name: Test
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --verbose
+        args: --verbose --workspace --exclude xilinx
 
