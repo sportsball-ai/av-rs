@@ -24,7 +24,7 @@ impl XlnxDecoder {
             bail!("unable to get frame properties from decoder session")
         }
 
-        let in_buf: XmaDataBuffer = Default::default();//unsafe { xma_data_buffer_alloc(0, true) };
+        let in_buf: XmaDataBuffer = Default::default();
 
         let out_frame = unsafe { xma_frame_alloc(&mut frame_props, false) };
 
