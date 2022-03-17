@@ -1,0 +1,18 @@
+[package]
+name = "xilinx"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libloading = "0.7"
+simple-error = "0.2.1"
+
+[build-dependencies]
+# We're very permissive here with bindgen due to https://github.com/rust-lang/cargo/issues/5237
+bindgen = "0.*"
+
+[dev-dependencies]
+h264 = { path = "../h264" }
+h265 = { path = "../h265" }
