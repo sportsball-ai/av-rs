@@ -52,7 +52,7 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
     }
     // parse the load from the output buffer of plugin param.
     let output_bytes = &plugin_param.output.map(|i| i as u8);
-    let dec_plugin_output = from_utf8(output_bytes).unwrap_or("-1").split(' ').collect::<Vec<&str>>()[0];
+    let dec_plugin_output = from_utf8(output_bytes).unwrap_or("-1").split(' ').next().expect("split should emit at least one item");
     let load = dec_plugin_output.parse::<i32>().unwrap_or(-1);
 
     if load == -1 {
@@ -159,6 +159,7 @@ fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_de
 /// Allocates decoder CU based on reserve_id
 fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm decoder
+
     let mut decode_cu_list_prop = xrmCuListProperty {
         cuNum: 2,
         ..Default::default()
@@ -178,6 +179,7 @@ fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_d
     if unsafe { xrmCuListAlloc(xlnx_dec_ctx.xrm_ctx, &mut decode_cu_list_prop, &mut xlnx_dec_ctx.cu_list_res) } != 0 {
         bail!("failed to allocate decode cu list from reserve id {}", xlnx_dec_ctx.xrm_reserve_id)
     }
+
     xlnx_dec_ctx.decode_res_in_use = true;
 
     // Set XMA plugin shared object and device index.

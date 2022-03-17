@@ -1,5 +1,5 @@
-extern crate alloc;
 
+extern crate alloc;
 pub mod sys;
 pub use sys::*;
 
@@ -51,6 +51,7 @@ pub fn xlnx_init_all_devices(device_count: i32) -> Result<(), simple_error::Simp
 }
 
 pub(crate) fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
+
     val << 8
 }
 
