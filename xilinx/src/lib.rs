@@ -68,14 +68,11 @@ pub(crate) fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simpl
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{sys::*, xlnx_decoder::tests::*, xlnx_error::*, xlnx_init_all_devices, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*};
-    use std::{fs::File, io::Read};
-    const H265_TEST_FILE_PATH: &str = "src/testdata/hvc1.1.6.L150.90.h265";
-    const H264_TEST_FILE_PATH: &str = "src/testdata/smptebars.h264";
-    const RAW_YUV_P_FILE_PATH: &str = "src/testdata/smptebars.yuv";
-
+    use crate::{sys::*, xlnx_init_all_devices};
     use std::sync::Once;
 
+    use std::{fs::File, io::Read};
+    pub const RAW_YUV_P_FILE_PATH: &str = "src/testdata/smptebars.yuv";
     static INIT: Once = Once::new();
 
     pub fn initialize() {
@@ -85,7 +82,7 @@ pub mod tests {
     }
 
     /// read raw frames from raw yuv420p file.
-    fn read_raw_yuv_420_p(file_path: &str, frame_props: &mut XmaFrameProperties, frame_count: usize) -> (Vec<*mut XmaFrame>, Vec<Vec<u8>>, Vec<Vec<u8>>) {
+    pub fn read_raw_yuv_420_p(file_path: &str, frame_props: &mut XmaFrameProperties, frame_count: usize) -> (Vec<*mut XmaFrame>, Vec<Vec<u8>>, Vec<Vec<u8>>) {
         let mut f = File::open(file_path).unwrap();
         let frame_size_y = (frame_props.width * frame_props.height) as usize;
         let frame_size_uv = frame_size_y / 2;
@@ -146,97 +143,5 @@ pub mod tests {
         }
 
         (frames, y_components, uv_components)
-    }
-
-    #[test]
-    fn test_hevc_decode() {
-        let (packets_sent, frames_decoded) = decode_file(H265_TEST_FILE_PATH, 1, 1, 93);
-        assert_eq!(packets_sent, 771); // there should be 739 frames but 771 nal units to send to the decoder
-        assert_eq!(frames_decoded, 739);
-    }
-
-    #[test]
-    fn test_h264_decode() {
-        let (packets_sent, frames_decoded) = decode_file(H264_TEST_FILE_PATH, 0, 100, 31);
-        assert_eq!(packets_sent, 321); // there are 300 frames but 321 nal units to send to the decoder
-        assert_eq!(frames_decoded, 300);
-    }
-
-    #[test]
-    fn test_abr_scale() {
-        let mut frame_props = XmaFrameProperties {
-            format: XmaFormatType_XMA_YUV420_FMT_TYPE,
-            width: 1280,
-            height: 720,
-            bits_per_pixel: 8,
-            ..Default::default()
-        };
-        // read the raw yuv into xma_frames, This file has 300 frames.
-        let (xma_frames, _y_component, _x_component) = read_raw_yuv_420_p(RAW_YUV_P_FILE_PATH, &mut frame_props, 300);
-
-        initialize();
-
-        // create a Xlnx scalar's context
-        let mut scal_props = Box::new(XlnxScalerProperties {
-            in_width: 1280,
-            in_height: 720,
-            fr_num: 1,
-            fr_den: 25,
-            nb_outputs: 3,
-            out_width: [1280, 852, 640, 0, 0, 0, 0, 0],
-            out_height: [720, 480, 360, 0, 0, 0, 0, 0],
-            enable_pipeline: 0,
-            log_level: 3,
-            latency_logging: 1,
-        });
-
-        let scal_params: [XmaParameter; MAX_SCAL_PARAMS] = Default::default();
-        let mut scal_params = Box::new(scal_params);
-
-        let mut xma_scal_props = xlnx_create_xma_scal_props(&mut scal_props, &mut scal_params).unwrap();
-
-        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-
-        let cu_res: xrmCuResource = Default::default();
-
-        let mut xlnx_scal_ctx = XlnxScalerXrmCtx {
-            xrm_reserve_id: 0,
-            device_id: -1,
-            scal_load: xlnx_calc_scal_load(xrm_ctx, &mut *xma_scal_props).unwrap(),
-            scal_res_in_use: false,
-            xrm_ctx,
-            num_outputs: 3,
-            cu_res,
-        };
-
-        // create xlnx scaler
-        let mut scaler = XlnxScaler::new(&mut *xma_scal_props, &mut xlnx_scal_ctx).unwrap();
-
-        let mut processed_frame_count = 0;
-
-        for xma_frame in xma_frames {
-            match scaler.process_frame(xma_frame) {
-                Ok(_) => {
-                    // successfully scaled frame.
-                    processed_frame_count += 1;
-                    // clear xvbm buffers for each return frame
-                    for i in 0..xma_scal_props.num_outputs as usize {
-                        unsafe {
-                            let handle: XvbmBufferHandle = (*scaler.out_frame_list[i]).data[0].buffer;
-                            xvbm_buffer_pool_entry_free(handle);
-                        }
-                    }
-                }
-                Err(e) => match e.err {
-                    XlnxErrorType::XlnxSendMoreData => {}
-                    _ => panic!("scalar processing has failed with error {:?}", e),
-                },
-            };
-            if !xma_frame.is_null() {
-                unsafe { xma_frame_free(xma_frame) };
-            }
-        }
-
-        assert_eq!(processed_frame_count, 300);
     }
 }

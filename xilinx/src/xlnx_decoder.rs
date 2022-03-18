@@ -126,9 +126,12 @@ impl Drop for XlnxDecoder {
 }
 
 #[cfg(test)]
-pub mod tests {
+mod decoder_tests {
     use crate::{tests::*, xlnx_dec_props::*, xlnx_dec_utils::*, xlnx_decoder::*, xlnx_error::*};
     use std::{fs::File, io::Read};
+
+    const H265_TEST_FILE_PATH: &str = "src/testdata/hvc1.1.6.L150.90.h265";
+    const H264_TEST_FILE_PATH: &str = "src/testdata/smptebars.h264";
 
     pub fn decode_file(file_path: &str, codec_type: u32, profile: u32, level: u32) -> (i32, i32) {
         initialize();
@@ -261,5 +264,19 @@ pub mod tests {
         // this has already been freed by xvbm_buffer_pool_entry_free. Not safe.
         // if we don't set it to null, the decoder will attempt to free it again.
         (packets_sent, frames_decoded)
+    }
+
+    #[test]
+    fn test_hevc_decode() {
+        let (packets_sent, frames_decoded) = decode_file(H265_TEST_FILE_PATH, 1, 1, 93);
+        assert_eq!(packets_sent, 771); // there should be 739 frames but 771 nal units to send to the decoder
+        assert_eq!(frames_decoded, 739);
+    }
+
+    #[test]
+    fn test_h264_decode() {
+        let (packets_sent, frames_decoded) = decode_file(H264_TEST_FILE_PATH, 0, 100, 31);
+        assert_eq!(packets_sent, 321); // there are 300 frames but 321 nal units to send to the decoder
+        assert_eq!(frames_decoded, 300);
     }
 }
