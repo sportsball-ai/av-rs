@@ -52,7 +52,11 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
     }
     // parse the load from the output buffer of plugin param.
     let output_bytes = &plugin_param.output.map(|i| i as u8);
-    let dec_plugin_output = from_utf8(output_bytes).unwrap_or("-1").split(' ').next().expect("split should emit at least one item");
+    let dec_plugin_output = from_utf8(output_bytes)
+        .unwrap_or("-1")
+        .split(' ')
+        .next()
+        .expect("split should emit at least one item");
     let load = dec_plugin_output.parse::<i32>().unwrap_or(-1);
 
     if load == -1 {

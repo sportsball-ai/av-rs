@@ -1,5 +1,3 @@
-
-extern crate alloc;
 pub mod sys;
 pub use sys::*;
 
@@ -51,7 +49,6 @@ pub fn xlnx_init_all_devices(device_count: i32) -> Result<(), simple_error::Simp
 }
 
 pub(crate) fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
-
     val << 8
 }
 
@@ -70,11 +67,8 @@ pub(crate) fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simpl
 }
 
 #[cfg(test)]
-mod tests {
-    use crate::{
-        sys::*, xlnx_dec_props::*, xlnx_dec_utils::*, xlnx_decoder::*, /*xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*,*/ xlnx_error::*,
-        xlnx_init_all_devices, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*,
-    };
+pub mod tests {
+    use crate::{sys::*, xlnx_decoder::tests::*, xlnx_error::*, xlnx_init_all_devices, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*};
     use std::{fs::File, io::Read};
     const H265_TEST_FILE_PATH: &str = "src/testdata/hvc1.1.6.L150.90.h265";
     const H264_TEST_FILE_PATH: &str = "src/testdata/smptebars.h264";
@@ -88,141 +82,6 @@ mod tests {
         INIT.call_once(|| {
             xlnx_init_all_devices(2).unwrap();
         });
-    }
-
-    fn decode_file(file_path: &str, codec_type: u32, profile: u32, level: u32) -> (i32, i32) {
-        initialize();
-
-        // create a Xlnx decoder's context
-        let dec_props = XlnxDecoderProperties {
-            width: 1280,
-            height: 720,
-            bitdepth: 8,
-            codec_type,
-            low_latency: 0,
-            entropy_buffers_count: 2,
-            zero_copy: 1,
-            profile,
-            level,
-            chroma_mode: 420,
-            scan_type: 1,
-            latency_logging: 1,
-            splitbuff_mode: 0,
-            framerate: XmaFraction { numerator: 1, denominator: 25 },
-        };
-        let mut dec_props = Box::new(dec_props);
-
-        let dec_params: [XmaParameter; MAX_DEC_PARAMS] = Default::default();
-        let mut dec_params = Box::new(dec_params);
-
-        let mut xma_dec_props = xlnx_create_xma_dec_props(&mut dec_props, &mut dec_params).unwrap();
-
-        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-
-        let cu_list_res: xrmCuListResource = Default::default();
-
-        let mut xlnx_dec_ctx = XlnxDecoderXrmCtx {
-            xrm_reserve_id: 0,
-            device_id: -1,
-            dec_load: xlnx_calc_dec_load(xrm_ctx, &mut *xma_dec_props).unwrap(),
-            decode_res_in_use: false,
-            xrm_ctx,
-            cu_list_res,
-        };
-
-        println!("******dec_load: {}", xlnx_dec_ctx.dec_load);
-
-        // create Xlnx decoder
-        let mut decoder = XlnxDecoder::new(&mut *xma_dec_props, &mut xlnx_dec_ctx).unwrap();
-        let mut frames_decoded = 0;
-        let mut packets_sent = 0;
-
-        //open file and read data nalus
-        let mut f = File::open(file_path).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
-
-        let nalus: Vec<_>;
-        if codec_type == 0 {
-            nalus = h264::iterate_annex_b(&buf).collect();
-        } else {
-            nalus = h265::iterate_annex_b(&buf).collect();
-        }
-
-        for (frame_count, nalu) in nalus.into_iter().enumerate() {
-            let pts = ((dec_props.framerate.numerator as f64 / dec_props.framerate.denominator as f64) * 90000.0 * frame_count as f64) as i32;
-            let mut data = vec![0, 0, 0, 1];
-            data.extend_from_slice(nalu);
-            let data = data.as_mut_slice();
-
-            loop {
-                let mut packet_send_success = false;
-                match decoder.xlnx_dec_send_pkt(data, pts as i32) {
-                    Ok(_) => {
-                        packets_sent += 1;
-                        packet_send_success = true;
-                    }
-                    Err(e) => {
-                        if let XlnxErrorType::XlnxErr = e.err {
-                            panic!("error sending packet to xilinx decoder: {}", e.message)
-                        }
-                    }
-                };
-                loop {
-                    match decoder.xlnx_dec_recv_frame() {
-                        Ok(_) => {
-                            //the frame was decoded. do nothing yet.
-                            frames_decoded += 1;
-                            // throw away the frame. Clear XVBM buffer
-                            unsafe {
-                                let handle: XvbmBufferHandle = (*decoder.out_frame).data[0].buffer;
-                                xvbm_buffer_pool_entry_free(handle);
-                            }
-                        }
-                        Err(e) => {
-                            match e.err {
-                                XlnxErrorType::XlnxTryAgain => break,
-                                _ => panic!("error receiving frame from decoder"),
-                            };
-                        }
-                    };
-                }
-                if packet_send_success {
-                    break;
-                }
-            }
-        }
-        // flush decoder
-        decoder.xlnx_send_flush_frame().unwrap();
-        decoder.flush_sent = true;
-
-        loop {
-            decoder.xlnx_dec_send_null_frame().unwrap();
-            let mut finished = false;
-            loop {
-                match decoder.xlnx_dec_recv_frame() {
-                    Ok(_) => {
-                        frames_decoded += 1;
-                        // The frame was successfully decoded.
-                    }
-                    Err(e) => match e.err {
-                        XlnxErrorType::XlnxEOS => {
-                            finished = true;
-                            break;
-                        }
-                        XlnxErrorType::XlnxTryAgain => break,
-                        _ => panic!("error receiving frame from decoder while flushing. Got error"),
-                    },
-                }
-            }
-            if finished {
-                break;
-            }
-        }
-        println!("finished decoding. num packets sent: {}, num frames recieved: {}", packets_sent, frames_decoded);
-        // this has already been freed by xvbm_buffer_pool_entry_free. Not safe.
-        // if we don't set it to null, the decoder will attempt to free it again.
-        (packets_sent, frames_decoded)
     }
 
     /// read raw frames from raw yuv420p file.

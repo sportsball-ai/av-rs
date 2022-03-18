@@ -1,5 +1,4 @@
 use crate::{sys::*, xlnx_error::*, xlnx_scal_utils::*};
-use alloc::vec::Vec;
 use simple_error::SimpleError;
 
 pub const SCAL_MAX_ABR_CHANNELS: usize = 8;
