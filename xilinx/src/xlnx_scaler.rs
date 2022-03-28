@@ -101,9 +101,9 @@ impl Drop for XlnxScaler {
             if !self.scal_session.is_null() {
                 xma_scaler_session_destroy(self.scal_session);
             }
-            for i in 0..SCAL_MAX_ABR_CHANNELS {
-                if !self.out_frame_list[i].is_null() {
-                    xma_frame_free(self.out_frame_list[i]);
+            for &f in &self.out_frame_list {
+                if !f.is_null() {
+                    xma_frame_free(f);
                 }
             }
         }
