@@ -8,6 +8,7 @@ fn main() {
     //builds with xilinx libraries for vt1 instances if paths are provided by XILINX_LIBS_PATH env var
     #[cfg(target_os = "linux")]
     {
+        env::set_var("LD_LIBRARY_PATH", "/opt/xilinx/xrm/lib:/opt/xilinx/xrt/lib");
         println!("cargo:rustc-link-search=native=/opt/xilinx/xrm/lib");
         println!("cargo:rustc-link-search=native=/opt/xilinx/xrt/lib");
         println!("cargo:rustc-link-search=native=/opt/xilinx/xvbm/lib");
