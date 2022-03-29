@@ -88,7 +88,7 @@ impl<F> X264Encoder<F> {
         }
     }
 
-    fn do_encode(&mut self, pic: Option<sys::x264_picture_t>) -> Result<Option<VideoEncoderOutput<F>>> {
+    fn do_encode(&mut self, mut pic: Option<sys::x264_picture_t>) -> Result<Option<VideoEncoderOutput<F>>> {
         let mut nals: *mut sys::x264_nal_t = std::ptr::null_mut();
         let mut nal_count = 0;
         unsafe {
@@ -101,8 +101,8 @@ impl<F> X264Encoder<F> {
                 self.encoder,
                 &mut nals as _,
                 &mut nal_count as _,
-                match pic {
-                    Some(mut pic) => &mut pic as _,
+                match &mut pic {
+                    Some(pic) => pic as _,
                     None => std::ptr::null_mut(),
                 },
                 &mut pic_out as _,
