@@ -24,10 +24,9 @@ impl XlnxEncoder {
 
     /// Sends raw frames to Xilinx Encoder plugin and receives back decoded frames.  
     pub fn process_frame(&mut self, enc_in_frame: *mut XmaFrame, enc_null_frame: bool, enc_out_size: &mut i32) -> Result<(), XlnxError> {
-
         if !self.flush_frame_sent {
             match self.send_frame(enc_in_frame) {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => {
                     if enc_null_frame {
                         self.flush_frame_sent = true;
@@ -67,7 +66,7 @@ impl XlnxEncoder {
         Ok(())
     }
 
-    /// Receives encoded frames from encoder. 
+    /// Receives encoded frames from encoder.
     fn recv_frame(&mut self, enc_out_size: &mut i32) -> Result<(), XlnxError> {
         let ret = unsafe { xma_enc_session_recv_data(self.enc_session, self.out_buffer, enc_out_size) };
         if ret != XMA_SUCCESS as i32 {
@@ -117,7 +116,7 @@ mod encoder_tests {
             bit_rate: 4000,
             width: 1280,
             height: 720,
-            framerate: XmaFraction{numerator: 1, denominator: 25},
+            framerate: XmaFraction { numerator: 1, denominator: 25 },
             gop_size: 120,
             slice_qp: -1,
             min_qp: 0,
@@ -183,20 +182,20 @@ mod encoder_tests {
             match encoder.process_frame(xma_frame, false, &mut enc_out_size) {
                 Ok(_) => {
                     if enc_out_size > 0 {
-                        //successfully encoded frame 
+                        //successfully encoded frame
                         processed_frame_count += 1;
                     } else {
                         panic!("no data received from encoder")
                     }
                 }
                 Err(e) => match e.err {
-                    XlnxErrorType::XlnxSendMoreData => {}, 
-                    XlnxErrorType::XlnxTryAgain => {},
+                    XlnxErrorType::XlnxSendMoreData => {}
+                    XlnxErrorType::XlnxTryAgain => {}
                     _ => panic!("encoder processing has failed with error {:?}", e),
-                }
+                },
             }
         }
-        
+
         //allocate a null frame without a buffer to start flushing
         let null_frame = unsafe { xma_frame_alloc(&mut frame_props, true) };
         loop {
@@ -206,38 +205,38 @@ mod encoder_tests {
                 (*null_frame).pts = u64::MAX;
             }
 
-            match encoder.process_frame(null_frame, true, & mut enc_out_size) {
+            match encoder.process_frame(null_frame, true, &mut enc_out_size) {
                 Ok(_) => {
                     processed_frame_count += 1;
-                    break
-                }, // if flush was successful the first time, break
+                    break;
+                } // if flush was successful the first time, break
                 Err(e) => match e.err {
-                    XlnxErrorType::XlnxFlushAgain => {},
+                    XlnxErrorType::XlnxFlushAgain => {}
                     XlnxErrorType::XlnxEOS => break,
                     _ => panic!("error sending flush frame to encoder {:?}", e),
-                }
+                },
             }
         }
         //free the null frame
         unsafe { xma_frame_free(null_frame) };
-        
-        
+
         loop {
             let mut enc_out_size = 0;
             match encoder.recv_frame(&mut enc_out_size) {
-                Ok(_) => {processed_frame_count += 1;},
-                Err(e) => match e.err {
-                    XlnxErrorType::XlnxEOS => break, //we have hit the end of the stream, 
-                    XlnxErrorType::XlnxTryAgain => {},
-                    _ => panic!("error receiving frame while flushing {:?}", e),
+                Ok(_) => {
+                    processed_frame_count += 1;
                 }
+                Err(e) => match e.err {
+                    XlnxErrorType::XlnxEOS => break, //we have hit the end of the stream,
+                    XlnxErrorType::XlnxTryAgain => {}
+                    _ => panic!("error receiving frame while flushing {:?}", e),
+                },
             }
         }
 
         processed_frame_count
-
     }
-    
+
     #[test]
     fn test_hevc_encode() {
         let processed_frame_count = encode_raw(CODEC_ID_HEVC, ENC_HEVC_MAIN, 31);

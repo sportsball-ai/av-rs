@@ -107,12 +107,11 @@ pub fn xlnx_create_xma_enc_props(
 
     let framerate = format!("{}/{}", enc_props.framerate.numerator, enc_props.framerate.denominator);
 
-    let slice_qp;
-    if enc_props.slice_qp == -1 {
-        slice_qp = "AUTO".to_string();
+    let slice_qp = if enc_props.slice_qp == -1 {
+        "AUTO".to_string()
     } else {
-        slice_qp = format!("{}", enc_props.slice_qp);
-    }
+        format!("{}", enc_props.slice_qp)
+    };
 
     let gop_ctrl_mode = match enc_props.gop_mode {
         1 => "PYRAMIDAL_GOP",
@@ -218,151 +217,103 @@ pub fn xlnx_create_xma_enc_props(
         qp_ctrl_mode = "UNIFORM_QP";
     }
 
-    let enc_options;
-    // hevc
-    if enc_props.codec_id == CODEC_ID_HEVC {
-        enc_options = format!("[INPUT]\n\
-        Width = {}\n\
-        Height = {}\n\
+    let width = enc_props.width;
+    let height = enc_props.height;
+    let bit_rate = enc_props.bit_rate;
+    let max_bitrate = enc_props.max_bitrate;
+    let max_qp = enc_props.max_qp;
+    let min_qp = enc_props.min_qp;
+    let cpb_size = enc_props.cpb_size;
+    let initial_delay = enc_props.initial_delay;
+    let gop_size = enc_props.gop_size;
+    let num_bframes = enc_props.num_bframes;
+    let idr_period = enc_props.idr_period;
+    let num_slices = enc_props.num_slices;
+    let slice_size = enc_props.slice_size;
+    let num_cores = enc_props.num_cores;
+
+    let enc_options = if enc_props.codec_id == CODEC_ID_HEVC {
+        format!(
+            "[INPUT]\n\
+        Width = {width}\n\
+        Height = {height}\n\
         [RATE_CONTROL]\n\
-        RateCtrlMode = {}\n\
-        FrameRate = {}\n\
-        BitRate = {}\n\
-        MaxBitRate = {}\n\
-        SliceQP = {}\n\
-        MaxQP = {}\n\
-        MinQP = {}\n\
-        CPBSize = {}\n\
-        InitialDelay = {}\n\
+        RateCtrlMode = {rate_ctrl_mode}\n\
+        FrameRate = {framerate}\n\
+        BitRate = {bit_rate}\n\
+        MaxBitRate = {max_bitrate}\n\
+        SliceQP = {slice_qp}\n\
+        MaxQP = {max_qp}\n\
+        MinQP = {min_qp}\n\
+        CPBSize = {cpb_size}\n\
+        InitialDelay = {initial_delay}\n\
         [GOP]\n\
-        GopCtrlMode = {}\n\
-        Gop.GdrMode = {}\n\
-        Gop.Length = {}\n\
-        Gop.NumB = {}\n\
-        Gop.FreqIDR = {}\n\
+        GopCtrlMode = {gop_ctrl_mode}\n\
+        Gop.GdrMode = {gdr_mode}\n\
+        Gop.Length = {gop_size}\n\
+        Gop.NumB = {num_bframes}\n\
+        Gop.FreqIDR = {idr_period}\n\
         [SETTINGS]\n\
-        Profile = {}\n\
-        Level = {}\n\
-        Tier = {}\n\
+        Profile = {profile}\n\
+        Level = {level}\n\
+        Tier = {tier}\n\
         ChromaMode = CHROMA_4_2_0\n\
         BitDepth = 8\n\
-        NumSlices = {}\n\
-        QPCtrlMode = {}\n\
-        SliceSize = {}\n\
-        DependentSlice = {}\n\
-        EnableFillerData = {}\n\
-        AspectRatio = {}\n\
-        ColourDescription = {}\n\
-        ScalingList = {}\n\
-        LoopFilter = {}\n\
-        ConstrainedIntraPred = {}\n\
-        LambdaCtrlMode = {}\n\
-        CacheLevel2 = {}\n\
-        NumCore = {}\n\0",
-            enc_props.width,
-            enc_props.height,
-            rate_ctrl_mode,
-            framerate,
-            enc_props.bit_rate,
-            enc_props.max_bitrate,
-            slice_qp,
-            enc_props.max_qp,
-            enc_props.min_qp,
-            enc_props.cpb_size,
-            enc_props.initial_delay,
-            gop_ctrl_mode,
-            gdr_mode,
-            enc_props.gop_size,
-            enc_props.num_bframes,
-            enc_props.idr_period,
-            profile,
-            level,
-            tier,
-            enc_props.num_slices,
-            qp_ctrl_mode,
-            enc_props.slice_size,
-            dependent_slice,
-            filler_data,
-            aspect_ratio,
-            color_space,
-            scaling_list,
-            loop_filter,
-            const_intra_pred,
-            lambda_ctrl_mode,
-            prefetch_buffer,
-            enc_props.num_cores
-        );
+        NumSlices = {num_slices}\n\
+        QPCtrlMode = {qp_ctrl_mode}\n\
+        SliceSize = {slice_size}\n\
+        DependentSlice = {dependent_slice}\n\
+        EnableFillerData = {filler_data}\n\
+        AspectRatio = {aspect_ratio}\n\
+        ColourDescription = {color_space}\n\
+        ScalingList = {scaling_list}\n\
+        LoopFilter = {loop_filter}\n\
+        ConstrainedIntraPred = {const_intra_pred}\n\
+        LambdaCtrlMode = {lambda_ctrl_mode}\n\
+        CacheLevel2 = {prefetch_buffer}\n\
+        NumCore = {num_cores}\n\0"
+        )
     } else {
-        enc_options = format!("[INPUT]\n\
-        Width = {}\n\
-        Height = {}\n\
+        format!(
+            "[INPUT]\n\
+        Width = {width}\n\
+        Height = {height}\n\
         [RATE_CONTROL]\n\
-        RateCtrlMode = {}\n\
-        FrameRate = {}\n\
-        BitRate = {}\n\
-        MaxBitRate = {}\n\
-        SliceQP = {}\n\
-        MaxQP = {}\n\
-        MinQP = {}\n\
-        CPBSize = {}\n\
-        InitialDelay = {}\n\
+        RateCtrlMode = {rate_ctrl_mode}\n\
+        FrameRate = {framerate}\n\
+        BitRate = {bit_rate}\n\
+        MaxBitRate = {max_bitrate}\n\
+        SliceQP = {slice_qp}\n\
+        MaxQP = {max_qp}\n\
+        MinQP = {min_qp}\n\
+        CPBSize = {cpb_size}\n\
+        InitialDelay = {initial_delay}\n\
         [GOP]\n\
-        GopCtrlMode = {}\n\
-        Gop.GdrMode = {}\n\
-        Gop.Length = {}\n\
-        Gop.NumB = {}\n\
-        Gop.FreqIDR = {}\n\
+        GopCtrlMode = {gop_ctrl_mode}\n\
+        Gop.GdrMode = {gdr_mode}\n\
+        Gop.Length = {gop_size}\n\
+        Gop.NumB = {num_bframes}\n\
+        Gop.FreqIDR = {idr_period}\n\
         [SETTINGS]\n\
-        Profile = {}\n\
-        Level = {}\n\
+        Profile = {profile}\n\
+        Level = {level}\n\
         ChromaMode = CHROMA_4_2_0\n\
         BitDepth = 8\n\
-        NumSlices = {}\n\
-        QPCtrlMode = {}\n\
-        SliceSize = {}\n\
-        EnableFillerData = {}\n\
-        AspectRatio = {}\n\
-        ColourDescription = {}\n\
-        ScalingList = {}\n\
-        EntropyMode = {}\n\
-        LoopFilter = {}\n\
-        ConstrainedIntraPred = {}\n\
-        LambdaCtrlMode = {}\n\
-        CacheLevel2 = {}\n\
-        NumCore = {}\n\0",
-            enc_props.width,
-            enc_props.height,
-            rate_ctrl_mode,
-            framerate,
-            enc_props.bit_rate,
-            enc_props.max_bitrate,
-            slice_qp,
-            enc_props.max_qp,
-            enc_props.min_qp,
-            enc_props.cpb_size,
-            enc_props.initial_delay,
-            gop_ctrl_mode,
-            gdr_mode,
-            enc_props.gop_size,
-            enc_props.num_bframes,
-            enc_props.idr_period,
-            profile,
-            level,
-            enc_props.num_slices,
-            qp_ctrl_mode,
-            enc_props.slice_size,
-            filler_data,
-            aspect_ratio,
-            color_space,
-            scaling_list,
-            entropy_mode,
-            loop_filter,
-            const_intra_pred,
-            lambda_ctrl_mode,
-            prefetch_buffer,
-            enc_props.num_cores
-        );
-    }
+        NumSlices = {num_slices}\n\
+        QPCtrlMode = {qp_ctrl_mode}\n\
+        SliceSize = {slice_size}\n\
+        EnableFillerData = {filler_data}\n\
+        AspectRatio = {aspect_ratio}\n\
+        ColourDescription = {color_space}\n\
+        ScalingList = {scaling_list}\n\
+        EntropyMode = {entropy_mode}\n\
+        LoopFilter = {loop_filter}\n\
+        ConstrainedIntraPred = {const_intra_pred}\n\
+        LambdaCtrlMode = {lambda_ctrl_mode}\n\
+        CacheLevel2 = {prefetch_buffer}\n\
+        NumCore = {num_cores}\n\0"
+        )
+    };
 
     enc_props.enc_options = enc_options;
     enc_props.enc_options_ptr = enc_props.enc_options.as_ptr();
