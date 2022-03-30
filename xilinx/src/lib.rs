@@ -21,6 +21,16 @@ pub use xlnx_scal_props::*;
 pub mod xlnx_scal_utils;
 pub use xlnx_scal_utils::*;
 
+/*---- encoder ----*/
+pub mod xlnx_encoder;
+pub use xlnx_encoder::*;
+
+pub mod xlnx_enc_props;
+pub use xlnx_enc_props::*;
+
+pub mod xlnx_enc_utils;
+pub use xlnx_enc_utils::*;
+
 /*---- error ----*/
 pub mod xlnx_error;
 pub use xlnx_error::*;
