@@ -12,7 +12,10 @@ struct StreamState {
 struct State<W> {
     w: W,
     next_packet_id: u16,
+    pcr_pid: u16,
     did_write_headers: bool,
+    last_header_pcr: Option<u64>,
+    header_continuity_counter: u8,
     streams: Vec<StreamState>,
 }
 
@@ -37,7 +40,10 @@ impl<W: Write> Muxer<W> {
             state: RefCell::new(State {
                 w,
                 next_packet_id: 0x100,
+                pcr_pid: 0,
+                last_header_pcr: None,
                 did_write_headers: false,
+                header_continuity_counter: 0,
                 streams: vec![],
             }),
         }
@@ -52,6 +58,7 @@ impl<W: Write> Muxer<W> {
             pid: packet_id,
             data: config.data,
         });
+        state.pcr_pid = packet_id;
         Stream {
             muxer: self,
             packet_id,
@@ -63,8 +70,25 @@ impl<W: Write> Muxer<W> {
 
     fn write(&self, p: ts::Packet) -> Result<(), EncodeError> {
         let mut state = self.state.borrow_mut();
+        let pcr = p.adaptation_field.as_ref().and_then(|af| af.program_clock_reference_27mhz);
 
-        if !state.did_write_headers {
+        let mut should_write_headers = !state.did_write_headers;
+        if p.packet_id == state.pcr_pid && state.did_write_headers {
+            // figure out if we need to repeat the headers
+            if let Some(pcr) = pcr {
+                if state.last_header_pcr.is_none() {
+                    state.last_header_pcr = Some(pcr);
+                }
+                if let Some(last_pcr) = state.last_header_pcr {
+                    // repeat the headers if we've wrapped around or if 90ms has passed
+                    if pcr + 27_000_000 < last_pcr || pcr > last_pcr + 2_430_000 {
+                        should_write_headers = true;
+                    }
+                }
+            }
+        }
+
+        if should_write_headers {
             const PMT_PID: u16 = 0x1000;
 
             // write the PAT
@@ -93,7 +117,7 @@ impl<W: Write> Muxer<W> {
                 let p = ts::Packet {
                     packet_id: ts::PID_PAT,
                     payload_unit_start_indicator: true,
-                    continuity_counter: 0,
+                    continuity_counter: state.header_continuity_counter,
                     adaptation_field: None,
                     payload: Some(encoded.into()),
                 };
@@ -103,7 +127,7 @@ impl<W: Write> Muxer<W> {
             // write the PMT
             {
                 let pmt = ts::PMTData {
-                    pcr_pid: state.streams.first().map(|s| s.pid).unwrap_or(0),
+                    pcr_pid: state.pcr_pid,
                     elementary_stream_info: state
                         .streams
                         .iter()
@@ -132,7 +156,7 @@ impl<W: Write> Muxer<W> {
                 let p = ts::Packet {
                     packet_id: PMT_PID,
                     payload_unit_start_indicator: true,
-                    continuity_counter: 0,
+                    continuity_counter: state.header_continuity_counter,
                     adaptation_field: None,
                     payload: Some(encoded.into()),
                 };
@@ -140,6 +164,8 @@ impl<W: Write> Muxer<W> {
             }
 
             state.did_write_headers = true;
+            state.last_header_pcr = pcr;
+            state.header_continuity_counter = (state.header_continuity_counter + 1) % 16;
         }
 
         p.encode(&mut state.w)?;
