@@ -56,7 +56,7 @@ impl DecompressionSession {
         result(
             unsafe {
                 let block_buffer = BlockBuffer::with_memory_block(frame_data)?;
-                let sample_buffer = SampleBuffer::new(&block_buffer, Some(format_desc), 1, Some(&[frame_data.len()]))?;
+                let sample_buffer = SampleBuffer::new(&block_buffer, Some(format_desc.into()), 1, Some(&[frame_data.len()]))?;
                 sys::VTDecompressionSessionDecodeFrame(
                     self.0,
                     sample_buffer.cf_type_ref() as _,

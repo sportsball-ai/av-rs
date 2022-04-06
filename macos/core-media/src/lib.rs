@@ -13,6 +13,12 @@ pub mod sys {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+pub mod video_codec_type;
+pub use video_codec_type::*;
+
+pub mod time;
+pub use time::*;
+
 pub mod format_description;
 pub use format_description::*;
 

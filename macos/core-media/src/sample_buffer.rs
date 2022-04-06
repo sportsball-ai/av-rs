@@ -5,9 +5,9 @@ pub struct SampleBuffer(sys::CMSampleBufferRef);
 core_foundation::trait_impls!(SampleBuffer);
 
 impl SampleBuffer {
-    pub fn new<T: FormatDescription>(
+    pub fn new(
         block_buffer: &BlockBuffer,
-        format_description: Option<&T>,
+        format_description: Option<FormatDescription>,
         num_samples: usize,
         sample_sizes: Option<&[usize]>,
     ) -> Result<Self, OSStatus> {
@@ -48,6 +48,39 @@ impl SampleBuffer {
                 None
             } else {
                 Some(core_video::ImageBuffer::with_cf_type_ref(buf as _))
+            }
+        }
+    }
+
+    pub fn attachments_array(&self) -> Option<core_foundation::Array> {
+        unsafe {
+            let buf = sys::CMSampleBufferGetSampleAttachmentsArray(self.0, 0);
+            if buf.is_null() {
+                None
+            } else {
+                Some(core_foundation::Array::with_cf_type_ref(buf as _))
+            }
+        }
+    }
+
+    pub fn data_buffer(&self) -> Option<BlockBuffer> {
+        unsafe {
+            let buf = sys::CMSampleBufferGetDataBuffer(self.0);
+            if buf.is_null() {
+                None
+            } else {
+                Some(BlockBuffer::with_cf_type_ref(buf as _))
+            }
+        }
+    }
+
+    pub fn format_description(&self) -> Option<FormatDescription> {
+        unsafe {
+            let buf = sys::CMSampleBufferGetFormatDescription(self.0);
+            if buf.is_null() {
+                None
+            } else {
+                Some(FormatDescription::with_cf_type_ref(buf as _))
             }
         }
     }

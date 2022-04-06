@@ -18,6 +18,7 @@ fn main() {
             .whitelist_function("CMBlockBuffer.+")
             .whitelist_function("CMSampleBuffer.+")
             .whitelist_var("kCFAllocator.+")
+            .whitelist_var("kCMVideoCodecType_.+")
             .generate()
             .expect("unable to generate bindings");
 

@@ -15,6 +15,15 @@ pub mod sys {
 pub mod base;
 pub use base::*;
 
+pub mod array;
+pub use array::*;
+
+pub mod boolean;
+pub use boolean::*;
+
+pub mod dictionary;
+pub use dictionary::*;
+
 #[macro_export]
 macro_rules! trait_impls {
     ($e:ident) => {

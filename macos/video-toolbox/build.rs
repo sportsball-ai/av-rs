@@ -14,7 +14,13 @@ fn main() {
         let bindings = bindgen::Builder::default()
             .clang_arg(format!("-isysroot{}", sdk_root))
             .header("src/lib.hpp")
+            .whitelist_function("VTCompressionSession.+")
             .whitelist_function("VTDecompressionSession.+")
+            .whitelist_var("kCMTime.+")
+            .whitelist_var("kCVPixelFormatType_.+")
+            .whitelist_var("kCMSampleAttachmentKey_.+")
+            .whitelist_var("kVTVideoEncoderSpecification_.+")
+            .whitelist_var("kVTCompressionPropertyKey_.+")
             .generate()
             .expect("unable to generate bindings");
 

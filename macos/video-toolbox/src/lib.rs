@@ -13,5 +13,11 @@ pub mod sys {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
+pub mod compression_session;
+pub use compression_session::*;
+
+pub mod video_encoder;
+pub use video_encoder::*;
+
 pub mod decompression_session;
 pub use decompression_session::*;
