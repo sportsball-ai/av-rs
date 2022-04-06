@@ -19,3 +19,17 @@ impl From<bool> for Boolean {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_boolean() {
+        let b = Boolean::from(true);
+        assert!(b.value());
+
+        let b = Boolean::from(false);
+        assert!(!b.value());
+    }
+}
