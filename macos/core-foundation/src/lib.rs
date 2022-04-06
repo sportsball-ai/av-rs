@@ -29,26 +29,26 @@ macro_rules! trait_impls {
     ($e:ident) => {
         impl std::fmt::Debug for $e {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                use core_foundation::CFType;
+                use $crate::CFType;
                 write!(f, "{}", self.description().unwrap_or("{..}".to_string()))
             }
         }
 
         impl Drop for $e {
             fn drop(&mut self) {
-                unsafe { core_foundation::sys::CFRelease(self.0 as _) }
+                unsafe { $crate::sys::CFRelease(self.0 as _) }
             }
         }
 
         unsafe impl Send for $e {}
 
-        impl core_foundation::CFType for $e {
-            unsafe fn with_cf_type_ref(cf: core_foundation::sys::CFTypeRef) -> Self {
-                core_foundation::sys::CFRetain(cf);
+        impl $crate::CFType for $e {
+            unsafe fn with_cf_type_ref(cf: $crate::sys::CFTypeRef) -> Self {
+                $crate::sys::CFRetain(cf);
                 Self(cf as _)
             }
 
-            unsafe fn cf_type_ref(&self) -> core_foundation::sys::CFTypeRef {
+            unsafe fn cf_type_ref(&self) -> $crate::sys::CFTypeRef {
                 self.0 as _
             }
         }

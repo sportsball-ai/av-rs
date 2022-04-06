@@ -1,5 +1,4 @@
 use super::*;
-use crate as core_foundation;
 
 pub struct Array(sys::CFArrayRef);
 crate::trait_impls!(Array);

@@ -1,5 +1,4 @@
 use super::*;
-use crate as core_foundation;
 
 pub struct Boolean(sys::CFBooleanRef);
 crate::trait_impls!(Boolean);
