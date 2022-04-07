@@ -1,14 +1,69 @@
 use super::sys;
 use core_foundation::{result, CFType, OSStatus};
 
-pub struct VideoFormatDescription(sys::CMVideoFormatDescriptionRef);
-core_foundation::trait_impls!(VideoFormatDescription);
+pub struct FormatDescription(sys::CMFormatDescriptionRef);
+core_foundation::trait_impls!(FormatDescription);
 
-mod private {
-    pub trait Sealed {}
+pub struct FormatDescriptionH264ParameterSet<'a> {
+    pub data: &'a [u8],
+    pub nal_unit_header_length: usize,
 }
 
-pub trait FormatDescription: CFType + private::Sealed {}
+pub struct FormatDescriptionHevcParameterSet<'a> {
+    pub data: &'a [u8],
+    pub nal_unit_header_length: usize,
+}
+
+impl FormatDescription {
+    pub fn h264_parameter_set_at_index(&self, idx: usize) -> Result<FormatDescriptionH264ParameterSet, OSStatus> {
+        unsafe {
+            let mut nal_unit_header_length = 0;
+            let mut ptr = std::ptr::null();
+            let mut len = 0;
+            result(
+                sys::CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                    self.0,
+                    idx as _,
+                    &mut ptr,
+                    &mut len,
+                    std::ptr::null_mut(),
+                    &mut nal_unit_header_length,
+                )
+                .into(),
+            )?;
+            Ok(FormatDescriptionH264ParameterSet {
+                data: std::slice::from_raw_parts(ptr as _, len as _),
+                nal_unit_header_length: nal_unit_header_length as _,
+            })
+        }
+    }
+
+    pub fn hevc_parameter_set_at_index(&self, idx: usize) -> Result<FormatDescriptionHevcParameterSet, OSStatus> {
+        unsafe {
+            let mut nal_unit_header_length = 0;
+            let mut ptr = std::ptr::null();
+            let mut len = 0;
+            result(
+                sys::CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                    self.0,
+                    idx as _,
+                    &mut ptr,
+                    &mut len,
+                    std::ptr::null_mut(),
+                    &mut nal_unit_header_length,
+                )
+                .into(),
+            )?;
+            Ok(FormatDescriptionHevcParameterSet {
+                data: std::slice::from_raw_parts(ptr as _, len as _),
+                nal_unit_header_length: nal_unit_header_length as _,
+            })
+        }
+    }
+}
+
+pub struct VideoFormatDescription(sys::CMVideoFormatDescriptionRef);
+core_foundation::trait_impls!(VideoFormatDescription);
 
 impl VideoFormatDescription {
     /// Constructs a format description from H.264 parameter sets. Typically one SPS and one PPS
@@ -36,15 +91,24 @@ impl VideoFormatDescription {
     }
 }
 
-impl private::Sealed for VideoFormatDescription {}
-impl FormatDescription for VideoFormatDescription {}
+impl From<VideoFormatDescription> for FormatDescription {
+    fn from(desc: VideoFormatDescription) -> Self {
+        unsafe { Self::with_cf_type_ref(desc.0 as _) }
+    }
+}
+
+impl From<&VideoFormatDescription> for FormatDescription {
+    fn from(desc: &VideoFormatDescription) -> Self {
+        unsafe { Self::with_cf_type_ref(desc.0 as _) }
+    }
+}
 
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
-    fn test_format_description() {
+    fn test_video_format_description() {
         VideoFormatDescription::with_h264_parameter_sets(
             &[
                 &[

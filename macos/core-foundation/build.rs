@@ -16,6 +16,7 @@ fn main() {
             .header("src/lib.hpp")
             .whitelist_function("CF.+")
             .whitelist_var("kCFString.+")
+            .whitelist_var("kCFBoolean.+")
             .whitelist_type("CFStringBuiltInEncodings")
             .whitelist_type("OSStatus")
             .prepend_enum_name(false)

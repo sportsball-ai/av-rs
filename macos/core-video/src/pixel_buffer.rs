@@ -1,10 +1,61 @@
-use super::sys;
+use super::{sys, ImageBuffer};
+use core_foundation::{result, CFType, OSStatus};
 use std::ffi::c_void;
 
 pub struct PixelBuffer(sys::CVPixelBufferRef);
 core_foundation::trait_impls!(PixelBuffer);
 
+pub struct PixelBufferPlane {
+    pub height: u32,
+    pub width: u32,
+    pub bytes_per_row: usize,
+    pub data: *mut u8,
+}
+
 impl PixelBuffer {
+    /// Creates a new pixel buffer that references the given planes, without copying them.
+    ///
+    /// # Safety
+    /// This is unsafe because the caller must ensure that the given planes out-live the PixelBuffer.
+    pub unsafe fn with_planar_bytes<P>(width: u32, height: u32, pixel_format_type: u32, planes: P) -> Result<Self, OSStatus>
+    where
+        P: IntoIterator<Item = PixelBufferPlane>,
+    {
+        let mut plane_ptrs = vec![];
+        let mut plane_widths = vec![];
+        let mut plane_heights = vec![];
+        let mut plane_bytes_per_row = vec![];
+        for p in planes.into_iter() {
+            plane_ptrs.push(p.data as *mut c_void);
+            plane_widths.push(p.width as u64);
+            plane_heights.push(p.height as u64);
+            plane_bytes_per_row.push(p.bytes_per_row as u64);
+        }
+
+        let mut ret = std::ptr::null_mut();
+        result(
+            sys::CVPixelBufferCreateWithPlanarBytes(
+                std::ptr::null(), // allocator
+                width as _,
+                height as _,
+                pixel_format_type,
+                std::ptr::null_mut(), // dataPtr
+                0,                    // dataSize
+                plane_widths.len() as _,
+                plane_ptrs.as_mut_ptr(),
+                plane_widths.as_mut_ptr(),
+                plane_heights.as_mut_ptr(),
+                plane_bytes_per_row.as_mut_ptr(),
+                None,                 // releaseCallback
+                std::ptr::null_mut(), // releaseRefCon
+                std::ptr::null_mut(), // pixelBufferAttributes
+                &mut ret as _,
+            )
+            .into(),
+        )?;
+        Ok(Self(ret))
+    }
+
     pub fn pixel_format_type(&self) -> u32 {
         unsafe { sys::CVPixelBufferGetPixelFormatType(self.0) }
     }
@@ -35,5 +86,11 @@ impl PixelBuffer {
 
     pub fn data_size(&self) -> usize {
         unsafe { sys::CVPixelBufferGetDataSize(self.0) as usize }
+    }
+}
+
+impl From<PixelBuffer> for ImageBuffer {
+    fn from(b: PixelBuffer) -> Self {
+        unsafe { ImageBuffer::with_cf_type_ref(b.0 as _) }
     }
 }

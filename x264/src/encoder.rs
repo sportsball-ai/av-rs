@@ -224,5 +224,9 @@ mod test {
 
         assert_eq!(encoded_frames, 90);
         assert!(encoded.len() > 5000);
+
+        // To inspect the output, uncomment these lines:
+        //use std::io::Write;
+        //std::fs::File::create("tmp.h264").unwrap().write_all(&encoded).unwrap();
     }
 }

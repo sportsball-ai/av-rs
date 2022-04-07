@@ -9,6 +9,7 @@ build = "build.rs"
 bindgen = "0.*"
 
 [dependencies]
+av-traits = { path = "../../av-traits" }
 core-foundation = { path = "../core-foundation" }
 core-media = { path = "../core-media" }
 core-video = { path = "../core-video" }
