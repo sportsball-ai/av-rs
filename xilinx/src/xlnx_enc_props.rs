@@ -14,6 +14,13 @@ pub const ENC_H264_HIGH: i32 = 100;
 pub const ENC_HEVC_MAIN: i32 = 0;
 pub const ENC_HEVC_MAIN_INTRA: i32 = 1;
 
+pub enum XlnxAspectRatio {
+    AspectRatio4x3,
+    AspectRatio16x9,
+    AspectRatioNone,
+    AspectRatioAuto,
+}
+
 pub const CODEC_ID_HEVC: i32 = 1;
 pub const CODEC_ID_H264: i32 = 0;
 
@@ -47,7 +54,7 @@ pub struct XlnxEncoderProperties {
     pub spatial_aq_gain: i32,
     pub qp_mode: i32,
     pub filler_data: bool,
-    pub aspect_ratio: i32,
+    pub aspect_ratio: XlnxAspectRatio,
     pub scaling_list: i32,
     pub entropy_mode: i32,
     pub loop_filter: bool,
@@ -192,10 +199,10 @@ pub fn xlnx_create_xma_enc_props(
     let filler_data = if enc_props.filler_data { "ENABLE" } else { "DISABLE" };
 
     let aspect_ratio = match enc_props.aspect_ratio {
-        1 => "ASPECT_RATIO_4_3",
-        2 => "ASPECT_RATIO_16_9",
-        3 => "ASPECT_RATIO_NONE",
-        _ => "ASPECT_RATIO_AUTO",
+        XlnxAspectRatio::AspectRatio4x3 => "ASPECT_RATIO_4_3",
+        XlnxAspectRatio::AspectRatio16x9 => "ASPECT_RATIO_16_9",
+        XlnxAspectRatio::AspectRatioNone => "ASPECT_RATIO_NONE",
+        XlnxAspectRatio::AspectRatioAuto => "ASPECT_RATIO_AUTO",
     };
 
     let color_space = "COLOUR_DESC_UNSPECIFIED";

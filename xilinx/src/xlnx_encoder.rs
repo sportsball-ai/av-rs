@@ -139,7 +139,7 @@ mod encoder_tests {
             spatial_aq_gain: 50,
             qp_mode: 1,
             filler_data: false,
-            aspect_ratio: 2,
+            aspect_ratio: XlnxAspectRatio::AspectRatio16x9,
             scaling_list: 1,
             entropy_mode: 1,
             loop_filter: true,
