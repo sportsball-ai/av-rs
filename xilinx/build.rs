@@ -26,6 +26,7 @@ fn main() {
         println!("cargo:rustc-link-lib=dylib=xrt_core");
 
         let bindings = bindgen::Builder::default();
+        #[allow(deprecated)]
         let bindings = bindings
             .header("src/bindings.h")
             .clang_arg("-I/opt/xilinx/xrt/include/xma2")
