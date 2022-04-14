@@ -3,7 +3,7 @@ use simple_error::SimpleError;
 
 pub struct XlnxEncoder {
     enc_session: *mut XmaEncoderSession,
-    out_buffer: *mut XmaDataBuffer,
+    pub out_buffer: *mut XmaDataBuffer,
     flush_frame_sent: bool,
 }
 
