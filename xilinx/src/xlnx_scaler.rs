@@ -132,8 +132,7 @@ mod scaler_tests {
         let mut scal_props = Box::new(XlnxScalerProperties {
             in_width: 1280,
             in_height: 720,
-            fr_num: 1,
-            fr_den: 25,
+            framerate: XmaFraction { numerator: 1, denominator: 25 },
             nb_outputs: 3,
             out_width: [1280, 852, 640, 0, 0, 0, 0, 0],
             out_height: [720, 480, 360, 0, 0, 0, 0, 0],

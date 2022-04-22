@@ -4,7 +4,7 @@ use simple_error::SimpleError;
 pub struct XlnxEncoder {
     enc_session: *mut XmaEncoderSession,
     pub out_buffer: *mut XmaDataBuffer,
-    flush_frame_sent: bool,
+    pub flush_frame_sent: bool,
 }
 
 impl XlnxEncoder {
@@ -236,7 +236,6 @@ mod encoder_tests {
 
         processed_frame_count
     }
-
     #[test]
     fn test_hevc_encode() {
         let processed_frame_count = encode_raw(CODEC_ID_HEVC, ENC_HEVC_MAIN, 31);

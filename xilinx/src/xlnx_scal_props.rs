@@ -2,7 +2,7 @@ use crate::{strcpy_to_arr_i8, sys::*, xlnx_scaler::SCAL_MAX_ABR_CHANNELS};
 use simple_error::SimpleError;
 use std::ptr;
 
-pub(crate) const MAX_SCAL_PARAMS: usize = 4;
+pub const MAX_SCAL_PARAMS: usize = 4;
 const ENABLE_PIPELINE_PARAM_NAME: &[u8] = b"enable_pipeline\0";
 const LOG_LEVEL_PARAM_NAME: &[u8] = b"logLevel\0";
 const MIX_RATE_PARAM_NAME: &[u8] = b"MixRate\0";
@@ -12,8 +12,7 @@ const TRANSCODE_WIDTH_ALIGN: i32 = 256;
 pub struct XlnxScalerProperties {
     pub in_width: i32,
     pub in_height: i32,
-    pub fr_num: i32,
-    pub fr_den: i32,
+    pub framerate: XmaFraction,
     pub nb_outputs: i32,
     pub out_width: [i32; SCAL_MAX_ABR_CHANNELS],
     pub out_height: [i32; SCAL_MAX_ABR_CHANNELS],
@@ -62,8 +61,8 @@ pub fn xlnx_create_xma_scal_props(
     xma_scal_props.input.width = scal_props.in_width;
     xma_scal_props.input.height = scal_props.in_height;
     xma_scal_props.input.stride = align(scal_props.in_width, TRANSCODE_WIDTH_ALIGN);
-    xma_scal_props.input.framerate.numerator = scal_props.fr_num;
-    xma_scal_props.input.framerate.denominator = scal_props.fr_den;
+    xma_scal_props.input.framerate.numerator = scal_props.framerate.numerator;
+    xma_scal_props.input.framerate.denominator = scal_props.framerate.denominator;
 
     for i in 0..scal_props.nb_outputs as usize {
         xma_scal_props.output[i].format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
@@ -72,8 +71,8 @@ pub fn xlnx_create_xma_scal_props(
         xma_scal_props.output[i].height = scal_props.out_height[i];
         xma_scal_props.output[i].stride = align(scal_props.out_width[i], TRANSCODE_WIDTH_ALIGN);
         xma_scal_props.output[i].coeffLoad = 0;
-        xma_scal_props.output[i].framerate.numerator = scal_props.fr_num;
-        xma_scal_props.output[i].framerate.denominator = scal_props.fr_den;
+        xma_scal_props.output[i].framerate.numerator = scal_props.framerate.numerator;
+        xma_scal_props.output[i].framerate.denominator = scal_props.framerate.denominator;
     }
 
     xlnx_fill_scal_params(scal_props, scal_params);

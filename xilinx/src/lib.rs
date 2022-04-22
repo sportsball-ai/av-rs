@@ -37,12 +37,11 @@ pub use xlnx_error::*;
 
 const XCLBIN_FILENAME: &[u8] = b"/opt/xilinx/xcdr/xclbins/transcode.xclbin\0";
 
-/// initalized the number of devices specified with the default xclbin_name
+/// initalizes all devices on system with the default xclbin_name
 ///
-/// @decice_count: The number of devices available in the system.
-pub fn xlnx_init_all_devices(device_count: i32) -> Result<(), simple_error::SimpleError> {
+pub fn xlnx_init_all_devices() -> Result<i32, simple_error::SimpleError> {
     let mut xclbin_params = Vec::new();
-
+    let device_count =  unsafe { xclProbe() } as i32;
     for i in 0..device_count {
         xclbin_params.push(XmaXclbinParameter {
             xclbin_name: XCLBIN_FILENAME.as_ptr() as *mut i8,
@@ -55,7 +54,7 @@ pub fn xlnx_init_all_devices(device_count: i32) -> Result<(), simple_error::Simp
         simple_error::bail!("xma initalization failed")
     }
 
-    Ok(())
+    Ok(device_count)
 }
 
 pub(crate) fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
@@ -87,7 +86,7 @@ pub mod tests {
 
     pub fn initialize() {
         INIT.call_once(|| {
-            xlnx_init_all_devices(2).unwrap();
+            xlnx_init_all_devices().unwrap();
         });
     }
 
