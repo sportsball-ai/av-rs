@@ -36,6 +36,7 @@ fn main() {
             .whitelist_function("xrm.*")
             .whitelist_function("xvbm.*")
             .whitelist_function("xma_.*")
+            .whitelist_function("xclProbe.*")
             .whitelist_type("xma.*")
             .whitelist_type("xvbm.*")
             .whitelist_type("xrm.*")
