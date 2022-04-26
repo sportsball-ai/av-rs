@@ -1,0 +1,16 @@
+
+
+cc_binary {
+    //proprietary: true,
+    name: "nidec_test",
+    srcs: ["client.cpp"],
+
+    shared_libs: [
+        "liblog",
+        "libhidlbase",
+        "libutils",
+        "android.hardware.nidec@1.0",
+        "libcutils",
+    ],
+
+}
