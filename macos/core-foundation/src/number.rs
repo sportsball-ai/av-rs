@@ -45,11 +45,11 @@ mod test {
 
     #[test]
     fn test_number() {
-        let _ = Number::from(1 as i8);
-        let _ = Number::from(1 as i16);
-        let _ = Number::from(1 as i32);
-        let _ = Number::from(1 as i64);
-        let _ = Number::from(1 as f32);
-        let _ = Number::from(1 as f64);
+        let _ = Number::from(1_i8);
+        let _ = Number::from(1_i16);
+        let _ = Number::from(1_i32);
+        let _ = Number::from(1_i64);
+        let _ = Number::from(1_f32);
+        let _ = Number::from(1_f64);
     }
 }
