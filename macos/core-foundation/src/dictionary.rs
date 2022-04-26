@@ -20,20 +20,20 @@ impl Dictionary {
 pub struct MutableDictionary(sys::CFMutableDictionaryRef);
 crate::trait_impls!(MutableDictionary);
 
-impl Default for MutableDictionary {
-    fn default() -> Self {
-        Self::with_capacity(0)
-    }
-}
-
 impl MutableDictionary {
-    pub fn with_capacity(capacity: usize) -> Self {
+    /// Creates a new mutable dictionary which will only contain CFType objects.
+    pub fn new_cf_type() -> Self {
+        Self::cf_type_with_capacity(0)
+    }
+
+    /// Creates a new mutable dictionary which will only contain CFType objects and has the given capacity.
+    pub fn cf_type_with_capacity(capacity: usize) -> Self {
         unsafe {
             Self(sys::CFDictionaryCreateMutable(
                 std::ptr::null_mut(),
                 capacity as _,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                &sys::kCFTypeDictionaryKeyCallBacks as _,
+                &sys::kCFTypeDictionaryValueCallBacks as _,
             ))
         }
     }

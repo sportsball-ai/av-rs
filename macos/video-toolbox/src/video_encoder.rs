@@ -44,7 +44,7 @@ pub struct VideoEncoder<F: Send> {
 
 impl<F: Send> VideoEncoder<F> {
     pub fn new(config: VideoEncoderConfig) -> Result<Self, OSStatus> {
-        let mut encoder_specification = MutableDictionary::default();
+        let mut encoder_specification = MutableDictionary::new_cf_type();
         unsafe {
             encoder_specification.set_value(
                 sys::kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as _,
