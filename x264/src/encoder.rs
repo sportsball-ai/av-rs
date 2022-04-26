@@ -47,6 +47,7 @@ pub struct X264EncoderConfig {
     pub height: u16,
     pub width: u16,
     pub fps: f64,
+    pub bitrate: Option<u32>,
     pub input_format: X264EncoderInputFormat,
 }
 
@@ -73,6 +74,13 @@ impl<F> X264Encoder<F> {
             params.i_fps_num = (config.fps * params.i_fps_den as f64).round() as _;
             params.i_timebase_num = params.i_fps_den;
             params.i_timebase_den = params.i_fps_num;
+
+            if let Some(bitrate) = config.bitrate {
+                params.rc.i_bitrate = (bitrate / 1000) as _;
+                params.rc.i_rc_method = sys::X264_RC_ABR as _;
+                params.rc.i_vbv_buffer_size = 3 * params.rc.i_bitrate;
+                params.rc.i_vbv_max_bitrate = params.rc.i_bitrate;
+            }
 
             let encoder = sys::x264_encoder_open(&mut params as _);
             if encoder.is_null() {
@@ -188,6 +196,7 @@ mod test {
         let mut encoder = X264Encoder::new(X264EncoderConfig {
             width: 1920,
             height: 1080,
+            bitrate: Some(10000),
             fps: 29.97,
             input_format: X264EncoderInputFormat::Yuv420Planar,
         })
@@ -224,6 +233,7 @@ mod test {
 
         assert_eq!(encoded_frames, 90);
         assert!(encoded.len() > 5000);
+        assert!(encoded.len() < 10000);
 
         // To inspect the output, uncomment these lines:
         //use std::io::Write;
