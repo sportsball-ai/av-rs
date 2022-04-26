@@ -57,7 +57,7 @@ mod test {
 
     #[test]
     fn test_dictionary() {
-        let mut d = MutableDictionary::default();
+        let mut d = MutableDictionary::new_cf_type();
 
         unsafe {
             let key = sys::kCFStringTransformToLatin;
