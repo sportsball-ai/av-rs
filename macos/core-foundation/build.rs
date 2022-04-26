@@ -17,6 +17,7 @@ fn main() {
             .whitelist_function("CF.+")
             .whitelist_var("kCFString.+")
             .whitelist_var("kCFBoolean.+")
+            .whitelist_var("kCFNumber.+")
             .whitelist_type("CFStringBuiltInEncodings")
             .whitelist_type("OSStatus")
             .prepend_enum_name(false)

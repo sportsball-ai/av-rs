@@ -18,3 +18,13 @@ impl From<Time> for sys::CMTime {
         }
     }
 }
+
+impl Time {
+    pub fn new(value: i64, timescale: i32) -> Self {
+        Self {
+            value,
+            timescale,
+            ..Default::default()
+        }
+    }
+}
