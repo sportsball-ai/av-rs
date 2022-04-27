@@ -100,7 +100,7 @@ pub struct XcoderEncoderConfig {
     pub height: u16,
     pub width: u16,
     pub fps: f64,
-    pub bitrate: u32,
+    pub bitrate: Option<u32>,
     pub codec: XcoderEncoderCodec,
 }
 
@@ -121,7 +121,9 @@ impl<F> XcoderEncoder<F> {
                 &mut params as _,
                 fps_numerator,
                 fps_denominator,
-                config.bitrate as _,
+                // There's nothing special about this default bitrate. It's not used unless
+                // `rc.enable_rate_control == 1`, so any valid number will do.
+                config.bitrate.unwrap_or(200000) as _,
                 config.width as _,
                 config.height as _,
                 match config.codec {
@@ -138,6 +140,7 @@ impl<F> XcoderEncoder<F> {
 
             let cfg_enc_params = &mut params.__bindgen_anon_1.cfg_enc_params;
             cfg_enc_params.planar = 1;
+            cfg_enc_params.rc.enable_rate_control = if config.bitrate.is_some() { 1 } else { 0 };
 
             // we don't like b-frames. so we use ipppp...
             cfg_enc_params.gop_preset_index = 9;
@@ -398,7 +401,7 @@ mod test {
             width: 1920,
             height: 1080,
             fps: 29.97,
-            bitrate: 200000,
+            bitrate: None,
             codec: XcoderEncoderCodec::H264,
         })
         .unwrap();
