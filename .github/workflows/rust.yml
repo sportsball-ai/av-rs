@@ -13,7 +13,8 @@ jobs:
     - name: Set Up Linux
       if: startsWith(matrix.os, 'ubuntu-')
       run: |
-        sudo apt-get update && sudo apt-get install -y libx264-dev
+        git clone https://github.com/mirror/x264.git
+        (cd x264 && git checkout 5db6aa6cab1b146e07b60cc1736a01f21da01154 && ./configure --disable-cli --enable-static && make -j && sudo make install)
         git clone https://github.com/ultravideo/kvazaar.git
         (cd kvazaar && git checkout 8143ab971cbbdd78a3ac12cf7904209e1db659c6 && ./autogen.sh && ./configure && make -j && sudo make install)
     - name: Set Up macOS
