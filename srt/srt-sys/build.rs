@@ -16,8 +16,12 @@ fn main() {
 
     let build = build.build();
 
+    println!("cargo:rustc-link-search={}/lib", build.display());
+    println!("cargo:rustc-link-lib=static=srt");
+
     match target_os.as_str() {
         "macos" => {
+            println!("cargo:rustc-link-lib=c++");
             println!(
                 "cargo:rustc-link-search={}/vendor/openssl/lib/macos-{}",
                 env!("CARGO_MANIFEST_DIR"),
@@ -32,7 +36,4 @@ fn main() {
         }
         _ => {}
     }
-    println!("cargo:rustc-link-lib=c++");
-    println!("cargo:rustc-link-search={}/lib", build.display());
-    println!("cargo:rustc-link-lib=static=srt");
 }
