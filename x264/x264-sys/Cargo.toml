@@ -8,3 +8,4 @@ build = "build.rs"
 # We're very permissive here with bindgen due to https://github.com/rust-lang/cargo/issues/5237
 bindgen = "0.*"
 cc = "1.0"
+pkg-config = "0.3.25"
