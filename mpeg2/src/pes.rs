@@ -201,7 +201,7 @@ impl OptionalHeader {
 
         if let Some(pts) = self.pts {
             buf[1] |= 0x80;
-            buf[3] = 0b00100001 | (pts >> 30) as u8;
+            buf[3] = 0b00100001 | (pts >> 29) as u8;
             buf[4] = (pts >> 22) as u8;
             buf[5] = (pts >> 14) as u8 | 1;
             buf[6] = (pts >> 7) as u8;
@@ -212,7 +212,7 @@ impl OptionalHeader {
         if let Some(dts) = self.dts {
             buf[1] |= 0x40;
             buf[3] |= 0b00010000;
-            buf[8] = 0b00010001 | (dts >> 30) as u8;
+            buf[8] = 0b00010001 | (dts >> 29) as u8;
             buf[9] = (dts >> 22) as u8;
             buf[10] = (dts >> 14) as u8 | 1;
             buf[11] = (dts >> 7) as u8;
@@ -320,5 +320,18 @@ mod test {
         let mut encoded = vec![];
         header.encode(&mut encoded).unwrap();
         assert_eq!(buf, encoded);
+
+        let ts = (0b111 << 30) + (0x5f375a86 & ((1 << 30) - 1));
+        let oh = OptionalHeader {
+            data_alignment_indicator: true,
+            pts: Some(ts),
+            dts: Some(ts),
+        };
+        let mut encoded_oh = vec![];
+        oh.encode(&mut encoded_oh).unwrap();
+        let (decoded_oh, _) = OptionalHeader::decode(&encoded_oh).unwrap();
+        assert_eq!(decoded_oh.data_alignment_indicator, true);
+        assert_eq!(decoded_oh.pts.unwrap(), ts);
+        assert_eq!(decoded_oh.dts.unwrap(), ts);
     }
 }
