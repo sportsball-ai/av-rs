@@ -330,7 +330,7 @@ mod test {
         let mut encoded_oh = vec![];
         oh.encode(&mut encoded_oh).unwrap();
         let (decoded_oh, _) = OptionalHeader::decode(&encoded_oh).unwrap();
-        assert_eq!(decoded_oh.data_alignment_indicator, true);
+        assert!(decoded_oh.data_alignment_indicator);
         assert_eq!(decoded_oh.pts.unwrap(), ts);
         assert_eq!(decoded_oh.dts.unwrap(), ts);
     }
