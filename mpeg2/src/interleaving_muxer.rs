@@ -1,56 +1,36 @@
 use super::{pes, ts, EncodeError};
-use crate::muxer::StreamConfig;
+use crate::muxer::{Muxer, Packet, Stream, StreamConfig, StreamState};
 use alloc::vec::Vec;
 use core2::io::Write;
 use std::collections::VecDeque;
 use std::time::Duration;
 
-struct StreamState {
-    stream_type: u8,
-    pid: u16,
-    data: Vec<u8>,
-}
-
 pub struct InterleavingMuxer<W> {
-    w: W,
-    next_packet_id: u16,
-    pcr_pid: u16,
-    did_write_headers: bool,
-    last_header_pcr: Option<u64>,
-    header_continuity_counter: u8,
-    stream_states: Vec<StreamState>,
+    muxer: Muxer<W>,
     max_buffer_duration: u64,
     largest_ts_in_buffer: u64,
     streams: Vec<InterleavingStream>,
 }
 
-#[derive(Default)]
-pub struct MuxerPacket {
-    pub data: Vec<u8>,
-    pub random_access_indicator: bool,
-    pub pts_90khz: Option<u64>,
-    pub dts_90khz: Option<u64>,
-}
-
 pub struct InterleavingStream {
-    packet_id: u16,
-    continuity_counter: u8,
-    stream_id: u8,
-    unbounded_data_length: bool,
-    buffered_packets: VecDeque<MuxerPacket>,
+    wrapper: Stream,
+    buffered_packets: VecDeque<Packet>,
     last_written_ts: u64,
 }
 
 impl<W: Write> InterleavingMuxer<W> {
     pub fn new(w: W, max_buffer_duration: Duration) -> Self {
-        Self {
+        let muxer = Muxer {
             w,
             next_packet_id: 0x100,
             pcr_pid: 0,
             last_header_pcr: None,
             did_write_headers: false,
             header_continuity_counter: 0,
-            stream_states: vec![],
+            streams: vec![],
+        };
+        Self {
+            muxer,
             max_buffer_duration: (max_buffer_duration.as_millis() * 90) as u64,
             largest_ts_in_buffer: 0,
             streams: vec![],
@@ -58,27 +38,30 @@ impl<W: Write> InterleavingMuxer<W> {
     }
 
     pub fn add_stream(&mut self, config: StreamConfig) {
-        let packet_id = self.next_packet_id;
+        let packet_id = self.muxer.next_packet_id;
         let stream_state = StreamState {
             stream_type: config.stream_type,
             pid: packet_id,
             data: config.data,
         };
-        self.next_packet_id += 1;
-        self.stream_states.push(stream_state);
-        self.pcr_pid = packet_id;
-        let stream = InterleavingStream {
+        self.muxer.next_packet_id += 1;
+        self.muxer.streams.push(stream_state);
+        self.muxer.pcr_pid = packet_id;
+        let internal_stream = Stream {
             packet_id,
             continuity_counter: 0,
             stream_id: config.stream_id,
             unbounded_data_length: config.unbounded_data_length,
+        };
+        let interleaving_stream = InterleavingStream {
+            wrapper: internal_stream,
             buffered_packets: VecDeque::with_capacity(6),
             last_written_ts: 0,
         };
-        self.streams.push(stream);
+        self.streams.push(interleaving_stream);
     }
 
-    pub fn write(&mut self, stream_index: usize, p: MuxerPacket) -> Result<(), EncodeError> {
+    pub fn write(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
         let last_written_ts = self.streams[stream_index].last_written_ts;
         // if the packet doesn't have a dts, use the pts. if it doesn't have a pts, consider it to have the same timestamp as the last packet
         let ts = p.dts_90khz.or(p.pts_90khz);
@@ -114,7 +97,7 @@ impl<W: Write> InterleavingMuxer<W> {
                     }
                 })
             {
-                let min_ts = self.min_ts_excluding(self.streams[index].packet_id as usize);
+                let min_ts = self.min_ts_excluding(self.streams[index].wrapper.packet_id as usize);
                 let stream = &mut self.streams[index];
                 min_ts_stream_index = index;
                 while let Some(p) = stream.buffered_packets.front() {
@@ -128,9 +111,8 @@ impl<W: Write> InterleavingMuxer<W> {
                 }
             }
             if !packets.is_empty() {
-                let packet_id = self.streams[min_ts_stream_index].packet_id;
                 for packet in packets {
-                    self.write_packet(packet_id as usize, packet)?;
+                    self.write_packet(min_ts_stream_index, packet)?;
                 }
                 self.streams[min_ts_stream_index].last_written_ts = last_written_ts;
             }
@@ -138,31 +120,9 @@ impl<W: Write> InterleavingMuxer<W> {
         Ok(())
     }
 
-    fn write_packet(&mut self, packet_id: usize, p: MuxerPacket) -> Result<(), EncodeError> {
-        let stream = &mut self.streams[packet_id];
-        let pes_packet = pes::Packet {
-            header: pes::PacketHeader {
-                stream_id: stream.stream_id,
-                optional_header: Some(pes::OptionalHeader {
-                    data_alignment_indicator: true,
-                    pts: p.pts_90khz,
-                    dts: p.dts_90khz,
-                }),
-                data_length: if stream.unbounded_data_length { 0 } else { p.data.len() },
-            },
-            data: p.data.into(),
-        };
-        for ts_packet in pes_packet.packetize(pes::PacketizationConfig {
-            packet_id: stream.packet_id,
-            continuity_counter: stream.continuity_counter,
-            random_access_indicator: p.random_access_indicator,
-        }) {
-            if ts_packet.payload.is_some() {
-                let stream = &mut self.streams[packet_id];
-                stream.continuity_counter = (stream.continuity_counter + 1) % 16;
-            }
-            self.write_ts_packet(ts_packet)?;
-        }
+    fn write_packet(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
+        let stream = &mut self.streams[stream_index].wrapper;
+        self.muxer.write(stream, p)?;
         Ok(())
     }
 
@@ -172,7 +132,7 @@ impl<W: Write> InterleavingMuxer<W> {
             while let Some(p) = stream.buffered_packets.front() {
                 let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
                 if self.largest_ts_in_buffer - ts > self.max_buffer_duration {
-                    packets.push((stream.packet_id, stream.buffered_packets.pop_front().unwrap()));
+                    packets.push((stream.wrapper.packet_id, stream.buffered_packets.pop_front().unwrap()));
                 }
             }
         }
@@ -182,113 +142,9 @@ impl<W: Write> InterleavingMuxer<W> {
         Ok(())
     }
 
-    fn write_ts_packet(&mut self, p: ts::Packet) -> Result<(), EncodeError> {
-        // let mut state = self.state.borrow_mut();
-        let pcr = p.adaptation_field.as_ref().and_then(|af| af.program_clock_reference_27mhz);
-
-        let mut should_write_headers = !self.did_write_headers;
-        if p.packet_id == self.pcr_pid && self.did_write_headers {
-            // figure out if we need to repeat the headers
-            if let Some(pcr) = pcr {
-                if self.last_header_pcr.is_none() {
-                    self.last_header_pcr = Some(pcr);
-                }
-                if let Some(last_pcr) = self.last_header_pcr {
-                    // repeat the headers if we've wrapped around or if 90ms has passed
-                    if pcr + 27_000_000 < last_pcr || pcr > last_pcr + 2_430_000 {
-                        should_write_headers = true;
-                    }
-                }
-            }
-        }
-
-        if should_write_headers {
-            const PMT_PID: u16 = 0x1000;
-
-            // write the PAT
-            {
-                let pat = ts::PATData {
-                    entries: vec![ts::PATEntry {
-                        program_number: 1,
-                        program_map_pid: PMT_PID,
-                    }],
-                };
-                let mut encoded = vec![];
-                pat.encode(&mut encoded)?;
-                let section = ts::TableSyntaxSection {
-                    table_id_extension: 1,
-                    data: &encoded,
-                };
-                let mut encoded = vec![];
-                section.encode_without_crc(&mut encoded)?;
-                let section = ts::TableSection {
-                    table_id: ts::TABLE_ID_PAT,
-                    section_syntax_indicator: true,
-                    data_without_crc: &encoded,
-                };
-                let mut encoded = vec![];
-                ts::encode_table_sections([section], &mut encoded, ts::Packet::max_payload_len(None))?;
-                let p = ts::Packet {
-                    packet_id: ts::PID_PAT,
-                    payload_unit_start_indicator: true,
-                    continuity_counter: self.header_continuity_counter,
-                    adaptation_field: None,
-                    payload: Some(encoded.into()),
-                };
-                p.encode(&mut self.w)?;
-            }
-
-            // write the PMT
-            {
-                let pmt = ts::PMTData {
-                    pcr_pid: self.pcr_pid,
-                    elementary_stream_info: self
-                        .stream_states
-                        .iter()
-                        .map(|s| ts::PMTElementaryStreamInfo {
-                            elementary_pid: s.pid,
-                            stream_type: s.stream_type,
-                            data: &s.data,
-                        })
-                        .collect(),
-                };
-                let mut encoded = vec![];
-                pmt.encode(&mut encoded)?;
-                let section = ts::TableSyntaxSection {
-                    table_id_extension: 1,
-                    data: &encoded,
-                };
-                let mut encoded = vec![];
-                section.encode_without_crc(&mut encoded)?;
-                let section = ts::TableSection {
-                    table_id: ts::TABLE_ID_PMT,
-                    section_syntax_indicator: true,
-                    data_without_crc: &encoded,
-                };
-                let mut encoded = vec![];
-                ts::encode_table_sections([section], &mut encoded, ts::Packet::max_payload_len(None))?;
-                let p = ts::Packet {
-                    packet_id: PMT_PID,
-                    payload_unit_start_indicator: true,
-                    continuity_counter: self.header_continuity_counter,
-                    adaptation_field: None,
-                    payload: Some(encoded.into()),
-                };
-                p.encode(&mut self.w)?;
-            }
-
-            self.did_write_headers = true;
-            self.last_header_pcr = pcr;
-            self.header_continuity_counter = (self.header_continuity_counter + 1) % 16;
-        }
-
-        p.encode(&mut self.w)?;
-        Ok(())
-    }
-
     fn min_ts_excluding(&self, packet_id: usize) -> u64 {
         let mut min_ts = u64::MAX;
-        for s in self.streams.iter().filter(|s| s.packet_id as usize != packet_id) {
+        for s in self.streams.iter().filter(|s| s.wrapper.packet_id as usize != packet_id) {
             if let Some(p) = s.buffered_packets.front() {
                 min_ts = min_ts.min(p.dts_90khz.or(p.pts_90khz).unwrap_or(0));
             }
@@ -333,7 +189,7 @@ mod test {
                     interleaving_muxer
                         .write(
                             0,
-                            MuxerPacket {
+                            Packet {
                                 data: frame.data.into(),
                                 random_access_indicator,
                                 pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),

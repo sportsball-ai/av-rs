@@ -1,26 +1,21 @@
 use super::{pes, ts, EncodeError};
 use alloc::vec::Vec;
-use core::cell::RefCell;
 use core2::io::Write;
 
-struct StreamState {
-    stream_type: u8,
-    pid: u16,
-    data: Vec<u8>,
-}
-
-struct State<W> {
-    w: W,
-    next_packet_id: u16,
-    pcr_pid: u16,
-    did_write_headers: bool,
-    last_header_pcr: Option<u64>,
-    header_continuity_counter: u8,
-    streams: Vec<StreamState>,
+pub(crate) struct StreamState {
+    pub(crate) stream_type: u8,
+    pub(crate) pid: u16,
+    pub(crate) data: Vec<u8>,
 }
 
 pub struct Muxer<W> {
-    state: RefCell<State<W>>,
+    pub(crate) w: W,
+    pub(crate) next_packet_id: u16,
+    pub(crate) pcr_pid: u16,
+    pub(crate) did_write_headers: bool,
+    pub(crate) last_header_pcr: Option<u64>,
+    pub(crate) header_continuity_counter: u8,
+    pub(crate) streams: Vec<StreamState>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,30 +32,26 @@ pub struct StreamConfig {
 impl<W: Write> Muxer<W> {
     pub fn new(w: W) -> Self {
         Self {
-            state: RefCell::new(State {
-                w,
-                next_packet_id: 0x100,
-                pcr_pid: 0,
-                last_header_pcr: None,
-                did_write_headers: false,
-                header_continuity_counter: 0,
-                streams: vec![],
-            }),
+            w,
+            next_packet_id: 0x100,
+            pcr_pid: 0,
+            last_header_pcr: None,
+            did_write_headers: false,
+            header_continuity_counter: 0,
+            streams: vec![],
         }
     }
 
-    pub fn new_stream(&self, config: StreamConfig) -> Stream<'_, W> {
-        let mut state = self.state.borrow_mut();
-        let packet_id = state.next_packet_id;
-        state.next_packet_id += 1;
-        state.streams.push(StreamState {
+    pub fn new_stream(&mut self, config: StreamConfig) -> Stream {
+        let packet_id = self.next_packet_id;
+        self.next_packet_id += 1;
+        self.streams.push(StreamState {
             stream_type: config.stream_type,
             pid: packet_id,
             data: config.data,
         });
-        state.pcr_pid = packet_id;
+        self.pcr_pid = packet_id;
         Stream {
-            muxer: self,
             packet_id,
             continuity_counter: 0,
             stream_id: config.stream_id,
@@ -68,18 +59,43 @@ impl<W: Write> Muxer<W> {
         }
     }
 
-    fn write(&self, p: ts::Packet) -> Result<(), EncodeError> {
-        let mut state = self.state.borrow_mut();
+    pub fn write(&mut self, stream: &mut Stream, p: Packet) -> Result<(), EncodeError> {
+        let pes_packet = pes::Packet {
+            header: pes::PacketHeader {
+                stream_id: stream.stream_id,
+                optional_header: Some(pes::OptionalHeader {
+                    data_alignment_indicator: true,
+                    pts: p.pts_90khz,
+                    dts: p.dts_90khz,
+                }),
+                data_length: if stream.unbounded_data_length { 0 } else { p.data.len() },
+            },
+            data: p.data.into(),
+        };
+        for ts_packet in pes_packet.packetize(pes::PacketizationConfig {
+            packet_id: stream.packet_id,
+            continuity_counter: stream.continuity_counter,
+            random_access_indicator: p.random_access_indicator,
+        }) {
+            if ts_packet.payload.is_some() {
+                stream.continuity_counter = (stream.continuity_counter + 1) % 16;
+            }
+            self.write_ts_packet(ts_packet)?;
+        }
+        Ok(())
+    }
+
+    fn write_ts_packet(&mut self, p: ts::Packet) -> Result<(), EncodeError> {
         let pcr = p.adaptation_field.as_ref().and_then(|af| af.program_clock_reference_27mhz);
 
-        let mut should_write_headers = !state.did_write_headers;
-        if p.packet_id == state.pcr_pid && state.did_write_headers {
+        let mut should_write_headers = !self.did_write_headers;
+        if p.packet_id == self.pcr_pid && self.did_write_headers {
             // figure out if we need to repeat the headers
             if let Some(pcr) = pcr {
-                if state.last_header_pcr.is_none() {
-                    state.last_header_pcr = Some(pcr);
+                if self.last_header_pcr.is_none() {
+                    self.last_header_pcr = Some(pcr);
                 }
-                if let Some(last_pcr) = state.last_header_pcr {
+                if let Some(last_pcr) = self.last_header_pcr {
                     // repeat the headers if we've wrapped around or if 90ms has passed
                     if pcr + 27_000_000 < last_pcr || pcr > last_pcr + 2_430_000 {
                         should_write_headers = true;
@@ -117,18 +133,18 @@ impl<W: Write> Muxer<W> {
                 let p = ts::Packet {
                     packet_id: ts::PID_PAT,
                     payload_unit_start_indicator: true,
-                    continuity_counter: state.header_continuity_counter,
+                    continuity_counter: self.header_continuity_counter,
                     adaptation_field: None,
                     payload: Some(encoded.into()),
                 };
-                p.encode(&mut state.w)?;
+                p.encode(&mut self.w)?;
             }
 
             // write the PMT
             {
                 let pmt = ts::PMTData {
-                    pcr_pid: state.pcr_pid,
-                    elementary_stream_info: state
+                    pcr_pid: self.pcr_pid,
+                    elementary_stream_info: self
                         .streams
                         .iter()
                         .map(|s| ts::PMTElementaryStreamInfo {
@@ -156,65 +172,36 @@ impl<W: Write> Muxer<W> {
                 let p = ts::Packet {
                     packet_id: PMT_PID,
                     payload_unit_start_indicator: true,
-                    continuity_counter: state.header_continuity_counter,
+                    continuity_counter: self.header_continuity_counter,
                     adaptation_field: None,
                     payload: Some(encoded.into()),
                 };
-                p.encode(&mut state.w)?;
+                p.encode(&mut self.w)?;
             }
 
-            state.did_write_headers = true;
-            state.last_header_pcr = pcr;
-            state.header_continuity_counter = (state.header_continuity_counter + 1) % 16;
+            self.did_write_headers = true;
+            self.last_header_pcr = pcr;
+            self.header_continuity_counter = (self.header_continuity_counter + 1) % 16;
         }
 
-        p.encode(&mut state.w)?;
+        p.encode(&mut self.w)?;
         Ok(())
     }
 }
 
 #[derive(Default)]
-pub struct Packet<'a> {
-    pub data: &'a [u8],
+pub struct Packet {
+    pub data: Vec<u8>,
     pub random_access_indicator: bool,
     pub pts_90khz: Option<u64>,
     pub dts_90khz: Option<u64>,
 }
 
-pub struct Stream<'a, W> {
-    muxer: &'a Muxer<W>,
-    packet_id: u16,
-    continuity_counter: u8,
-    stream_id: u8,
-    unbounded_data_length: bool,
-}
-
-impl<'a, W: Write> Stream<'a, W> {
-    pub fn write(&mut self, p: Packet) -> Result<(), EncodeError> {
-        let pes_packet = pes::Packet {
-            header: pes::PacketHeader {
-                stream_id: self.stream_id,
-                optional_header: Some(pes::OptionalHeader {
-                    data_alignment_indicator: true,
-                    pts: p.pts_90khz,
-                    dts: p.dts_90khz,
-                }),
-                data_length: if self.unbounded_data_length { 0 } else { p.data.len() },
-            },
-            data: p.data.into(),
-        };
-        for ts_packet in pes_packet.packetize(pes::PacketizationConfig {
-            packet_id: self.packet_id,
-            continuity_counter: self.continuity_counter,
-            random_access_indicator: p.random_access_indicator,
-        }) {
-            if ts_packet.payload.is_some() {
-                self.continuity_counter = (self.continuity_counter + 1) % 16;
-            }
-            self.muxer.write(ts_packet)?;
-        }
-        Ok(())
-    }
+pub struct Stream {
+    pub(crate) packet_id: u16,
+    pub(crate) continuity_counter: u8,
+    pub(crate) stream_id: u8,
+    pub(crate) unbounded_data_length: bool,
 }
 
 #[cfg(test)]
@@ -235,7 +222,7 @@ mod test {
 
         let mut data_out = Vec::new();
         {
-            let muxer = Muxer::new(&mut data_out);
+            let mut muxer = Muxer::new(&mut data_out);
             let mut video_out = muxer.new_stream(StreamConfig {
                 stream_id: 0xe0,
                 stream_type: 0x1b,
@@ -250,13 +237,16 @@ mod test {
                 }
 
                 for frame in video_in.write(&p).unwrap() {
-                    video_out
-                        .write(Packet {
-                            data: &frame.data,
-                            random_access_indicator,
-                            pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
-                            dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),
-                        })
+                    muxer
+                        .write(
+                            &mut video_out,
+                            Packet {
+                                data: frame.data.into(),
+                                random_access_indicator,
+                                pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
+                                dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),
+                            },
+                        )
                         .unwrap();
                     random_access_indicator = false;
                 }
