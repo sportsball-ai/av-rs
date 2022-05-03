@@ -1,4 +1,4 @@
-use super::{pes, ts, EncodeError};
+use super::EncodeError;
 use crate::muxer::{Muxer, Packet, Stream, StreamConfig, StreamState};
 use alloc::vec::Vec;
 use core2::io::Write;
@@ -156,6 +156,7 @@ impl<W: Write> InterleavingMuxer<W> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{pes, ts};
     use std::{fs::File, io::Read};
 
     #[test]
