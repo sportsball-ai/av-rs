@@ -2,20 +2,20 @@ use super::{pes, ts, EncodeError};
 use alloc::vec::Vec;
 use core2::io::Write;
 
-pub(crate) struct StreamState {
-    pub(crate) stream_type: u8,
-    pub(crate) pid: u16,
-    pub(crate) data: Vec<u8>,
+struct StreamState {
+    stream_type: u8,
+    pid: u16,
+    data: Vec<u8>,
 }
 
 pub struct Muxer<W> {
-    pub(crate) w: W,
-    pub(crate) next_packet_id: u16,
-    pub(crate) pcr_pid: u16,
-    pub(crate) did_write_headers: bool,
-    pub(crate) last_header_pcr: Option<u64>,
-    pub(crate) header_continuity_counter: u8,
-    pub(crate) streams: Vec<StreamState>,
+    w: W,
+    next_packet_id: u16,
+    pcr_pid: u16,
+    did_write_headers: bool,
+    last_header_pcr: Option<u64>,
+    header_continuity_counter: u8,
+    streams: Vec<StreamState>,
 }
 
 #[derive(Clone, Debug)]
@@ -198,10 +198,16 @@ pub struct Packet {
 }
 
 pub struct Stream {
-    pub(crate) packet_id: u16,
-    pub(crate) continuity_counter: u8,
-    pub(crate) stream_id: u8,
-    pub(crate) unbounded_data_length: bool,
+    packet_id: u16,
+    continuity_counter: u8,
+    stream_id: u8,
+    unbounded_data_length: bool,
+}
+
+impl Stream {
+    pub fn packet_id(&self) -> u16 {
+        self.packet_id
+    }
 }
 
 #[cfg(test)]

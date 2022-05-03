@@ -1,5 +1,5 @@
 use super::EncodeError;
-use crate::muxer::{Muxer, Packet, Stream, StreamConfig, StreamState};
+use crate::muxer::{Muxer, Packet, Stream, StreamConfig};
 use alloc::vec::Vec;
 use core2::io::Write;
 use std::collections::VecDeque;
@@ -20,15 +20,7 @@ pub struct InterleavingStream {
 
 impl<W: Write> InterleavingMuxer<W> {
     pub fn new(w: W, max_buffer_duration: Duration) -> Self {
-        let muxer = Muxer {
-            w,
-            next_packet_id: 0x100,
-            pcr_pid: 0,
-            last_header_pcr: None,
-            did_write_headers: false,
-            header_continuity_counter: 0,
-            streams: vec![],
-        };
+        let muxer = Muxer::new(w);
         Self {
             muxer,
             max_buffer_duration: (max_buffer_duration.as_millis() * 90) as u64,
@@ -38,23 +30,9 @@ impl<W: Write> InterleavingMuxer<W> {
     }
 
     pub fn add_stream(&mut self, config: StreamConfig) {
-        let packet_id = self.muxer.next_packet_id;
-        let stream_state = StreamState {
-            stream_type: config.stream_type,
-            pid: packet_id,
-            data: config.data,
-        };
-        self.muxer.next_packet_id += 1;
-        self.muxer.streams.push(stream_state);
-        self.muxer.pcr_pid = packet_id;
-        let internal_stream = Stream {
-            packet_id,
-            continuity_counter: 0,
-            stream_id: config.stream_id,
-            unbounded_data_length: config.unbounded_data_length,
-        };
+        let wrapper = self.muxer.new_stream(config);
         let interleaving_stream = InterleavingStream {
-            wrapper: internal_stream,
+            wrapper,
             buffered_packets: VecDeque::with_capacity(6),
             last_written_ts: 0,
         };
@@ -97,7 +75,7 @@ impl<W: Write> InterleavingMuxer<W> {
                     }
                 })
             {
-                let min_ts = self.min_ts_excluding(self.streams[index].wrapper.packet_id as usize);
+                let min_ts = self.min_ts_excluding(self.streams[index].wrapper.packet_id() as usize);
                 let stream = &mut self.streams[index];
                 min_ts_stream_index = index;
                 while let Some(p) = stream.buffered_packets.front() {
@@ -128,23 +106,23 @@ impl<W: Write> InterleavingMuxer<W> {
 
     fn write_packets_outside_buffer_duration(&mut self) -> Result<(), EncodeError> {
         let mut packets = vec![];
-        for stream in self.streams.iter_mut() {
+        for (stream_index, stream) in self.streams.iter_mut().enumerate() {
             while let Some(p) = stream.buffered_packets.front() {
                 let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
                 if self.largest_ts_in_buffer - ts > self.max_buffer_duration {
-                    packets.push((stream.wrapper.packet_id, stream.buffered_packets.pop_front().unwrap()));
+                    packets.push((stream_index, stream.buffered_packets.pop_front().unwrap()));
                 }
             }
         }
-        for (packet_id, packet) in packets {
-            self.write_packet(packet_id as usize, packet)?;
+        for (stream_index, packet) in packets {
+            self.write_packet(stream_index, packet)?;
         }
         Ok(())
     }
 
     fn min_ts_excluding(&self, packet_id: usize) -> u64 {
         let mut min_ts = u64::MAX;
-        for s in self.streams.iter().filter(|s| s.wrapper.packet_id as usize != packet_id) {
+        for s in self.streams.iter().filter(|s| s.wrapper.packet_id() as usize != packet_id) {
             if let Some(p) = s.buffered_packets.front() {
                 min_ts = min_ts.min(p.dts_90khz.or(p.pts_90khz).unwrap_or(0));
             }
