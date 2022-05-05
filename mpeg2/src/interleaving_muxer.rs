@@ -5,15 +5,15 @@ use core2::io::Write;
 use std::collections::VecDeque;
 use std::time::Duration;
 
-pub struct InterleavingMuxer<W> {
-    muxer: Muxer<W>,
-    max_buffer_duration: u64,
+pub struct InterleavingMuxer<W: Write> {
+    inner: Muxer<W>,
+    max_buffer_duration_90khz: u64,
     largest_ts_in_buffer: u64,
     streams: Vec<InterleavingStream>,
 }
 
 pub struct InterleavingStream {
-    wrapper: Stream,
+    inner: Stream,
     buffered_packets: VecDeque<Packet>,
     last_written_ts: u64,
 }
@@ -22,17 +22,17 @@ impl<W: Write> InterleavingMuxer<W> {
     pub fn new(w: W, max_buffer_duration: Duration) -> Self {
         let muxer = Muxer::new(w);
         Self {
-            muxer,
-            max_buffer_duration: (max_buffer_duration.as_millis() * 90) as u64,
+            inner: muxer,
+            max_buffer_duration_90khz: (max_buffer_duration.as_millis() * 90) as u64,
             largest_ts_in_buffer: 0,
             streams: vec![],
         }
     }
 
     pub fn add_stream(&mut self, config: StreamConfig) {
-        let wrapper = self.muxer.new_stream(config);
+        let inner = self.inner.new_stream(config);
         let interleaving_stream = InterleavingStream {
-            wrapper,
+            inner,
             buffered_packets: VecDeque::with_capacity(6),
             last_written_ts: 0,
         };
@@ -45,7 +45,7 @@ impl<W: Write> InterleavingMuxer<W> {
         let ts = p.dts_90khz.or(p.pts_90khz);
         // if all other streams have provided packets with timestamps after this packet, we can emit it now
         if self.min_ts_excluding(stream_index) > ts.unwrap_or(last_written_ts) {
-            self.write_packet(stream_index, p)?;
+            self.write_muxer_packet(stream_index, p)?;
             if let Some(t) = ts {
                 self.streams[stream_index].last_written_ts = t;
             }
@@ -71,26 +71,28 @@ impl<W: Write> InterleavingMuxer<W> {
                     if let Some(p) = s.buffered_packets.front() {
                         p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts)
                     } else {
-                        u64::MAX
+                        0
                     }
                 })
             {
-                let min_ts = self.min_ts_excluding(self.streams[index].wrapper.packet_id() as usize);
-                let stream = &mut self.streams[index];
-                min_ts_stream_index = index;
-                while let Some(p) = stream.buffered_packets.front() {
-                    let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
-                    if ts <= min_ts {
-                        packets.push(stream.buffered_packets.pop_front().unwrap());
-                        last_written_ts = ts;
-                    } else {
-                        break;
+                if !self.streams[index].buffered_packets.is_empty() {
+                    let others_min_ts = self.min_ts_excluding(index);
+                    let stream = &mut self.streams[index];
+                    min_ts_stream_index = index;
+                    while let Some(p) = stream.buffered_packets.front() {
+                        let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
+                        if ts <= others_min_ts {
+                            packets.push(stream.buffered_packets.pop_front().expect("there must be at least one packet to pop"));
+                            last_written_ts = ts;
+                        } else {
+                            break;
+                        }
                     }
                 }
             }
             if !packets.is_empty() {
                 for packet in packets {
-                    self.write_packet(min_ts_stream_index, packet)?;
+                    self.write_muxer_packet(min_ts_stream_index, packet)?;
                 }
                 self.streams[min_ts_stream_index].last_written_ts = last_written_ts;
             }
@@ -98,9 +100,9 @@ impl<W: Write> InterleavingMuxer<W> {
         Ok(())
     }
 
-    fn write_packet(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
-        let stream = &mut self.streams[stream_index].wrapper;
-        self.muxer.write(stream, p)?;
+    fn write_muxer_packet(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
+        let stream = &mut self.streams[stream_index].inner;
+        self.inner.write(stream, p)?;
         Ok(())
     }
 
@@ -109,25 +111,60 @@ impl<W: Write> InterleavingMuxer<W> {
         for (stream_index, stream) in self.streams.iter_mut().enumerate() {
             while let Some(p) = stream.buffered_packets.front() {
                 let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
-                if self.largest_ts_in_buffer - ts > self.max_buffer_duration {
-                    packets.push((stream_index, stream.buffered_packets.pop_front().unwrap()));
+                if self.largest_ts_in_buffer - ts > self.max_buffer_duration_90khz {
+                    packets.push((
+                        stream_index,
+                        ts,
+                        stream.buffered_packets.pop_front().expect("there must be at least one packet to pop"),
+                    ));
+                } else {
+                    break;
                 }
             }
         }
-        for (stream_index, packet) in packets {
-            self.write_packet(stream_index, packet)?;
+        for (stream_index, ts, packet) in packets {
+            self.write_muxer_packet(stream_index, packet)?;
+            self.streams[stream_index].last_written_ts = ts;
         }
         Ok(())
     }
 
-    fn min_ts_excluding(&self, packet_id: usize) -> u64 {
+    fn min_ts_excluding(&self, stream_id: usize) -> u64 {
         let mut min_ts = u64::MAX;
-        for s in self.streams.iter().filter(|s| s.wrapper.packet_id() as usize != packet_id) {
-            if let Some(p) = s.buffered_packets.front() {
-                min_ts = min_ts.min(p.dts_90khz.or(p.pts_90khz).unwrap_or(0));
+        for (_, stream) in self.streams.iter().enumerate().filter(|&(index, _)| index != stream_id) {
+            if let Some(p) = stream.buffered_packets.front() {
+                min_ts = min_ts.min(p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts));
+            } else {
+                min_ts = 0;
+                break;
             }
         }
         min_ts
+    }
+
+    pub fn flush(&mut self, ignore_error: bool) -> Result<(), EncodeError> {
+        let mut packets = vec![];
+        self.streams.iter_mut().enumerate().for_each(|(stream_index, stream)| {
+            while let Some(p) = stream.buffered_packets.pop_front() {
+                packets.push((stream_index, stream.last_written_ts, p));
+            }
+        });
+        packets.sort_unstable_by_key(|(_, ts, p)| p.dts_90khz.or(p.pts_90khz).unwrap_or(*ts));
+        for (stream_index, _, packet) in packets {
+            match self.write_muxer_packet(stream_index, packet) {
+                Err(e) if !ignore_error => {
+                    return Err(e);
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<W: Write> Drop for InterleavingMuxer<W> {
+    fn drop(&mut self) {
+        self.flush(true).expect("Errors are ignored when flushing the buffered packets");
     }
 }
 
@@ -137,53 +174,117 @@ mod test {
     use crate::{pes, ts};
     use std::{fs::File, io::Read};
 
+    fn get_test_stream_data() -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut f = File::open("src/testdata/pro-bowl.ts").unwrap();
+        f.read_to_end(&mut buf).unwrap();
+        buf
+    }
+
+    fn get_pes_packets_from_byte_stream<'a>(data_in: &'a Vec<u8>, num_of_pes_packets: usize, included_packet_ids: &'a [u16], sort: bool) -> Vec<pes::Packet<'a>> {
+        let ts_packets = ts::decode_packets(data_in).unwrap();
+        let mut pes_stream = pes::Stream::new();
+
+        let mut pes_packets = ts_packets
+            .into_iter()
+            .filter(|p| included_packet_ids.contains(&p.packet_id))
+            .flat_map(|p| pes_stream.write(&p).unwrap())
+            .take(num_of_pes_packets - 1)
+            .collect::<Vec<pes::Packet>>();
+        pes_packets.extend(pes_stream.flush().into_iter());
+        if sort {
+            pes_packets.sort_unstable_by_key(|p| {
+                let h = p.header.optional_header.as_ref().unwrap();
+                h.dts.or(h.pts).unwrap()
+            });
+        }
+        pes_packets
+    }
+
+    fn convert_pes_packet_to_muxer_packet(pes_packet: pes::Packet, random_access_indicator: bool) -> Packet {
+        Packet {
+            data: pes_packet.data.into(),
+            random_access_indicator,
+            pts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.pts),
+            dts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.dts),
+        }
+    }
+
+    fn verify_pes_packets_ts_in_sorted_order(pes_packets: &Vec<pes::Packet>) {
+        for i in 1..pes_packets.len() {
+            let h_prev = pes_packets[i - 1].header.optional_header.as_ref().unwrap();
+            let h_cur = pes_packets[i].header.optional_header.as_ref().unwrap();
+            assert!(h_prev.dts.or(h_prev.pts).unwrap() <= h_cur.dts.or(h_cur.pts).unwrap())
+        }
+    }
+
     #[test]
-    fn test_muxer() {
-        let data_in = {
-            let mut buf = Vec::new();
-            let mut f = File::open("src/testdata/pro-bowl.ts").unwrap();
-            f.read_to_end(&mut buf).unwrap();
-            buf
-        };
-        let packets_in = ts::decode_packets(&data_in).unwrap();
-        let mut video_in = pes::Stream::new();
+    fn test_single_stream() {
+        let num_of_pes_packets: usize = 20;
+        let data_in: Vec<u8> = get_test_stream_data();
+        let pes_packets = get_pes_packets_from_byte_stream(&data_in, num_of_pes_packets, &[0x100], true);
 
         let mut data_out = Vec::new();
         {
-            let mut interleaving_muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(10));
-            interleaving_muxer.add_stream(StreamConfig {
+            let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(0));
+            muxer.add_stream(StreamConfig {
                 stream_id: 0xe0,
                 stream_type: 0x1b,
                 data: vec![],
                 unbounded_data_length: true,
             });
             let mut random_access_indicator = true;
-
-            for p in packets_in {
-                if p.packet_id != 0x0100 {
-                    continue;
-                }
-
-                for frame in video_in.write(&p).unwrap() {
-                    interleaving_muxer
-                        .write(
-                            0,
-                            Packet {
-                                data: frame.data.into(),
-                                random_access_indicator,
-                                pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
-                                dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),
-                            },
-                        )
-                        .unwrap();
-                    random_access_indicator = false;
-                }
+            for pes_packet in pes_packets {
+                muxer.write(0, convert_pes_packet_to_muxer_packet(pes_packet, random_access_indicator)).unwrap();
+                random_access_indicator = false;
             }
+            let stream = &muxer.streams[0];
+            assert!(stream.buffered_packets.is_empty());
+            assert!(stream.last_written_ts > 0);
         }
 
-        assert!(data_out.len() >= 8000000);
+        let reconstructed_pes_packets = get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets, &[0x100], false);
+        assert_eq!(reconstructed_pes_packets.len(), num_of_pes_packets);
+        verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets);
+    }
 
-        // uncomment this to write to a file for testing with other programs
-        // File::create("tmp.ts").unwrap().write_all(&data_out).unwrap();
+    #[test]
+    fn test_multiple_out_of_sync_streams() {
+        let num_of_pes_packets_per_stream: usize = 6;
+        let num_of_streams: usize = 3;
+        let data_in = get_test_stream_data();
+        let pes_packets = get_pes_packets_from_byte_stream(&data_in, num_of_pes_packets_per_stream * num_of_streams, &[0x100], true);
+
+        let mut pes_packets_array = [VecDeque::new(), VecDeque::new(), VecDeque::new()];
+        for (i, pes_packet) in pes_packets.into_iter().enumerate() {
+            pes_packets_array[i % 3].push_back(pes_packet);
+        }
+
+        let mut data_out = Vec::new();
+        {
+            let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(30));
+            for i in 0..3 {
+                muxer.add_stream(StreamConfig {
+                    stream_id: 0xe0 + i,
+                    stream_type: 0x1b + i,
+                    data: vec![],
+                    unbounded_data_length: true,
+                });
+            }
+            let mut random_access_indicator = true;
+            for _ in 0..num_of_pes_packets_per_stream {
+                for i in (0..3).rev() {
+                    let pes_packet = pes_packets_array[i].pop_front().unwrap();
+                    muxer.write(i, convert_pes_packet_to_muxer_packet(pes_packet, random_access_indicator)).unwrap();
+                }
+                random_access_indicator = false;
+            }
+            muxer.flush(false).unwrap();
+            assert!(muxer.streams.iter().all(|s| s.buffered_packets.is_empty()));
+            assert!(muxer.streams.iter().all(|s| s.last_written_ts > 0));
+        }
+        let reconstructed_pes_packets = get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets_per_stream * num_of_streams, &[0x100, 0x101, 0x102],false);
+        assert_eq!(reconstructed_pes_packets.len(), num_of_pes_packets_per_stream * num_of_streams);
+        verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets);
     }
 }
