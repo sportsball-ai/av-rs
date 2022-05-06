@@ -135,9 +135,9 @@ impl<W: Write> InterleavingMuxer<W> {
 
     fn write_muxer_packet(&mut self, stream_index: usize, mut p: Packet) -> Result<(), EncodeError> {
         if let Some(ref mut pdt) = p.dts_90khz {
-            *pdt = *pdt & TS_33BIT_MASK;
+            *pdt &= TS_33BIT_MASK;
         } else if let Some(ref mut pts) = p.pts_90khz {
-            *pts = *pts & TS_33BIT_MASK;
+            *pts &= TS_33BIT_MASK;
         }
         let stream = &mut self.streams[stream_index].inner;
         self.inner.write(stream, p)?;
