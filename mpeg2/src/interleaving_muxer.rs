@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 const TS_33BIT_MASK: u64 = 0x1FFFFFFFF;
+const TS_ROLLOVER_THREAD: u64 = 1 << 20;
 
 pub struct InterleavingMuxer<W: Write> {
     inner: Muxer<W>,
@@ -56,14 +57,14 @@ impl<W: Write> InterleavingMuxer<W> {
             let largest_ts = buffered_packets
                 .back()
                 .map_or(s.last_written_ts, |p| p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts));
-            if *dts < largest_ts {
+            if *dts < largest_ts && largest_ts - *dts > TS_ROLLOVER_THREAD {
                 *dts |= self.get_most_significant_bit(largest_ts | TS_33BIT_MASK) << 1;
             }
         } else if let Some(ref mut pts) = packet.pts_90khz {
             let largest_ts = buffered_packets
                 .back()
                 .map_or(s.last_written_ts, |p| p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts));
-            if *pts < largest_ts {
+            if *pts < largest_ts && largest_ts - *pts > TS_ROLLOVER_THREAD {
                 *pts |= self.get_most_significant_bit(largest_ts | TS_33BIT_MASK) << 1;
             }
         }
@@ -261,7 +262,6 @@ mod test {
         h.dts.or(h.pts).unwrap()
     }
 
-
     #[test]
     fn test_single_stream() {
         let num_of_pes_packets: usize = 20;
@@ -408,7 +408,15 @@ mod test {
         let pes_packets = get_pes_packets_from_byte_stream(&data_in, num_of_pes_packets_per_stream * num_of_streams, &[0x100], true);
 
         let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
-        for (i, pes_packet) in pes_packets.into_iter().enumerate() {
+        for (i, mut pes_packet) in pes_packets.into_iter().enumerate() {
+            if i >= num_of_pes_packets_per_stream {
+                let h = pes_packet.header.optional_header.as_mut().unwrap();
+                if let Some(ref mut dts) = h.dts {
+                    *dts |= TS_ROLLOVER_THREAD << 1;
+                } else if let Some(ref mut pts) = h.pts {
+                    *pts |= TS_ROLLOVER_THREAD << 1;
+                }
+            }
             pes_packets_array[i % num_of_streams].push_back(pes_packet);
         }
 
