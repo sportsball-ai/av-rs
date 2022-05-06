@@ -317,11 +317,11 @@ mod test {
             }
             let mut random_access_indicator = true;
             for n in 0..num_of_pes_packets_per_stream {
-                for i in 0..num_of_streams {
+                for (i, pes_packets) in pes_packets_array.iter_mut().enumerate() {
                     if i == 0 && n >= 3 {
                         continue;
                     }
-                    let pes_packet = pes_packets_array[i].pop_front().unwrap();
+                    let pes_packet = pes_packets.pop_front().unwrap();
                     muxer.write(i, convert_pes_packet_to_muxer_packet(pes_packet, random_access_indicator)).unwrap();
                 }
                 random_access_indicator = false;
@@ -420,8 +420,8 @@ mod test {
             pes_packets_array[i % num_of_streams].push_back(pes_packet);
         }
 
-        for i in 0..=1 {
-            reorder_pes_packets(&mut pes_packets_array[i], num_of_pes_packets_per_stream / 2);
+        for pes_packets in &mut pes_packets_array {
+            reorder_pes_packets(pes_packets, num_of_pes_packets_per_stream / 2);
         }
 
         let mut data_out = Vec::new();
