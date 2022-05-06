@@ -5,6 +5,8 @@ use core2::io::Write;
 use std::collections::VecDeque;
 use std::time::Duration;
 
+const TS_33BIT_MASK: u64 = 0x1FFFFFFFF;
+
 pub struct InterleavingMuxer<W: Write> {
     inner: Muxer<W>,
     max_buffer_duration_90khz: u64,
@@ -39,7 +41,37 @@ impl<W: Write> InterleavingMuxer<W> {
         self.streams.push(interleaving_stream);
     }
 
-    pub fn write(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
+    #[inline]
+    fn get_most_significant_bit(&self, mut n: u64) -> u64 {
+        while n > 1 && (n & (n - 1) != 0) {
+            n &= n - 1;
+        }
+        n
+    }
+
+    fn handle_ts_rollover(&mut self, stream_index: usize, packet: &mut Packet) {
+        let s = &self.streams[stream_index];
+        let buffered_packets = &s.buffered_packets;
+        if let Some(ref mut dts) = packet.dts_90khz {
+            let largest_ts = buffered_packets
+                .back()
+                .map_or(s.last_written_ts, |p| p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts));
+            if *dts < largest_ts {
+                *dts |= self.get_most_significant_bit(largest_ts | TS_33BIT_MASK) << 1;
+            }
+        } else if let Some(ref mut pts) = packet.pts_90khz {
+            let largest_ts = buffered_packets
+                .back()
+                .map_or(s.last_written_ts, |p| p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts));
+            if *pts < largest_ts {
+                *pts |= self.get_most_significant_bit(largest_ts | TS_33BIT_MASK) << 1;
+            }
+        }
+    }
+
+    pub fn write(&mut self, stream_index: usize, mut p: Packet) -> Result<(), EncodeError> {
+        self.handle_ts_rollover(stream_index, &mut p);
+
         let last_written_ts = self.streams[stream_index].last_written_ts;
         // if the packet doesn't have a dts, use the pts. if it doesn't have a pts, consider it to have the same timestamp as the last packet
         let ts = p.dts_90khz.or(p.pts_90khz);
@@ -100,7 +132,12 @@ impl<W: Write> InterleavingMuxer<W> {
         Ok(())
     }
 
-    fn write_muxer_packet(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
+    fn write_muxer_packet(&mut self, stream_index: usize, mut p: Packet) -> Result<(), EncodeError> {
+        if let Some(ref mut pdt) = p.dts_90khz {
+            *pdt = *pdt & TS_33BIT_MASK;
+        } else if let Some(ref mut pts) = p.pts_90khz {
+            *pts = *pts & TS_33BIT_MASK;
+        }
         let stream = &mut self.streams[stream_index].inner;
         self.inner.write(stream, p)?;
         Ok(())
@@ -143,12 +180,16 @@ impl<W: Write> InterleavingMuxer<W> {
     }
 
     pub fn flush(&mut self, ignore_error: bool) -> Result<(), EncodeError> {
+        self.largest_ts_in_buffer = 0;
+
         let mut packets = vec![];
         self.streams.iter_mut().enumerate().for_each(|(stream_index, stream)| {
             while let Some(p) = stream.buffered_packets.pop_front() {
                 packets.push((stream_index, stream.last_written_ts, p));
             }
+            stream.last_written_ts = 0;
         });
+
         packets.sort_unstable_by_key(|(_, ts, p)| p.dts_90khz.or(p.pts_90khz).unwrap_or(*ts));
         for (stream_index, _, packet) in packets {
             match self.write_muxer_packet(stream_index, packet) {
@@ -181,7 +222,7 @@ mod test {
         buf
     }
 
-    fn get_pes_packets_from_byte_stream<'a>(data_in: &'a Vec<u8>, num_of_pes_packets: usize, included_packet_ids: &'a [u16], sort: bool) -> Vec<pes::Packet<'a>> {
+    fn get_pes_packets_from_byte_stream<'a>(data_in: &'a [u8], num_of_pes_packets: usize, included_packet_ids: &'a [u16], sort: bool) -> Vec<pes::Packet<'a>> {
         let ts_packets = ts::decode_packets(data_in).unwrap();
         let mut pes_stream = pes::Stream::new();
 
@@ -193,10 +234,7 @@ mod test {
             .collect::<Vec<pes::Packet>>();
         pes_packets.extend(pes_stream.flush().into_iter());
         if sort {
-            pes_packets.sort_unstable_by_key(|p| {
-                let h = p.header.optional_header.as_ref().unwrap();
-                h.dts.or(h.pts).unwrap()
-            });
+            pes_packets.sort_unstable_by_key(get_packet_ts);
         }
         pes_packets
     }
@@ -210,13 +248,19 @@ mod test {
         }
     }
 
-    fn verify_pes_packets_ts_in_sorted_order(pes_packets: &Vec<pes::Packet>) {
+    fn verify_pes_packets_ts_in_sorted_order(pes_packets: &[pes::Packet]) {
         for i in 1..pes_packets.len() {
             let h_prev = pes_packets[i - 1].header.optional_header.as_ref().unwrap();
             let h_cur = pes_packets[i].header.optional_header.as_ref().unwrap();
             assert!(h_prev.dts.or(h_prev.pts).unwrap() <= h_cur.dts.or(h_cur.pts).unwrap())
         }
     }
+
+    fn get_packet_ts(p: &pes::Packet) -> u64 {
+        let h = p.header.optional_header.as_ref().unwrap();
+        h.dts.or(h.pts).unwrap()
+    }
+
 
     #[test]
     fn test_single_stream() {
@@ -249,8 +293,58 @@ mod test {
     }
 
     #[test]
+    fn test_one_stream_stop_sending_data() {
+        let num_of_pes_packets_per_stream: usize = 30;
+        let num_of_streams: usize = 2;
+        let data_in = get_test_stream_data();
+        let pes_packets = get_pes_packets_from_byte_stream(&data_in, num_of_pes_packets_per_stream * num_of_streams, &[0x100], true);
+
+        let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
+        for (i, pes_packet) in pes_packets.into_iter().enumerate() {
+            pes_packets_array[i % num_of_streams as usize].push_back(pes_packet);
+        }
+
+        let mut data_out = Vec::new();
+        {
+            let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(20));
+            for i in 0..num_of_streams {
+                muxer.add_stream(StreamConfig {
+                    stream_id: 0xe0 + i as u8,
+                    stream_type: 0x1b + i as u8,
+                    data: vec![],
+                    unbounded_data_length: true,
+                });
+            }
+            let mut random_access_indicator = true;
+            for n in 0..num_of_pes_packets_per_stream {
+                for i in 0..num_of_streams {
+                    if i == 0 && n >= 3 {
+                        continue;
+                    }
+                    let pes_packet = pes_packets_array[i].pop_front().unwrap();
+                    muxer.write(i, convert_pes_packet_to_muxer_packet(pes_packet, random_access_indicator)).unwrap();
+                }
+                random_access_indicator = false;
+            }
+            assert!(muxer.streams.iter().all(|s| s.last_written_ts > 0));
+            assert!(muxer.largest_ts_in_buffer > 0);
+
+            muxer.flush(false).unwrap();
+            assert!(muxer.streams.iter().all(|s| s.buffered_packets.is_empty()));
+            assert!(muxer.streams.iter().all(|s| s.last_written_ts == 0));
+            assert_eq!(muxer.largest_ts_in_buffer, 0);
+        }
+        let reconstructed_pes_packets =
+            get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets_per_stream * num_of_streams, &[0x100, 0x101, 0x102], false);
+
+        //
+        assert_eq!(reconstructed_pes_packets.len(), num_of_pes_packets_per_stream + 3);
+        verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets);
+    }
+
+    #[test]
     fn test_multiple_out_of_sync_streams() {
-        let num_of_pes_packets_per_stream: usize = 6;
+        let num_of_pes_packets_per_stream: usize = 20;
         let num_of_streams: usize = 3;
         let data_in = get_test_stream_data();
         let pes_packets = get_pes_packets_from_byte_stream(&data_in, num_of_pes_packets_per_stream * num_of_streams, &[0x100], true);
@@ -279,12 +373,83 @@ mod test {
                 }
                 random_access_indicator = false;
             }
+            assert!(muxer.streams.iter().all(|s| s.last_written_ts > 0));
+            assert!(muxer.largest_ts_in_buffer > 0);
+
             muxer.flush(false).unwrap();
             assert!(muxer.streams.iter().all(|s| s.buffered_packets.is_empty()));
-            assert!(muxer.streams.iter().all(|s| s.last_written_ts > 0));
+            assert!(muxer.streams.iter().all(|s| s.last_written_ts == 0));
+            assert_eq!(muxer.largest_ts_in_buffer, 0);
         }
-        let reconstructed_pes_packets = get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets_per_stream * num_of_streams, &[0x100, 0x101, 0x102],false);
+        let reconstructed_pes_packets =
+            get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets_per_stream * num_of_streams, &[0x100, 0x101, 0x102], false);
         assert_eq!(reconstructed_pes_packets.len(), num_of_pes_packets_per_stream * num_of_streams);
         verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets);
+    }
+
+    #[test]
+    fn test_timestamp_rollover_in_multiple_streams() {
+        fn reverse_vec(pes_packets: &mut VecDeque<pes::Packet>, mut from: usize, mut to: usize) {
+            while from < to {
+                pes_packets.swap(from, to);
+                from += 1;
+                to -= 1;
+            }
+        }
+        fn reorder_pes_packets(pes_packets: &mut VecDeque<pes::Packet>, pivot: usize) {
+            reverse_vec(pes_packets, 0, pivot - 1);
+            reverse_vec(pes_packets, pivot, pes_packets.len() - 1);
+            reverse_vec(pes_packets, 0, pes_packets.len() - 1);
+        }
+
+        let num_of_pes_packets_per_stream: usize = 20;
+        let num_of_streams: usize = 2;
+        let data_in = get_test_stream_data();
+        let pes_packets = get_pes_packets_from_byte_stream(&data_in, num_of_pes_packets_per_stream * num_of_streams, &[0x100], true);
+
+        let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
+        for (i, pes_packet) in pes_packets.into_iter().enumerate() {
+            pes_packets_array[i % num_of_streams].push_back(pes_packet);
+        }
+
+        for i in 0..=1 {
+            reorder_pes_packets(&mut pes_packets_array[i], num_of_pes_packets_per_stream / 2);
+        }
+
+        let mut data_out = Vec::new();
+        {
+            let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(300));
+            for i in 0..num_of_streams {
+                muxer.add_stream(StreamConfig {
+                    stream_id: 0xe0 + i as u8,
+                    stream_type: 0x1b + i as u8,
+                    data: vec![],
+                    unbounded_data_length: true,
+                });
+            }
+            let mut random_access_indicator = true;
+            for _ in 0..num_of_pes_packets_per_stream {
+                for i in (0..num_of_streams).rev() {
+                    let pes_packet = pes_packets_array[i].pop_front().unwrap();
+                    muxer.write(i, convert_pes_packet_to_muxer_packet(pes_packet, random_access_indicator)).unwrap();
+                }
+                random_access_indicator = false;
+            }
+            assert!(muxer.streams.iter().all(|s| s.last_written_ts > TS_33BIT_MASK));
+            assert!(muxer.largest_ts_in_buffer > TS_33BIT_MASK);
+
+            muxer.flush(false).unwrap();
+            assert!(muxer.streams.iter().all(|s| s.buffered_packets.is_empty()));
+            assert!(muxer.streams.iter().all(|s| s.last_written_ts == 0));
+            assert_eq!(muxer.largest_ts_in_buffer, 0);
+        }
+        let reconstructed_pes_packets =
+            get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets_per_stream * num_of_streams, &[0x100, 0x101, 0x102], false);
+        assert_eq!(reconstructed_pes_packets.len(), num_of_pes_packets_per_stream * num_of_streams);
+
+        verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets[0..num_of_pes_packets_per_stream]);
+        verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets[num_of_pes_packets_per_stream..]);
+
+        assert!(get_packet_ts(reconstructed_pes_packets.last().unwrap()) < get_packet_ts(reconstructed_pes_packets.first().unwrap()));
     }
 }
