@@ -1,21 +1,21 @@
 use super::*;
 use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoderOutput};
-use core_foundation::{Boolean, CFType, Dictionary, MutableDictionary, OSStatus};
+use core_foundation::{Boolean, CFType, Dictionary, MutableDictionary, Number, OSStatus};
 use core_media::{Time, VideoCodecType};
 use core_video::{PixelBuffer, PixelBufferPlane};
 use std::pin::Pin;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub enum VideoEncoderCodec {
-    H264,
-    H265,
+    H264 { bitrate: Option<u32> },
+    H265 { bitrate: Option<u32> },
 }
 
-impl From<VideoEncoderCodec> for VideoCodecType {
-    fn from(c: VideoEncoderCodec) -> Self {
+impl From<&VideoEncoderCodec> for VideoCodecType {
+    fn from(c: &VideoEncoderCodec) -> Self {
         match c {
-            VideoEncoderCodec::H264 => VideoCodecType::H264,
-            VideoEncoderCodec::H265 => VideoCodecType::Hevc,
+            VideoEncoderCodec::H264 { .. } => VideoCodecType::H264,
+            VideoEncoderCodec::H265 { .. } => VideoCodecType::Hevc,
         }
     }
 }
@@ -24,6 +24,7 @@ impl From<VideoEncoderCodec> for VideoCodecType {
 pub struct VideoEncoderConfig {
     pub width: u16,
     pub height: u16,
+    pub fps: f64,
     pub codec: VideoEncoderCodec,
     pub input_format: VideoEncoderInputFormat,
 }
@@ -38,11 +39,12 @@ pub enum VideoEncoderInputFormat {
 pub struct VideoEncoder<F: Send> {
     sess: CompressionSession<Pin<Box<F>>>,
     config: VideoEncoderConfig,
+    frame_count: u64,
 }
 
 impl<F: Send> VideoEncoder<F> {
     pub fn new(config: VideoEncoderConfig) -> Result<Self, OSStatus> {
-        let mut encoder_specification = MutableDictionary::default();
+        let mut encoder_specification = MutableDictionary::new_cf_type();
         unsafe {
             encoder_specification.set_value(
                 sys::kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as _,
@@ -52,16 +54,45 @@ impl<F: Send> VideoEncoder<F> {
                 sys::kVTCompressionPropertyKey_AllowFrameReordering as _,
                 Boolean::from(false).cf_type_ref() as _,
             );
+            encoder_specification.set_value(sys::kVTCompressionPropertyKey_RealTime as _, Boolean::from(true).cf_type_ref() as _);
+            encoder_specification.set_value(
+                sys::kVTCompressionPropertyKey_ExpectedFrameRate as _,
+                Number::from(config.fps).cf_type_ref() as _,
+            );
+        }
+
+        match &config.codec {
+            VideoEncoderCodec::H264 { bitrate } => {
+                if let Some(bitrate) = bitrate {
+                    unsafe {
+                        encoder_specification.set_value(
+                            sys::kVTCompressionPropertyKey_AverageBitRate as _,
+                            Number::from(*bitrate as i64).cf_type_ref() as _,
+                        );
+                    }
+                }
+            }
+            VideoEncoderCodec::H265 { bitrate } => {
+                if let Some(bitrate) = bitrate {
+                    unsafe {
+                        encoder_specification.set_value(
+                            sys::kVTCompressionPropertyKey_AverageBitRate as _,
+                            Number::from(*bitrate as i64).cf_type_ref() as _,
+                        );
+                    }
+                }
+            }
         }
 
         Ok(Self {
             sess: CompressionSession::new(CompressionSessionConfig {
                 width: config.width as _,
                 height: config.height as _,
-                codec_type: config.codec.into(),
+                codec_type: (&config.codec).into(),
                 encoder_specification: Some(encoder_specification.into()),
             })?,
             config,
+            frame_count: 0,
         })
     }
 
@@ -88,8 +119,8 @@ impl<F: Send> VideoEncoder<F> {
 
                 let format_desc = frame.sample_buffer.format_description().expect("all frames should have format descriptions");
                 let prefix_len = match self.config.codec {
-                    VideoEncoderCodec::H264 => format_desc.h264_parameter_set_at_index(0)?.nal_unit_header_length,
-                    VideoEncoderCodec::H265 => format_desc.hevc_parameter_set_at_index(0)?.nal_unit_header_length,
+                    VideoEncoderCodec::H264 { .. } => format_desc.h264_parameter_set_at_index(0)?.nal_unit_header_length,
+                    VideoEncoderCodec::H265 { .. } => format_desc.hevc_parameter_set_at_index(0)?.nal_unit_header_length,
                 };
 
                 let mut data = Vec::with_capacity(avcc_data.len() + 100);
@@ -97,14 +128,14 @@ impl<F: Send> VideoEncoder<F> {
                 // if this is a keyframe, prepend parameter sets
                 if is_keyframe {
                     match self.config.codec {
-                        VideoEncoderCodec::H264 => {
+                        VideoEncoderCodec::H264 { .. } => {
                             for i in 0..2 {
                                 let ps = format_desc.h264_parameter_set_at_index(i)?;
                                 data.extend_from_slice(&[0, 0, 0, 1]);
                                 data.extend_from_slice(ps.data);
                             }
                         }
-                        VideoEncoderCodec::H265 => {
+                        VideoEncoderCodec::H265 { .. } => {
                             for i in 0..3 {
                                 let ps = format_desc.hevc_parameter_set_at_index(i)?;
                                 data.extend_from_slice(&[0, 0, 0, 1]);
@@ -197,7 +228,14 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
                 },
             )?
         };
-        self.sess.encode_frame(pixel_buffer.into(), Time::default(), input)?;
+
+        let fps_den = if self.config.fps.fract() == 0.0 { 1000 } else { 1001 };
+        let fps_num = (self.config.fps * fps_den as f64).round() as i64;
+
+        let frame_number = self.frame_count;
+        self.frame_count += 1;
+        self.sess
+            .encode_frame(pixel_buffer.into(), Time::new((fps_den * frame_number) as _, fps_num as _), input)?;
         self.next_video_encoder_trait_frame()
     }
 
@@ -226,6 +264,7 @@ mod test {
         let mut encoder = VideoEncoder::new(VideoEncoderConfig {
             width: 1920,
             height: 1080,
+            fps: 29.97,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
         })
@@ -270,11 +309,11 @@ mod test {
 
     #[test]
     fn test_video_encoder_h264() {
-        test_video_encoder(VideoEncoderCodec::H264);
+        test_video_encoder(VideoEncoderCodec::H264 { bitrate: Some(10000) });
     }
 
     #[test]
     fn test_video_encoder_h265() {
-        test_video_encoder(VideoEncoderCodec::H265);
+        test_video_encoder(VideoEncoderCodec::H265 { bitrate: Some(10000) });
     }
 }

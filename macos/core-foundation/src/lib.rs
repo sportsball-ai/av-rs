@@ -24,6 +24,9 @@ pub use boolean::*;
 pub mod dictionary;
 pub use dictionary::*;
 
+pub mod number;
+pub use number::*;
+
 #[macro_export]
 macro_rules! trait_impls {
     ($e:ident) => {

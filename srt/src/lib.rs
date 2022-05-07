@@ -1,6 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 
+use srt_sys as sys;
 use std::{
     ffi::CStr,
     fmt,
@@ -18,8 +19,6 @@ mod async_lib;
 mod epoll_reactor;
 #[cfg(feature = "async")]
 pub use async_lib::*;
-
-mod sys;
 
 #[derive(Debug)]
 pub enum Error {

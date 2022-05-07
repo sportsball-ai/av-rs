@@ -1,0 +1,171 @@
+//###############################################################################
+
+cc_library_shared {
+	name: "libxcoder",
+    srcs: [
+        "ni_log.c",
+        "ni_nvme.c",
+        "ni_device_api_priv.c",
+        "ni_device_api.c",
+        "ni_util.c",
+        "ni_av_codec.c",
+        "ni_bitstream.c",
+        "ni_rsrc_priv.cpp",
+        "ni_rsrc_api.cpp",
+    ],
+	
+	vendor_available: true,
+	vndk: {
+        enabled: true,
+    },
+//	proprietary: true,
+    //PRODUCT_COPY_FILES += $(TARGET_OUT)/lib64/libxcoder.so:/usr/local/lib64/
+    //PRODUCT_COPY_FILES += ni_rsrc_api_android.h:/usr/local/include/
+
+    local_include_dirs: [""],
+
+    cflags: [
+        "-Werror",
+        "-Wno-missing-field-initializers",
+        "-Wno-missing-braces",
+        "-Wno-sign-compare",
+        "-Wno-return-type",
+        "-Wno-pointer-arith",
+        "-Wno-pointer-sign",
+        "-Wno-enum-conversion",
+        "-Wno-unused-parameter",
+        "-Wno-pointer-bool-conversion",
+        "-Wno-tautological-pointer-compare",
+        "-Wno-parentheses",
+        "-Wno-tautological-compare",
+        "-Wno-absolute-value",
+        "-Wno-format",
+		"-Wno-macro-redefined",
+    ] + [
+        "-D_ANDROID",
+        "-DXCODER_IO_RW_ENABLED",
+        "-D_FILE_OFFSET_BITS=64",
+    ],
+
+    shared_libs: [
+        "libutils",
+        "libbinder",
+		"libhidlbase",
+		"android.hardware.nidec@1.0",
+        "libcutils",
+        "liblog",
+    ],
+		
+	sanitize: {
+        misc_undefined: [
+            "signed-integer-overflow",
+        ],
+        cfi: true,
+        diag: {
+            cfi: true,
+        },
+    },
+
+    ldflags: ["-Wl,-Bsymbolic"],
+    clang: true,
+
+}
+
+filegroup {
+	name: "commonfile",
+	srcs: ["common/ISharedBuffer.cpp"],
+}
+
+//###############################################################################
+
+
+
+cc_binary {
+	proprietary: true,
+    srcs: ["ni_device_test.c"],
+
+    local_include_dirs: [""],
+
+    cflags: [
+        "-Werror",
+        "-Wno-missing-field-initializers",
+        "-Wno-missing-braces",
+        "-Wno-sign-compare",
+        "-Wno-return-type",
+        "-Wno-pointer-arith",
+        "-Wno-pointer-sign",
+        "-Wno-enum-conversion",
+        "-Wno-unused-parameter",
+        "-Wno-pointer-bool-conversion",
+        "-Wno-tautological-pointer-compare",
+        "-Wno-parentheses",
+        "-Wno-tautological-compare",
+        "-Wno-absolute-value",
+        "-Wno-sometimes-uninitialized",
+        "-Wno-unused-variable",
+    ] + [
+        "-D_ANDROID",
+        "-DXCODER_IO_RW_ENABLED",
+		"-pie",
+		"-fPIE",
+    ],
+	
+
+    shared_libs: [
+        "libutils",
+        "libcutils",
+        "liblog",
+        "libxcoder",
+    ],
+
+    name: "xcoder",
+
+    clang: true,
+
+}
+
+//###############################################################################
+
+cc_binary {
+	proprietary: true,
+    srcs: ["ni_rsrc_mon.c"],
+
+    local_include_dirs: [""],
+
+    cflags: [
+        "-Werror",
+        "-Wno-missing-field-initializers",
+        "-Wno-missing-braces",
+        "-Wno-sign-compare",
+        "-Wno-return-type",
+        "-Wno-pointer-arith",
+        "-Wno-pointer-sign",
+        "-Wno-enum-conversion",
+        "-Wno-unused-parameter",
+        "-Wno-pointer-bool-conversion",
+        "-Wno-tautological-pointer-compare",
+        "-Wno-parentheses",
+        "-Wno-tautological-compare",
+        "-Wno-absolute-value",
+        "-Wno-sometimes-uninitialized",
+    ] + [
+        "-D_ANDROID",
+        "-DXCODER_IO_RW_ENABLED",
+        "-D_FILE_OFFSET_BITS=64",
+    ],
+
+    shared_libs: [
+        "libutils",
+        "libbinder",
+        "libcutils",
+        "liblog",
+        "libxcoder",
+    ],
+
+    name: "ni_rsrc_mon",
+
+    clang: true,
+
+}
+
+//###############################################################################

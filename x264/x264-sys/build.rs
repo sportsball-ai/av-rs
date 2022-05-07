@@ -4,7 +4,13 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rustc-link-lib=x264");
+    if let Ok(info) = pkg_config::probe_library("x264") {
+        for path in info.link_paths {
+            println!("cargo:rustc-link-search={}", path.display());
+        }
+    }
+
+    println!("cargo:rustc-link-lib=static=x264");
 
     cc::Build::new().file("src/lib.c").compile("x264-sys");
 
