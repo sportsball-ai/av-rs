@@ -2,7 +2,7 @@ use simple_error::{bail, SimpleError};
 
 use crate::{strcpy_to_arr_i8, sys::*};
 
-pub const MAX_ENC_PARAMS: usize = 3;
+pub const MAX_ENC_PARAMS: usize = 6;
 
 const ENC_OPTIONS_PARAM_NAME: &[u8] = b"enc_options\0";
 const LATENCY_LOGGING_PARAM_NAME: &[u8] = b"latency_logging\0";
@@ -94,7 +94,7 @@ pub fn xlnx_create_xma_enc_props(
 
     strcpy_to_arr_i8(&mut xma_enc_props.hwvendor_string, "MPSoC")?;
     xma_enc_props.hwencoder_type = XmaEncoderType_XMA_MULTI_ENCODER_TYPE;
-    xma_enc_props.param_cnt = MAX_ENC_PARAMS as u32;
+    xma_enc_props.param_cnt = 3_u32;
     xma_enc_props.params = enc_params.as_mut_ptr();
     xma_enc_props.format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
     xma_enc_props.bits_per_pixel = 8;
@@ -139,13 +139,13 @@ pub fn xlnx_create_xma_enc_props(
             ENC_H264_BASELINE => "AVC_BASELINE",
             ENC_H264_MAIN => "AVC_MAIN",
             ENC_H264_HIGH => "AVC_HIGH",
-            _ => bail!("invalid profile {} specified to H264 xlinx encoder", enc_props.profile),
+            _ => bail!("invalid profile {} specified to H264 xilinx encoder", enc_props.profile),
         },
         // h265
         CODEC_ID_HEVC => match enc_props.profile {
             ENC_HEVC_MAIN => "HEVC_MAIN",
             ENC_HEVC_MAIN_INTRA => "HEVC_MAIN_INTRA",
-            _ => bail!("invalid profile {} specified to HEVC xlinx encoder", enc_props.profile),
+            _ => bail!("invalid profile {} specified to HEVC xilinx encoder", enc_props.profile),
         },
         _ => bail!("incompatible codec_id {}", enc_props.codec_id),
     };

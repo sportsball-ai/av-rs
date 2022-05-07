@@ -3,7 +3,7 @@ use std::fmt;
 
 use crate::XMA_TRY_AGAIN;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum XlnxErrorType {
     XlnxTryAgain,
     XlnxEOS,
