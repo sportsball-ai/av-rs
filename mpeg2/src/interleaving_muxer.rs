@@ -426,20 +426,17 @@ mod test {
 
         let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
         for (i, mut pes_packet) in pes_packets.into_iter().enumerate() {
+            let h = pes_packet.header.optional_header.as_mut().unwrap();
             if i < num_of_pes_packets_per_stream {
-                let h = pes_packet.header.optional_header.as_mut().unwrap();
                 if let Some(ref mut dts) = h.dts {
                     *dts = TS_33BIT_MASK - (num_of_pes_packets_per_stream as u64 - i as u64) * 9_000 + i as u64;
                 } else if let Some(ref mut pts) = h.pts {
                     *pts = TS_33BIT_MASK - (num_of_pes_packets_per_stream as u64 - i as u64) * 9_000 + i as u64;
                 }
-            } else {
-                let h = pes_packet.header.optional_header.as_mut().unwrap();
-                if let Some(ref mut dts) = h.dts {
-                    *dts = (i - num_of_pes_packets_per_stream + 2) as u64 * 9_000 + i as u64;
-                } else if let Some(ref mut pts) = h.pts {
-                    *pts = (i - num_of_pes_packets_per_stream + 2) as u64 * 9_000 + i as u64;
-                }
+            } else if let Some(ref mut dts) = h.dts {
+                *dts = (i - num_of_pes_packets_per_stream + 2) as u64 * 9_000 + i as u64;
+            } else if let Some(ref mut pts) = h.pts {
+                *pts = (i - num_of_pes_packets_per_stream + 2) as u64 * 9_000 + i as u64;
             }
             pes_packet.header.stream_id += (i % 2) as u8;
             pes_packets_array[i % num_of_streams].push_back(pes_packet);
