@@ -5,7 +5,7 @@ edition = "2018"
 
 [features]
 default = []
-async = ["tokio"]
+async = ["tokio", "srt-sys/async"]
 
 [dependencies]
 libc = "0.2.71"

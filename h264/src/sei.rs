@@ -90,7 +90,7 @@ impl PicTiming {
     pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>, vui_params: &VUIParameters) -> io::Result<Self> {
         let mut ret = Self::default();
 
-        let hrd_params = vui_params.nal_hrd_parameters.as_ref().or_else(|| vui_params.vcl_hrd_parameters.as_ref());
+        let hrd_params = vui_params.nal_hrd_parameters.as_ref().or(vui_params.vcl_hrd_parameters.as_ref());
         if let Some(hrd_params) = hrd_params {
             ret.cpb_removal_delay = bs.read_bits(hrd_params.cpb_removal_delay_length_minus1.0 as usize + 1)?;
             ret.dpb_output_delay = bs.read_bits(hrd_params.dpb_output_delay_length_minus1.0 as usize + 1)?;

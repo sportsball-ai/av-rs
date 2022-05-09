@@ -175,7 +175,7 @@ impl EpollReactor {
 
 impl Drop for EpollReactor {
     fn drop(&mut self) {
-        self.pipe.write(b"x").expect("we should be able to write to the epoll thread pipe");
+        let _ = self.pipe.write(b"x").expect("we should be able to write to the epoll thread pipe");
         self.join_handle
             .take()
             .expect("there should be a join handle")
