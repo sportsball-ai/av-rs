@@ -33,12 +33,12 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: build
-        args: --verbose --workspace --exclude xilinx --all-features
+        args: --verbose --workspace --exclude xilinx --features srt/async
     - name: Lint
-      run: cargo clippy --workspace --exclude xilinx --all-features --all-targets -- --deny warnings
+      run: cargo clippy --workspace --exclude xilinx --features srt/async --all-targets -- --deny warnings
     - name: Test
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --verbose --workspace --exclude xilinx --all-features --exclude xcoder
+        args: --verbose --workspace --exclude xilinx --features srt/async --exclude xcoder
 
