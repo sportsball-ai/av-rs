@@ -1,4 +1,5 @@
 use crate::{DecodeError, EncodeError};
+use byteorder::{BigEndian, ByteOrder};
 use core2::io::Write;
 
 const AF_DESCR_TAG_TIMELINE: u8 = 0x04;
@@ -71,21 +72,11 @@ impl TEMITimelineDescriptor {
 
         let mut ret = 5;
         if let Some(has_timestamp) = self.has_timestamp {
-            buf[5] = self.timescale as _;
-            buf[6] = (self.timescale >> 8) as u8;
-            buf[7] = (self.timescale >> 16) as u8;
-            buf[8] = (self.timescale >> 24) as u8;
-
-            buf[9] = (self.media_timestamp) as _;
-            buf[10] = (self.media_timestamp >> 8) as u8;
-            buf[11] = (self.media_timestamp >> 16) as u8;
-            buf[12] = (self.media_timestamp >> 24) as u8;
+            BigEndian::write_u32(&mut buf[5..=8], self.timescale);
+            BigEndian::write_u32(&mut buf[9..=12], self.media_timestamp as u32);
             ret += 8;
             if has_timestamp == 2 {
-                buf[13] = (self.media_timestamp >> 32) as u8;
-                buf[14] = (self.media_timestamp >> 40) as u8;
-                buf[15] = (self.media_timestamp >> 48) as u8;
-                buf[16] = (self.media_timestamp >> 56) as u8;
+                BigEndian::write_u32(&mut buf[13..=16], (self.media_timestamp >> 32) as u32);
                 ret += 4;
             } else if has_timestamp != 1 {
                 return Err(EncodeError::other("Invalid has_timestamp value"));
@@ -94,16 +85,14 @@ impl TEMITimelineDescriptor {
 
         if let Some(ntp_ts) = self.ntp_timestamp {
             buf[2] |= 0b0010_0000;
-            for i in 0..8 {
-                buf[ret + i] = (ntp_ts >> (i * 8)) as u8;
-            }
+            BigEndian::write_u64(&mut buf[ret..(ret + 8)], ntp_ts);
             ret += 8;
         } else if let Some(ptp_ts) = self.ptp_timestamp {
             buf[2] |= 0b0001_0000;
-            for i in 0..10 {
-                buf[ret + i] = (ptp_ts >> (i * 8)) as u8;
-            }
-            ret += 10;
+            BigEndian::write_u64(&mut buf[ret..(ret + 8)], ptp_ts as u64);
+            ret += 8;
+            BigEndian::write_u16(&mut buf[ret..(ret + 2)], (ptp_ts >> 64) as u16);
+            ret += 2;
         }
 
         if let Some(has_timecode) = self.has_timecode {
@@ -158,33 +147,29 @@ impl TEMITimelineDescriptor {
 
         let mut n = 5;
         if has_timestamp != 0 {
-            ret.timescale = buf[5] as u32 | (buf[6] as u32) << 8 | (buf[7] as u32) << 16 | (buf[8] as u32) << 24;
+            ret.timescale = BigEndian::read_u32(&buf[5..=8]);
             if has_timestamp <= 2 {
-                ret.media_timestamp = buf[9] as u64 | (buf[10] as u64) << 8 | (buf[11] as u64) << 16 | (buf[12] as u64) << 24;
+                ret.media_timestamp = BigEndian::read_u32(&buf[9..=12]) as u64;
                 n += 8;
             } else {
                 return Err(DecodeError::new("incorrect media_timestamp for temi_timeline_descriptor"));
             }
             if has_timestamp == 2 {
                 n += 4;
-                ret.media_timestamp |= (buf[13] as u64 | (buf[14] as u64) << 8 | (buf[15] as u64) << 16 | (buf[16] as u64) << 24) << 32;
+                ret.media_timestamp |= (BigEndian::read_u32(&buf[13..=24]) as u64) << 32;
             }
             ret.has_timestamp = Some(has_timestamp);
         }
 
         if buf[2] & 0b0010_0000 != 0 {
-            let mut ts = 0u64;
-            for i in 0..8 {
-                ts |= (buf[n + i] as u64) << (i * 8);
-            }
+            let ts = BigEndian::read_u64(&buf[n..(n + 8)]);
             n += 8;
             ret.ntp_timestamp = Some(ts);
         } else if buf[2] & 0b0001_0000 != 0 {
-            let mut ts = 0u128;
-            for i in 0..10 {
-                ts |= (buf[n + i] as u128) << (i * 8);
-            }
-            n += 10;
+            let mut ts = BigEndian::read_u64(&buf[n..(n + 8)]) as u128;
+            n += 8;
+            ts |= (BigEndian::read_u16(&buf[n..(n + 2)]) as u128) << 64;
+            n += 2;
             ret.ptp_timestamp = Some(ts);
         }
 
