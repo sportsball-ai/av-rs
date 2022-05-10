@@ -276,15 +276,12 @@ mod test {
         let mut buf = [0; 1316];
         for i in 0..5 {
             let payload = [i as u8; 1316];
-            for _ in 0..10000 {
+
+            for _ in 0..10 {
                 assert_eq!(client_conn.write(&payload).await.unwrap(), 1316);
             }
-        }
-        mem::drop(client_conn);
 
-        for i in 0..5 {
-            let payload = [i as u8; 1316];
-            for _ in 0..10000 {
+            for _ in 0..10 {
                 assert_eq!(server_conn.read(&mut buf).await.unwrap(), 1316);
                 assert_eq!(&buf, &payload);
             }
