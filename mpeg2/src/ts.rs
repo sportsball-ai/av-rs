@@ -642,7 +642,7 @@ mod test {
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
         let packets = decode_packets(&buf).unwrap();
-        let mut packet = packets.into_iter().filter(|p| p.packet_id == 0x0100).next().unwrap();
+        let mut packet = packets.into_iter().find(|p| p.packet_id == 0x0100).unwrap();
 
         let af = packet.adaptation_field.as_mut().unwrap();
         let temi = TEMITimelineDescriptor {

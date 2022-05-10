@@ -124,7 +124,7 @@ impl TEMITimelineDescriptor {
                 ret += 3;
                 if has_timecode == 2 {
                     for i in 0..5 {
-                        buf[ret + i] = (self.time_code >> (i + 3) * 8) as u8;
+                        buf[ret + i] = (self.time_code >> ((i + 3) * 8)) as u8;
                     }
                     ret += 8;
                 } else if has_timecode != 1 {
@@ -147,11 +147,13 @@ impl TEMITimelineDescriptor {
         if buf[0] != AF_DESCR_TAG_TIMELINE {
             return Err(DecodeError::new("incorrect tag value for temi_timeline_descriptor"));
         }
-        let mut ret = Self::default();
-        ret.force_reload = Some(buf[2] & 0b0000_0010 != 0);
-        ret.paused = Some(buf[2] & 0b0000_0001 != 0);
-        ret.discontinuity = Some(buf[3] & 0b1000_0000 != 0);
-        ret.timeline_id = buf[4];
+        let mut ret = TEMITimelineDescriptor {
+            force_reload: Some(buf[2] & 0b0000_0010 != 0),
+            paused: Some(buf[2] & 0b0000_0001 != 0),
+            discontinuity: Some(buf[3] & 0b1000_0000 != 0),
+            timeline_id: buf[4],
+            ..Self::default()
+        };
 
         let has_timestamp = buf[2] >> 6;
 
