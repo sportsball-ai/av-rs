@@ -129,7 +129,7 @@ impl Drop for Api {
     fn drop(&mut self) {
         #[cfg(feature = "async")]
         if let Some(reactor) = self.epoll_reactor.lock().expect("the lock should not be poisoned").take() {
-            if let Err(_) = Arc::try_unwrap(reactor) {
+            if Arc::try_unwrap(reactor).is_err() {
                 panic!("the api must have the last strong reference to the reactor");
             }
         }
