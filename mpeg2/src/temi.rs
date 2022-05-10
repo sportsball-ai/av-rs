@@ -126,7 +126,7 @@ impl TEMITimelineDescriptor {
                     for i in 0..5 {
                         buf[ret + i] = (self.time_code >> ((i + 3) * 8)) as u8;
                     }
-                    ret += 8;
+                    ret += 5;
                 } else if has_timecode != 1 {
                     return Err(EncodeError::other("Invalid has_timecode value"));
                 }
@@ -141,7 +141,6 @@ impl TEMITimelineDescriptor {
 
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         if buf.len() < 5 || (buf[1] as usize + 2) > buf.len() {
-            println!("buf[1]={}", buf[1]);
             return Err(DecodeError::new("not enough bytes for temi_timeline_descriptor"));
         }
         if buf[0] != AF_DESCR_TAG_TIMELINE {
