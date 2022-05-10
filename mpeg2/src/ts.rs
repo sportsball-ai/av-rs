@@ -19,7 +19,7 @@ pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
-    pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
+    pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
 impl AdaptationField {
@@ -40,8 +40,21 @@ impl AdaptationField {
             };
             let mut n = if af.program_clock_reference_27mhz.is_some() { 8 } else { 2 };
             if buf[1] & 1 == 1 {
+                if buf[n] == 0 {
+                    return Err(DecodeError::new("invalid adaptation_field_extension_length"));
+                }
+                let temi_descriptors_len = (buf[n] - 1) as usize;
                 n += 2;
-                af.temi_timeline_descriptor = Some(TEMITimelineDescriptor::decode(&buf[n..])?);
+                af.temi_timeline_descriptors = vec![];
+                let end = n + temi_descriptors_len;
+                while n < end {
+                    let descr = TEMITimelineDescriptor::decode(&buf[n..end])?;
+                    n += descr.encode_len();
+                    af.temi_timeline_descriptors.push(descr);
+                }
+                if n != end {
+                    return Err(DecodeError::new("not enough bytes for temi timeline descriptors"));
+                }
             }
         }
         Ok(af)
@@ -55,15 +68,22 @@ impl AdaptationField {
         if self.program_clock_reference_27mhz.is_some() {
             len += 6;
         }
-        if let Some(temi) = &self.temi_timeline_descriptor {
-            len += temi.encode_len();
+        for timeline_descriptor in &self.temi_timeline_descriptors {
+            len += timeline_descriptor.encode_len();
         }
         len
     }
 
     pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> Result<usize, EncodeError> {
         let mut ret = 1usize;
-        let temi_len = self.temi_timeline_descriptor.as_ref().map_or(0, |temi| temi.encode_len()) as u8;
+        let temi_len = self.temi_timeline_descriptors.iter().fold(0, |mut sum, temi| {
+            sum += temi.encode_len();
+            sum
+        });
+        if temi_len > 0xfe {
+            return Err(EncodeError::other("temi_timeline_descriptors overflow"));
+        }
+
         let mut buf = vec![0u8; 20 + temi_len as usize];
 
         if pad_to_length >= 2 {
@@ -101,11 +121,13 @@ impl AdaptationField {
             ret += 6;
         }
 
-        if let Some(temi_timeline) = &self.temi_timeline_descriptor {
+        if !self.temi_timeline_descriptors.is_empty() {
             buf[1] |= 1; // adaptation_field_extension_flag
-            buf[ret] = 1 + temi_len; // adaptation_field_extension_length
+            buf[ret] = (1 + temi_len) as u8; // adaptation_field_extension_length
             ret += 2;
-            ret += temi_timeline.encode(&mut buf[ret..])?;
+            for descr in &self.temi_timeline_descriptors {
+                ret += descr.encode(&mut buf[ret..])?;
+            }
         }
 
         if ret < pad_to_length {
@@ -519,7 +541,7 @@ mod test {
                 discontinuity_indicator: Some(false),
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
-                temi_timeline_descriptor: None,
+                temi_timeline_descriptors: vec![],
             })
         );
         {
@@ -645,7 +667,7 @@ mod test {
         let mut packet = packets.into_iter().find(|p| p.packet_id == 0x0100).unwrap();
 
         let af = packet.adaptation_field.as_mut().unwrap();
-        let temi = TEMITimelineDescriptor {
+        let temi1 = TEMITimelineDescriptor {
             timescale: 0,
             media_timestamp: Some(0),
             ntp_timestamp: Some(1652398146422),
@@ -660,8 +682,26 @@ mod test {
             timeline_id: 0xa1,
         };
 
-        let payload = &packet.payload.unwrap()[temi.encode_len() + 2..];
-        af.temi_timeline_descriptor = Some(temi);
+        let temi2 = TEMITimelineDescriptor {
+            timescale: 0,
+            media_timestamp: None,
+
+            ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
+            ptp_timestamp: None,
+
+            drop: true,
+            frames_per_tc_seconds: 0x35a3,
+            duration: 0x9a8a,
+            time_code: Some(0xfb_82ef),
+
+            force_reload: true,
+            paused: true,
+            discontinuity: false,
+            timeline_id: 0xf3,
+        };
+
+        let payload = &packet.payload.unwrap()[temi1.encode_len() + temi2.encode_len() + 2..];
+        af.temi_timeline_descriptors = vec![temi1, temi2];
         packet.payload = Some(Cow::Borrowed(payload));
 
         let mut w = vec![];
