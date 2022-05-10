@@ -646,19 +646,17 @@ mod test {
 
         let af = packet.adaptation_field.as_mut().unwrap();
         let temi = TEMITimelineDescriptor {
-            has_timestamp: None,
             timescale: 0,
-            media_timestamp: 0,
+            media_timestamp: Some(0),
             ntp_timestamp: Some(1652398146422),
-            ptp_timestamp: None,
-            has_timecode: Some(1),
-            drop: true,
-            frames_per_tc_seconds: 9283,
-            duration: 65530,
-            time_code: 0,
-            force_reload: Some(true),
-            paused: Some(true),
-            discontinuity: Some(true),
+            ptp_timestamp: Some(0xcdf8_fdc9_b5f8_25e9_9236),
+            drop: false,
+            frames_per_tc_seconds: 0,
+            duration: 0,
+            time_code: None,
+            force_reload: true,
+            paused: true,
+            discontinuity: true,
             timeline_id: 0xa1,
         };
 
