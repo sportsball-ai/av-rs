@@ -2,6 +2,7 @@
 
 #[macro_use]
 extern crate alloc;
+extern crate core;
 
 pub use core2::io;
 
@@ -66,4 +67,5 @@ impl std::error::Error for EncodeError {
 
 pub mod muxer;
 pub mod pes;
+pub mod temi;
 pub mod ts;

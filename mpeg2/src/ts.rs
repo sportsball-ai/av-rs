@@ -1,4 +1,5 @@
 use super::{DecodeError, EncodeError};
+use crate::temi::TEMITimelineDescriptor;
 use alloc::{borrow::Cow, vec::Vec};
 use core2::io::Write;
 
@@ -18,6 +19,7 @@ pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
+    pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
 }
 
 impl AdaptationField {
@@ -36,21 +38,33 @@ impl AdaptationField {
             } else {
                 None
             };
+            let mut n = if af.program_clock_reference_27mhz.is_some() { 8 } else { 2 };
+            if buf[1] & 1 == 1 {
+                n += 2;
+                af.temi_timeline_descriptor = Some(TEMITimelineDescriptor::decode(&buf[n..])?);
+            }
         }
         Ok(af)
     }
 
     pub fn encoded_len(&self) -> usize {
-        1 + if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() || self.program_clock_reference_27mhz.is_some() {
-            1
-        } else {
-            0
-        } + if self.program_clock_reference_27mhz.is_some() { 6 } else { 0 }
+        let mut len = 1;
+        if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() || self.program_clock_reference_27mhz.is_some() {
+            len += 1;
+        }
+        if self.program_clock_reference_27mhz.is_some() {
+            len += 6;
+        }
+        if let Some(temi) = &self.temi_timeline_descriptor {
+            len += temi.encode_len();
+        }
+        len
     }
 
     pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> Result<usize, EncodeError> {
         let mut ret = 1usize;
-        let mut buf = [0u8; 20];
+        let temi_len = self.temi_timeline_descriptor.as_ref().map_or(0, |temi| temi.encode_len()) as u8;
+        let mut buf = vec![0u8; 20 + temi_len as usize];
 
         if pad_to_length >= 2 {
             ret = 2;
@@ -85,6 +99,13 @@ impl AdaptationField {
             buf[6] = (base << 7) as u8 | 0b01111110 | (ext >> 8) as u8;
             buf[7] = ext as _;
             ret += 6;
+        }
+
+        if let Some(temi_timeline) = &self.temi_timeline_descriptor {
+            buf[1] |= 1; // adaptation_field_extension_flag
+            buf[ret] = 1 + temi_len; // adaptation_field_extension_length
+            ret += 2;
+            ret += temi_timeline.encode(&mut buf[ret..])?;
         }
 
         if ret < pad_to_length {
@@ -498,6 +519,7 @@ mod test {
                 discontinuity_indicator: Some(false),
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
+                temi_timeline_descriptor: None,
             })
         );
         {
@@ -612,5 +634,42 @@ mod test {
         let packet = Packet::decode(&data).unwrap();
         assert_eq!(packet.adaptation_field, Some(AdaptationField::default()));
         assert_eq!(packet.payload.unwrap(), &data[5..]);
+    }
+
+    #[test]
+    fn test_af_temi_timeline_descriptor() {
+        let mut f = File::open("src/testdata/pro-bowl.ts").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        let packets = decode_packets(&buf).unwrap();
+        let mut packet = packets.into_iter().filter(|p| p.packet_id == 0x0100).next().unwrap();
+
+        let af = packet.adaptation_field.as_mut().unwrap();
+        let temi = TEMITimelineDescriptor {
+            has_timestamp: None,
+            timescale: 0,
+            media_timestamp: 0,
+            ntp_timestamp: Some(1652398146422),
+            ptp_timestamp: None,
+            has_timecode: Some(1),
+            drop: true,
+            frames_per_tc_seconds: 9283,
+            duration: 65530,
+            time_code: 0,
+            force_reload: Some(true),
+            paused: Some(true),
+            discontinuity: Some(true),
+            timeline_id: 0xa1,
+        };
+
+        let payload = &packet.payload.unwrap()[temi.encode_len() + 2..];
+        af.temi_timeline_descriptor = Some(temi);
+        packet.payload = Some(Cow::Borrowed(payload));
+
+        let mut w = vec![];
+        packet.encode(&mut w).unwrap();
+
+        let decoded_packet = Packet::decode(&w).unwrap();
+        assert_eq!(decoded_packet, packet);
     }
 }
