@@ -30,41 +30,75 @@ impl AdaptationField {
         if af_length as usize > buf.len() - 1 {
             return Err(DecodeError::new("adaptation field length too long"));
         } else if buf[0] > 0 {
+            let mut n = 2;
             af.discontinuity_indicator = Some(buf[1] & 0x80 != 0);
             af.random_access_indicator = Some(buf[1] & 0x40 != 0);
             af.program_clock_reference_27mhz = if af_length >= 7 && buf[1] & 0x10 != 0 {
                 let base = (buf[2] as u64) << 25 | (buf[3] as u64) << 17 | (buf[4] as u64) << 9 | (buf[5] as u64) << 1 | (buf[6] as u64) >> 7;
                 let ext = ((buf[6] as u64) & 1) << 8 | (buf[7] as u64);
+                n += 6;
                 Some(base * 300 + ext)
             } else {
                 None
             };
-            let mut n = if af.program_clock_reference_27mhz.is_some() { 8 } else { 2 };
-            if buf[1] & 0x02 != 0 {
-                let transport_private_date_length = buf[n];
-                af.private_data_types = buf[n..(n + transport_private_date_length as usize)].to_vec();
-                n += transport_private_date_length as usize + 1
+
+            if buf[1] & 0b0000_1000 != 0 {
+                // skip OPCR
+                n += 6;
+            }
+            if buf[1] & 0b0000_0100 != 0 {
+                // skip splice_countdown
+                n += 1;
+            }
+            if buf[1] & 0b0000_0010 != 0 {
+                if n >= buf.len() || buf[n] as usize + n + 1 > buf.len() {
+                    return Err(DecodeError::new("adaptation field length too long"));
+                }
+                let transport_private_data_length = buf[n];
+                af.private_data_types = buf[n..(n + transport_private_data_length as usize)].to_vec();
+                n += transport_private_data_length as usize + 1
             }
             if buf[1] & 1 == 1 {
-                if buf[n] == 0 {
+                if n + 2 > buf.len() {
+                    return Err(DecodeError::new("adaptation field length too long"));
+                } else if buf[n] == 0 {
                     return Err(DecodeError::new("invalid adaptation_field_extension_length"));
                 }
-                let temi_descriptors_len = (buf[n] - 1) as usize;
+                let temi_descriptors_len = buf[n] - 1;
+                let af_extension_flags = buf[n + 1];
                 n += 2;
-                af.temi_timeline_descriptors = vec![];
-                let end = n + temi_descriptors_len;
-                while n < end {
-                    if buf[n] == AF_DESCR_TAG_TIMELINE {
-                        let descr = TEMITimelineDescriptor::decode(&buf[n..end])?;
-                        n += descr.encode_len();
-                        af.temi_timeline_descriptors.push(descr);
-                    } else {
-                        // Other types of TEMI descriptors are ignored
-                        n += buf[n + 1] as usize;
-                    }
+
+                if af_extension_flags & 0b1000_0000 != 0 {
+                    // skip ltw
+                    n += 2;
                 }
-                if n != end {
-                    return Err(DecodeError::new("not enough bytes for temi timeline descriptors"));
+                if af_extension_flags & 0b0100_0000 != 0 {
+                    // skip piecewise_rate
+                    n += 3;
+                }
+                if af_extension_flags & 0b0010_0000 != 0 {
+                    // skip seamless_splice
+                    n += 5;
+                }
+
+                if af_extension_flags & 0b0001_0000 == 0 {
+                    // AF descriptors
+                    if n + temi_descriptors_len as usize > buf.len() {
+                        return Err(DecodeError::new("adaptation field length too long"));
+                    }
+                    af.temi_timeline_descriptors = vec![];
+                    let temi_buf = &buf[n..(n + temi_descriptors_len as usize)];
+                    let mut m = 0;
+                    while m + 2 <= temi_buf.len() {
+                        if temi_buf[m] == AF_DESCR_TAG_TIMELINE {
+                            let descr = TEMITimelineDescriptor::decode(&temi_buf[m..])?;
+                            m += 2 + temi_buf[m + 1] as usize;
+                            af.temi_timeline_descriptors.push(descr);
+                        } else {
+                            // Other types of TEMI descriptors are ignored
+                            m += 2 + temi_buf[m + 1] as usize;
+                        }
+                    }
                 }
             }
         }
@@ -82,8 +116,11 @@ impl AdaptationField {
         if !self.private_data_types.is_empty() {
             len += 1 + self.private_data_types.len();
         }
-        for timeline_descriptor in &self.temi_timeline_descriptors {
-            len += timeline_descriptor.encode_len();
+        if !self.temi_timeline_descriptors.is_empty() {
+            len += 2;
+            for timeline_descriptor in &self.temi_timeline_descriptors {
+                len += timeline_descriptor.encoded_len();
+            }
         }
         len
     }
@@ -91,7 +128,7 @@ impl AdaptationField {
     pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> Result<usize, EncodeError> {
         let mut ret = 1usize;
         let temi_len = self.temi_timeline_descriptors.iter().fold(0, |mut sum, temi| {
-            sum += temi.encode_len();
+            sum += temi.encoded_len();
             sum
         });
         if temi_len > 0xfe {
@@ -547,7 +584,7 @@ pub fn decode_packets(buf: &[u8]) -> Result<Vec<Packet>, DecodeError> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::temi::TimestampLength;
+    use crate::temi::TimeFieldLength;
     use std::{fs::File, io::Read};
 
     #[test]
@@ -693,12 +730,12 @@ mod test {
 
         let af = packet.adaptation_field.as_mut().unwrap();
         let temi1 = TEMITimelineDescriptor {
-            has_timestamp: TimestampLength::None,
+            has_timestamp: TimeFieldLength::None,
             timescale: 0,
             media_timestamp: 0,
             ntp_timestamp: Some(1652398146422),
             ptp_timestamp: Some(0xcdf8_fdc9_b5f8_25e9_9236),
-            has_timecode: TimestampLength::None,
+            has_timecode: TimeFieldLength::None,
             drop: false,
             frames_per_tc_seconds: 0,
             duration: 0,
@@ -710,14 +747,14 @@ mod test {
         };
 
         let temi2 = TEMITimelineDescriptor {
-            has_timestamp: TimestampLength::SixtyFourBits,
+            has_timestamp: TimeFieldLength::Long,
             timescale: 225,
             media_timestamp: 8232432,
 
             ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
             ptp_timestamp: None,
 
-            has_timecode: TimestampLength::ThirtyTwoBits,
+            has_timecode: TimeFieldLength::Short,
             drop: true,
             frames_per_tc_seconds: 0x35a3,
             duration: 0x9a8a,
@@ -729,7 +766,7 @@ mod test {
             timeline_id: 0xf3,
         };
 
-        let payload = &packet.payload.unwrap()[temi1.encode_len() + temi2.encode_len() + 2..];
+        let payload = &packet.payload.unwrap()[temi1.encoded_len() + temi2.encoded_len() + 2..];
         af.temi_timeline_descriptors = vec![temi1, temi2];
         packet.payload = Some(Cow::Borrowed(payload));
 
@@ -755,7 +792,7 @@ mod test {
         assert_eq!(temi_descriptors.len(), 1);
         let decoded_temi = &temi_descriptors[0];
         let temi = TEMITimelineDescriptor {
-            has_timestamp: TimestampLength::SixtyFourBits,
+            has_timestamp: TimeFieldLength::Long,
             timescale: 1000,
             paused: true,
             timeline_id: 200,
@@ -766,20 +803,20 @@ mod test {
 
     #[test]
     fn test_decode_af_private_data_type() {
-        let packet_data = vec![
+        let ori_packet_data = vec![
             71, 66, 89, 60, 34, 3, 13, 2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0, 18, 15, 4, 15, 129, 127, 206, 0, 15, 66, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 1, 224, 52, 128, 139, 128, 5, 33, 70, 181, 81, 147, 0, 0, 1, 0, 1, 223, 255, 251, 184, 0, 0, 1, 181, 131, 51, 51, 156, 0, 0, 0, 1, 1, 34, 164,
             64, 193, 88, 0, 0, 1, 2, 34, 171, 0, 194, 176, 0, 0, 1, 3, 34, 171, 0, 194, 176, 0, 0, 1, 4, 34, 171, 0, 194, 176, 0, 0, 1, 5, 34, 171, 0, 194,
             176, 0, 0, 1, 6, 34, 171, 0, 194, 176, 0, 0, 1, 7, 34, 171, 0, 194, 176, 0, 0, 1, 8, 34, 171, 0, 194, 176, 0, 0, 1, 9, 34, 171, 0, 194, 176, 0, 0,
             1, 10, 34, 171, 0, 194, 176, 0, 0, 1, 11, 34, 171, 0, 194, 176, 0, 0, 1, 12, 34, 171, 0, 194, 176, 0, 0, 1, 13, 34, 171, 0, 194, 176,
         ];
-        let packet = Packet::decode(&packet_data).unwrap();
-        let af = packet.adaptation_field.unwrap();
-        let temi_descriptors = af.temi_timeline_descriptors;
+        let decoded_packet = Packet::decode(&ori_packet_data).unwrap();
+        let af = decoded_packet.adaptation_field.as_ref().unwrap();
+        let temi_descriptors = &af.temi_timeline_descriptors;
         assert_eq!(temi_descriptors.len(), 1);
         let decoded_temi = &temi_descriptors[0];
         let temi = TEMITimelineDescriptor {
-            has_timestamp: TimestampLength::SixtyFourBits,
+            has_timestamp: TimeFieldLength::Long,
             timescale: 1000000,
             paused: true,
             timeline_id: 206,
