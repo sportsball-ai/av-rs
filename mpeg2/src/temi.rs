@@ -4,14 +4,19 @@ use core2::io::Write;
 
 pub const AF_DESCR_TAG_TIMELINE: u8 = 0x04;
 
-#[derive(Debug, Default, PartialEq, PartialOrd, Copy, Clone)]
+#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
 #[allow(non_camel_case_types)]
 #[repr(C)]
 pub enum TimestampLength {
-    #[default]
     None = 0,
     ThirtyTwoBits = 1,
     SixtyFourBits = 2,
+}
+
+impl Default for TimestampLength {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 #[derive(Debug, Default, PartialEq)]
