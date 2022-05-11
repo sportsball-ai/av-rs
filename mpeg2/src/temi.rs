@@ -6,8 +6,9 @@ const AF_DESCR_TAG_TIMELINE: u8 = 0x04;
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TEMITimelineDescriptor {
+    pub has_timestamp: u8,
     pub timescale: u32,
-    pub media_timestamp: Option<u64>,
+    pub media_timestamp: u64,
 
     pub ntp_timestamp: Option<u64>,
     pub ptp_timestamp: Option<u128>,
@@ -15,7 +16,8 @@ pub struct TEMITimelineDescriptor {
     pub drop: bool,
     pub frames_per_tc_seconds: u16,
     pub duration: u16,
-    pub time_code: Option<u64>,
+    pub has_timecode: u8,
+    pub time_code: u64,
 
     pub force_reload: bool,
     pub paused: bool,
@@ -25,8 +27,13 @@ pub struct TEMITimelineDescriptor {
 
 impl TEMITimelineDescriptor {
     pub fn encode_len(&self) -> usize {
-        let mut len = 5;
-        len += self.media_timestamp.map(|ts| if ts >> 32 == 0 { 8 } else { 12 }).unwrap_or(0);
+        let mut len = if self.has_timestamp == 1 {
+            13
+        } else if self.has_timestamp == 2 {
+            17
+        } else {
+            5
+        };
         if self.ntp_timestamp.is_some() {
             len += 8;
         }
@@ -34,15 +41,23 @@ impl TEMITimelineDescriptor {
             len += 10;
         }
 
-        len += self.time_code.map(|tc| if tc >> 24 == 0 { 7 } else { 12 }).unwrap_or(0);
+        len += if self.has_timecode == 1 {
+            7
+        } else if self.has_timecode == 2 {
+            12
+        } else {
+            0
+        };
         len
     }
 
     pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
         let mut buf = vec![0u8; self.encode_len()];
         buf[0] = AF_DESCR_TAG_TIMELINE;
-        let has_timestamp = self.media_timestamp.map(|ts| if ts >> 32 != 0 { 2 } else { 1 }).unwrap_or(0);
-        buf[2] |= has_timestamp << 6;
+        if self.has_timestamp > 2 {
+            return Err(EncodeError::other("Invalid has_timestamp value"));
+        }
+        buf[2] = self.has_timestamp << 6;
 
         if self.force_reload {
             buf[2] |= 0b0000_0010;
@@ -56,15 +71,13 @@ impl TEMITimelineDescriptor {
         buf[4] = self.timeline_id;
 
         let mut ret = 5;
-        if let Some(media_timestamp) = self.media_timestamp {
+        if self.has_timestamp > 0 {
             BigEndian::write_u32(&mut buf[5..=8], self.timescale);
-            BigEndian::write_u32(&mut buf[9..=12], media_timestamp as u32);
+            BigEndian::write_u32(&mut buf[9..=12], self.media_timestamp as u32);
             ret += 8;
-            if has_timestamp == 2 {
-                BigEndian::write_u32(&mut buf[13..=16], (media_timestamp >> 32) as u32);
+            if self.has_timestamp == 2 {
+                BigEndian::write_u32(&mut buf[13..=16], (self.media_timestamp >> 32) as u32);
                 ret += 4;
-            } else if has_timestamp != 1 {
-                return Err(EncodeError::other("Invalid has_timestamp value"));
             }
         }
 
@@ -81,9 +94,8 @@ impl TEMITimelineDescriptor {
             ret += 2;
         }
 
-        if let Some(time_code) = self.time_code {
-            let has_timecode: u8 = if time_code >> 24 == 0 { 1 } else { 2 };
-            buf[2] |= has_timecode << 2;
+        if self.has_timecode != 0 {
+            buf[2] |= self.has_timecode << 2;
             if self.drop {
                 buf[ret] = 0b1000_0000;
             }
@@ -94,16 +106,16 @@ impl TEMITimelineDescriptor {
 
             ret += 4;
             for i in 0..3 {
-                buf[ret + i] = (time_code >> (i * 8)) as u8;
+                buf[ret + i] = (self.time_code >> (i * 8)) as u8;
             }
             ret += 3;
-            if has_timecode == 2 {
+            if self.has_timecode == 2 {
                 for i in 0..5 {
-                    buf[ret + i] = (time_code >> ((i + 3) * 8)) as u8;
+                    buf[ret + i] = (self.time_code >> ((i + 3) * 8)) as u8;
                 }
                 ret += 5;
-            } else if has_timecode != 1 {
-                return Err(EncodeError::other("Invalid has_timecode value"));
+            } else if self.has_timecode != 1 {
+                return Err(EncodeError::other("Invalid has_timecode in temi_timeline_descriptor"));
             }
         }
 
@@ -142,9 +154,10 @@ impl TEMITimelineDescriptor {
             }
             if has_timestamp == 2 {
                 n += 4;
-                media_timestamp |= (BigEndian::read_u32(&buf[13..=24]) as u64) << 32;
+                media_timestamp |= (BigEndian::read_u32(&buf[13..=16]) as u64) << 32;
             }
-            ret.media_timestamp = Some(media_timestamp);
+            ret.has_timestamp = has_timestamp;
+            ret.media_timestamp = media_timestamp;
         }
 
         if buf[2] & 0b0010_0000 != 0 {
@@ -162,6 +175,7 @@ impl TEMITimelineDescriptor {
 
         let has_timecode = (buf[2] & 0b0000_1100) >> 2;
         if has_timecode != 0 {
+            ret.has_timecode = has_timecode;
             ret.drop = buf[n] >> 7 == 1;
             ret.frames_per_tc_seconds = (buf[n] as u16 & 0b0111_1111) << 8 | buf[n + 1] as u16;
             ret.duration = (buf[n + 2] as u16) << 8 | buf[n + 3] as u16;
@@ -179,7 +193,7 @@ impl TEMITimelineDescriptor {
                 return Err(DecodeError::new("incorrect time_code for temi_timeline_descriptor"));
             }
 
-            ret.time_code = Some(time_code);
+            ret.time_code = time_code;
         }
         Ok(ret)
     }
@@ -204,16 +218,18 @@ mod test {
     fn test_encode_decode() {
         let mut w: Vec<u8> = vec![];
         let temi = TEMITimelineDescriptor {
+            has_timestamp: 2,
             timescale: 0xEBF1_3405,
-            media_timestamp: Some(0xa1dd_3e6a_19d7_bfec),
+            media_timestamp: 0xa1dd_3e6a_19d7_bfec,
 
             ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
             ptp_timestamp: Some(0xcdf8_fdc9_b5f8_25e9_9236),
 
+            has_timecode: 1,
             drop: true,
             frames_per_tc_seconds: 0x75a3,
             duration: 0x988a,
-            time_code: Some(0xab_82ef),
+            time_code: 0xab_82ef,
 
             force_reload: true,
             paused: true,
@@ -233,16 +249,18 @@ mod test {
     fn test_ntp_without_media_timestamp() {
         let mut w: Vec<u8> = vec![];
         let temi = TEMITimelineDescriptor {
+            has_timestamp: 0,
             timescale: 0,
-            media_timestamp: None,
+            media_timestamp: 0,
 
             ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
             ptp_timestamp: None,
 
+            has_timecode: 1,
             drop: true,
             frames_per_tc_seconds: 0x75a3,
             duration: 0x988a,
-            time_code: Some(0xab_82ef),
+            time_code: 0xab_82ef,
 
             force_reload: true,
             paused: true,

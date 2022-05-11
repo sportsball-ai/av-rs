@@ -19,6 +19,7 @@ pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
+    pub private_data_types: Vec<u8>,
     pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
@@ -39,6 +40,11 @@ impl AdaptationField {
                 None
             };
             let mut n = if af.program_clock_reference_27mhz.is_some() { 8 } else { 2 };
+            if buf[1] & 0x02 != 0 {
+                let transport_private_date_length = buf[n];
+                af.private_data_types = buf[n..(n + transport_private_date_length as usize)].to_vec();
+                n += transport_private_date_length as usize + 1
+            }
             if buf[1] & 1 == 1 {
                 if buf[n] == 0 {
                     return Err(DecodeError::new("invalid adaptation_field_extension_length"));
@@ -67,6 +73,9 @@ impl AdaptationField {
         }
         if self.program_clock_reference_27mhz.is_some() {
             len += 6;
+        }
+        if !self.private_data_types.is_empty() {
+            len += 1 + self.private_data_types.len();
         }
         for timeline_descriptor in &self.temi_timeline_descriptors {
             len += timeline_descriptor.encode_len();
@@ -119,6 +128,15 @@ impl AdaptationField {
             buf[6] = (base << 7) as u8 | 0b01111110 | (ext >> 8) as u8;
             buf[7] = ext as _;
             ret += 6;
+        }
+
+        if !self.private_data_types.is_empty() {
+            buf[ret] = self.private_data_types.len() as u8;
+            ret += 1;
+            for data_type in &self.private_data_types {
+                buf[ret] = *data_type;
+                ret += 1;
+            }
         }
 
         if !self.temi_timeline_descriptors.is_empty() {
@@ -541,6 +559,7 @@ mod test {
                 discontinuity_indicator: Some(false),
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
+                private_data_types: vec![],
                 temi_timeline_descriptors: vec![],
             })
         );
@@ -668,14 +687,16 @@ mod test {
 
         let af = packet.adaptation_field.as_mut().unwrap();
         let temi1 = TEMITimelineDescriptor {
+            has_timestamp: 0,
             timescale: 0,
-            media_timestamp: Some(0),
+            media_timestamp: 0,
             ntp_timestamp: Some(1652398146422),
             ptp_timestamp: Some(0xcdf8_fdc9_b5f8_25e9_9236),
+            has_timecode: 0,
             drop: false,
             frames_per_tc_seconds: 0,
             duration: 0,
-            time_code: None,
+            time_code: 0,
             force_reload: true,
             paused: true,
             discontinuity: true,
@@ -683,16 +704,18 @@ mod test {
         };
 
         let temi2 = TEMITimelineDescriptor {
-            timescale: 0,
-            media_timestamp: None,
+            has_timestamp: 2,
+            timescale: 225,
+            media_timestamp: 8232432,
 
             ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
             ptp_timestamp: None,
 
+            has_timecode: 1,
             drop: true,
             frames_per_tc_seconds: 0x35a3,
             duration: 0x9a8a,
-            time_code: Some(0xfb_82ef),
+            time_code: 0xfb_82ef,
 
             force_reload: true,
             paused: true,
@@ -709,5 +732,62 @@ mod test {
 
         let decoded_packet = Packet::decode(&w).unwrap();
         assert_eq!(decoded_packet, packet);
+    }
+
+    #[test]
+    fn test_decode_empty_temi_descriptor() {
+        let packet_data = vec![
+            71, 72, 53, 52, 20, 1, 18, 15, 4, 15, 129, 127, 200, 0, 0, 3, 232, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 224, 19, 148, 143, 192, 10, 49, 126, 133, 202,
+            33, 17, 126, 133, 145, 225, 0, 0, 0, 1, 9, 80, 0, 0, 1, 6, 1, 1, 50, 4, 10, 181, 0, 49, 68, 84, 71, 49, 65, 254, 255, 128, 0, 0, 0, 1, 65, 158,
+            188, 61, 47, 16, 83, 40, 159, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3,
+            0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 2, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 12, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        ];
+        let packet = Packet::decode(&packet_data).unwrap();
+        let af = packet.adaptation_field.unwrap();
+        let temi_descriptors = af.temi_timeline_descriptors;
+        assert_eq!(temi_descriptors.len(), 1);
+        let decoded_temi = &temi_descriptors[0];
+        let temi = TEMITimelineDescriptor {
+            has_timestamp: 2,
+            timescale: 1000,
+            paused: true,
+            timeline_id: 200,
+            ..TEMITimelineDescriptor::default()
+        };
+        assert_eq!(decoded_temi, &temi);
+    }
+
+    #[test]
+    fn test_decode_af_private_data_type() {
+        let packet_data = vec![
+            71, 66, 89, 60, 34, 3, 13, 2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0, 18, 15, 4, 15, 129, 127, 206, 0, 15, 66, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 1, 224, 52, 128, 139, 128, 5, 33, 70, 181, 81, 147, 0, 0, 1, 0, 1, 223, 255, 251, 184, 0, 0, 1, 181, 131, 51, 51, 156, 0, 0, 0, 1, 1, 34, 164,
+            64, 193, 88, 0, 0, 1, 2, 34, 171, 0, 194, 176, 0, 0, 1, 3, 34, 171, 0, 194, 176, 0, 0, 1, 4, 34, 171, 0, 194, 176, 0, 0, 1, 5, 34, 171, 0, 194,
+            176, 0, 0, 1, 6, 34, 171, 0, 194, 176, 0, 0, 1, 7, 34, 171, 0, 194, 176, 0, 0, 1, 8, 34, 171, 0, 194, 176, 0, 0, 1, 9, 34, 171, 0, 194, 176, 0, 0,
+            1, 10, 34, 171, 0, 194, 176, 0, 0, 1, 11, 34, 171, 0, 194, 176, 0, 0, 1, 12, 34, 171, 0, 194, 176, 0, 0, 1, 13, 34, 171, 0, 194, 176,
+        ];
+        let packet = Packet::decode(&packet_data).unwrap();
+        let af = packet.adaptation_field.unwrap();
+        let temi_descriptors = af.temi_timeline_descriptors;
+        assert_eq!(temi_descriptors.len(), 1);
+        let decoded_temi = &temi_descriptors[0];
+        let temi = TEMITimelineDescriptor {
+            has_timestamp: 2,
+            timescale: 1000000,
+            paused: true,
+            timeline_id: 206,
+            ..TEMITimelineDescriptor::default()
+        };
+        assert_eq!(decoded_temi, &temi);
+        assert_eq!(&af.private_data_types, &[13, 2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8]);
+    }
+
+    #[test]
+    fn test_decode_video_with_temi_timelines() {
+        let mut f = File::open("src/testdata/uk_psb1_temi.ts").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        decode_packets(&buf).unwrap();
     }
 }
