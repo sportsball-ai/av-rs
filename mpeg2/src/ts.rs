@@ -1,5 +1,5 @@
 use super::{DecodeError, EncodeError};
-use crate::temi::TEMITimelineDescriptor;
+use crate::temi::{TEMITimelineDescriptor, AF_DESCR_TAG_TIMELINE};
 use alloc::{borrow::Cow, vec::Vec};
 use core2::io::Write;
 
@@ -54,9 +54,14 @@ impl AdaptationField {
                 af.temi_timeline_descriptors = vec![];
                 let end = n + temi_descriptors_len;
                 while n < end {
-                    let descr = TEMITimelineDescriptor::decode(&buf[n..end])?;
-                    n += descr.encode_len();
-                    af.temi_timeline_descriptors.push(descr);
+                    if buf[n] == AF_DESCR_TAG_TIMELINE {
+                        let descr = TEMITimelineDescriptor::decode(&buf[n..end])?;
+                        n += descr.encode_len();
+                        af.temi_timeline_descriptors.push(descr);
+                    } else {
+                        // Other types of TEMI descriptors are ignored
+                        n += buf[n + 1] as usize;
+                    }
                 }
                 if n != end {
                     return Err(DecodeError::new("not enough bytes for temi timeline descriptors"));
@@ -542,6 +547,7 @@ pub fn decode_packets(buf: &[u8]) -> Result<Vec<Packet>, DecodeError> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::temi::TimestampLength;
     use std::{fs::File, io::Read};
 
     #[test]
@@ -687,12 +693,12 @@ mod test {
 
         let af = packet.adaptation_field.as_mut().unwrap();
         let temi1 = TEMITimelineDescriptor {
-            has_timestamp: 0,
+            has_timestamp: TimestampLength::None,
             timescale: 0,
             media_timestamp: 0,
             ntp_timestamp: Some(1652398146422),
             ptp_timestamp: Some(0xcdf8_fdc9_b5f8_25e9_9236),
-            has_timecode: 0,
+            has_timecode: TimestampLength::None,
             drop: false,
             frames_per_tc_seconds: 0,
             duration: 0,
@@ -704,14 +710,14 @@ mod test {
         };
 
         let temi2 = TEMITimelineDescriptor {
-            has_timestamp: 2,
+            has_timestamp: TimestampLength::SixtyFourBits,
             timescale: 225,
             media_timestamp: 8232432,
 
             ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
             ptp_timestamp: None,
 
-            has_timecode: 1,
+            has_timecode: TimestampLength::ThirtyTwoBits,
             drop: true,
             frames_per_tc_seconds: 0x35a3,
             duration: 0x9a8a,
@@ -749,7 +755,7 @@ mod test {
         assert_eq!(temi_descriptors.len(), 1);
         let decoded_temi = &temi_descriptors[0];
         let temi = TEMITimelineDescriptor {
-            has_timestamp: 2,
+            has_timestamp: TimestampLength::SixtyFourBits,
             timescale: 1000,
             paused: true,
             timeline_id: 200,
@@ -773,7 +779,7 @@ mod test {
         assert_eq!(temi_descriptors.len(), 1);
         let decoded_temi = &temi_descriptors[0];
         let temi = TEMITimelineDescriptor {
-            has_timestamp: 2,
+            has_timestamp: TimestampLength::SixtyFourBits,
             timescale: 1000000,
             paused: true,
             timeline_id: 206,
