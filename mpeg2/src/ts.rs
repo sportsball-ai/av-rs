@@ -849,7 +849,7 @@ mod test {
     #[test]
     fn test_decode_video_with_temi_timelines() {
         // let mut f = File::open("src/testdata/uk_psb1_temi.ts").unwrap();
-        let mut f = File::open("/Users/leon/Documents/AV/temi/hbbtv20-teststreams.temi-1/psb3.temi-1.ts").unwrap();
+        let mut f = File::open("src/testdata/uk_psb1_temi.ts").unwrap();
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
         decode_packets(&buf).unwrap();
