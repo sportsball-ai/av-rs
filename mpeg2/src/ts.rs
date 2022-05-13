@@ -1,4 +1,5 @@
 use super::{DecodeError, EncodeError};
+use crate::bitstream::{Bitstream, Decode};
 use crate::temi::{TEMITimelineDescriptor, AF_DESCR_TAG_TIMELINE};
 use alloc::{borrow::Cow, vec::Vec};
 use core2::io::Write;
@@ -25,78 +26,97 @@ pub struct AdaptationField {
 
 impl AdaptationField {
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
+        let mut bitstream = Bitstream::new(buf);
         let mut af = Self::default();
-        let af_length = buf[0];
-        if af_length as usize > buf.len() - 1 {
+        let af_length = bitstream.read_u8();
+        if bitstream.remaining_bytes() < af_length as usize {
             return Err(DecodeError::new("adaptation field length too long"));
-        } else if buf[0] > 0 {
-            let mut n = 2;
-            af.discontinuity_indicator = Some(buf[1] & 0x80 != 0);
-            af.random_access_indicator = Some(buf[1] & 0x40 != 0);
-            af.program_clock_reference_27mhz = if af_length >= 7 && buf[1] & 0x10 != 0 {
+        } else if af_length > 0 {
+            af.discontinuity_indicator = Some(bitstream.read_boolean());
+            af.random_access_indicator = Some(bitstream.read_boolean());
+            bitstream.skip_bits(1); // elementary_stream_priority_indicator
+
+            let pcr_flag = bitstream.read_boolean();
+            let opcr_flag = bitstream.read_boolean();
+            let splicing_point_flag = bitstream.read_boolean();
+            let transport_private_data_flag = bitstream.read_boolean();
+            let adaptation_extension_flag = bitstream.read_boolean();
+
+            af.program_clock_reference_27mhz = if af_length >= 7 && pcr_flag {
                 let base = (buf[2] as u64) << 25 | (buf[3] as u64) << 17 | (buf[4] as u64) << 9 | (buf[5] as u64) << 1 | (buf[6] as u64) >> 7;
                 let ext = ((buf[6] as u64) & 1) << 8 | (buf[7] as u64);
-                n += 6;
+                bitstream.skip_bytes(6);
                 Some(base * 300 + ext)
             } else {
                 None
             };
 
-            if buf[1] & 0b0000_1000 != 0 {
+            if opcr_flag {
                 // skip OPCR
-                n += 6;
+                bitstream.skip_bytes(6);
             }
-            if buf[1] & 0b0000_0100 != 0 {
+            if splicing_point_flag {
                 // skip splice_countdown
-                n += 1;
+                bitstream.skip_bytes(1);
             }
-            if buf[1] & 0b0000_0010 != 0 {
-                if n >= buf.len() || buf[n] as usize + n + 1 > buf.len() {
-                    return Err(DecodeError::new("adaptation field length too long"));
+            if transport_private_data_flag {
+                if bitstream.remaining_bytes() == 0 {
+                    return Err(DecodeError::new("adaptation field too short for transport_private_data_length"));
                 }
-                let transport_private_data_length = buf[n];
-                af.private_data_types = buf[n..(n + transport_private_data_length as usize)].to_vec();
-                n += transport_private_data_length as usize + 1
+                let transport_private_data_length = bitstream.read_u8();
+                if transport_private_data_length as usize > bitstream.remaining_bytes() {
+                    return Err(DecodeError::new("transport private data length too long"));
+                }
+                af.private_data_types = bitstream.read_n_bytes(transport_private_data_length as usize).to_vec();
             }
-            if buf[1] & 1 == 1 {
-                if n + 2 > buf.len() {
-                    return Err(DecodeError::new("adaptation field length too long"));
-                } else if buf[n] == 0 {
+            if adaptation_extension_flag {
+                if bitstream.remaining_bytes() < 2 {
+                    return Err(DecodeError::new("adaptation field too short for adaptation field extension"));
+                }
+                let adaptation_field_extension_length = bitstream.read_u8();
+                if adaptation_field_extension_length == 0 {
                     return Err(DecodeError::new("invalid adaptation_field_extension_length"));
                 }
-                let temi_descriptors_len = buf[n] - 1;
-                let af_extension_flags = buf[n + 1];
-                n += 2;
 
-                if af_extension_flags & 0b1000_0000 != 0 {
+                let ltw_flag = bitstream.read_boolean();
+                let piecewise_rate_flag = bitstream.read_boolean();
+                let seamless_splice_flag = bitstream.read_boolean();
+                let af_descriptor_not_present_flag = bitstream.read_boolean();
+                bitstream.skip_bits(4);
+
+                if ltw_flag {
                     // skip ltw
-                    n += 2;
+                    bitstream.skip_bytes(2);
                 }
-                if af_extension_flags & 0b0100_0000 != 0 {
+                if piecewise_rate_flag {
                     // skip piecewise_rate
-                    n += 3;
+                    bitstream.skip_bytes(3);
                 }
-                if af_extension_flags & 0b0010_0000 != 0 {
+                if seamless_splice_flag {
                     // skip seamless_splice
-                    n += 5;
+                    bitstream.skip_bytes(5);
                 }
 
-                if af_extension_flags & 0b0001_0000 == 0 {
+                if !af_descriptor_not_present_flag {
                     // AF descriptors
-                    if n + temi_descriptors_len as usize > buf.len() {
-                        return Err(DecodeError::new("adaptation field length too long"));
+                    if bitstream.remaining_bytes() + 1 < adaptation_field_extension_length as usize {
+                        return Err(DecodeError::new("adaptation descriptor field length too long"));
                     }
                     af.temi_timeline_descriptors = vec![];
-                    let temi_buf = &buf[n..(n + temi_descriptors_len as usize)];
-                    let mut m = 0;
-                    while m + 2 <= temi_buf.len() {
-                        if temi_buf[m] == AF_DESCR_TAG_TIMELINE {
-                            let descr = TEMITimelineDescriptor::decode(&temi_buf[m..])?;
-                            m += 2 + temi_buf[m + 1] as usize;
+                    let mut af_descr_bitstream = bitstream.wrapped_stream(adaptation_field_extension_length as usize - 1);
+                    while af_descr_bitstream.remaining_bytes() >= 2 {
+                        let af_descr_tag = af_descr_bitstream.read_u8();
+                        let af_descr_length = af_descr_bitstream.read_u8();
+                        if af_descr_tag == AF_DESCR_TAG_TIMELINE {
+                            let descr = TEMITimelineDescriptor::decode(&mut af_descr_bitstream.wrapped_stream(af_descr_length as usize))?;
+                            af_descr_bitstream.skip_bytes(af_descr_length as usize);
                             af.temi_timeline_descriptors.push(descr);
                         } else {
-                            // Other types of TEMI descriptors are ignored
-                            m += 2 + temi_buf[m + 1] as usize;
+                            // Other types of AF descriptors are ignored
+                            if af_descr_bitstream.remaining_bytes() < af_descr_length as usize {
+                                return Err(DecodeError::new("ignored AF descriptor length too long"));
+                            }
+                            af_descr_bitstream.skip_bytes(af_descr_length as usize);
                         }
                     }
                 }
@@ -823,12 +843,13 @@ mod test {
             ..TEMITimelineDescriptor::default()
         };
         assert_eq!(decoded_temi, &temi);
-        assert_eq!(&af.private_data_types, &[13, 2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8]);
+        assert_eq!(&af.private_data_types, &[2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0]);
     }
 
     #[test]
     fn test_decode_video_with_temi_timelines() {
-        let mut f = File::open("src/testdata/uk_psb1_temi.ts").unwrap();
+        // let mut f = File::open("src/testdata/uk_psb1_temi.ts").unwrap();
+        let mut f = File::open("/Users/leon/Documents/AV/temi/hbbtv20-teststreams.temi-1/psb3.temi-1.ts").unwrap();
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
         decode_packets(&buf).unwrap();

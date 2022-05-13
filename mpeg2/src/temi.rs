@@ -1,14 +1,16 @@
+use crate::bitstream::{Bitstream, BitstreamWriter, Decode};
 use crate::{DecodeError, EncodeError};
-use byteorder::{BigEndian, ByteOrder};
 use core2::io::Write;
 
 pub const AF_DESCR_TAG_TIMELINE: u8 = 0x04;
+const TEMI_TIMELINE_FLAGS_LENGTH: usize = 3;
 
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
 pub enum TimeFieldLength {
     None = 0,
     Short = 1,
     Long = 2,
+    Reserved = 3,
 }
 
 impl Default for TimeFieldLength {
@@ -65,135 +67,120 @@ impl TEMITimelineDescriptor {
     }
 
     pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
-        let mut buf = vec![0u8; self.encoded_len()];
-        buf[0] = AF_DESCR_TAG_TIMELINE;
-        buf[2] = (self.has_timestamp as u8) << 6;
+        let len = self.encoded_len();
+        let mut buf = vec![0u8; len];
+        let mut bs = BitstreamWriter::new(&mut buf);
 
-        if self.force_reload {
-            buf[2] |= 0b0000_0010;
-        }
-        if self.paused {
-            buf[2] |= 0b0000_0001;
-        }
-        if self.discontinuity {
-            buf[3] = 0b1000_0000;
-        }
-        buf[4] = self.timeline_id;
+        bs.write_u8(AF_DESCR_TAG_TIMELINE);
+        bs.write_u8((len - 2) as u8);
+        bs.write_n_bits(self.has_timestamp as u8, 2);
+        bs.write_bit(self.ntp_timestamp.is_some());
+        bs.write_bit(self.ptp_timestamp.is_some());
+        bs.write_n_bits(self.has_timecode as u8, 2);
+        bs.write_bit(self.force_reload);
+        bs.write_bit(self.paused);
+        bs.write_bit(self.discontinuity);
+        bs.skip_n_bits(7);
+        bs.write_u8(self.timeline_id);
 
-        let mut ret = 5;
         if self.has_timestamp != TimeFieldLength::None {
-            BigEndian::write_u32(&mut buf[5..9], self.timescale);
+            bs.write_u32(self.timescale);
             if self.has_timestamp == TimeFieldLength::Short {
-                BigEndian::write_u32(&mut buf[9..13], self.media_timestamp as u32);
-                ret += 8;
+                bs.write_u32(self.media_timestamp as u32);
             } else if self.has_timestamp == TimeFieldLength::Long {
-                BigEndian::write_u64(&mut buf[9..17], self.media_timestamp);
-                ret += 12;
+                bs.write_u64(self.media_timestamp)
             }
         }
 
-        if let Some(ntp_ts) = self.ntp_timestamp {
-            buf[2] |= 0b0010_0000;
-            BigEndian::write_u64(&mut buf[ret..], ntp_ts);
-            ret += 8;
+        if let Some(ntp) = self.ntp_timestamp {
+            bs.write_u64(ntp);
         }
-        if let Some(ptp_ts) = self.ptp_timestamp {
-            buf[2] |= 0b0001_0000;
-            BigEndian::write_u16(&mut buf[ret..], (ptp_ts >> 64) as u16);
-            ret += 2;
-            BigEndian::write_u64(&mut buf[ret..], ptp_ts as u64);
-            ret += 8;
+        if let Some(ptp) = self.ptp_timestamp {
+            bs.write_u16((ptp >> 64) as u16);
+            bs.write_u64(ptp as u64);
         }
 
         if self.has_timecode != TimeFieldLength::None {
-            buf[2] |= (self.has_timecode as u8) << 2;
-
-            BigEndian::write_u16(&mut buf[ret..], self.frames_per_tc_seconds & 0x7fff);
-            BigEndian::write_u16(&mut buf[ret + 2..], self.duration);
-            if self.drop {
-                buf[ret] |= 0b1000_0000;
-            }
-
-            ret += 4;
+            bs.write_bit(self.drop);
+            bs.write_n_bits((self.frames_per_tc_seconds >> 8) as u8, 7);
+            bs.write_u8(self.frames_per_tc_seconds as u8);
+            bs.write_u16(self.duration);
             if self.has_timecode == TimeFieldLength::Short {
                 for i in 0..=2 {
-                    buf[ret + i] = (self.time_code >> ((2 - i) * 8)) as u8;
+                    bs.write_u8((self.time_code >> ((2 - i) * 8)) as u8);
                 }
-                ret += 3;
-            } else {
-                BigEndian::write_u64(&mut buf[ret..], self.time_code);
-                ret += 8;
+            } else if self.has_timecode == TimeFieldLength::Long {
+                bs.write_u64(self.time_code);
             }
         }
-
-        buf[1] = ret as u8 - 2;
 
         w.write_all(&buf)?;
-        Ok(ret)
+        Ok(len)
     }
+}
 
-    pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
-        if buf.len() < 5 || (buf[1] as usize + 2) > buf.len() {
-            return Err(DecodeError::new("not enough bytes for temi_timeline_descriptor"));
+impl Decode for TEMITimelineDescriptor {
+    fn decode(bs: &mut Bitstream) -> Result<Self, DecodeError> {
+        if bs.remaining_bytes() < TEMI_TIMELINE_FLAGS_LENGTH {
+            return Err(DecodeError::new("not enough bytes for temi_timeline_descriptor flags"));
         }
-        if buf[0] != AF_DESCR_TAG_TIMELINE {
-            return Err(DecodeError::new("incorrect tag value for temi_timeline_descriptor"));
-        }
-        let mut ret = TEMITimelineDescriptor {
-            force_reload: buf[2] & 0b0000_0010 != 0,
-            paused: buf[2] & 0b0000_0001 != 0,
-            discontinuity: buf[3] & 0b1000_0000 != 0,
-            timeline_id: buf[4],
-            ..Self::default()
+
+        let has_timestamp = match bs.read_n_bits(2) {
+            0 => TimeFieldLength::None,
+            1 => TimeFieldLength::Short,
+            2 => TimeFieldLength::Long,
+            _ => TimeFieldLength::Reserved,
         };
 
-        match buf[2] >> 6 {
-            0 => ret.has_timestamp = TimeFieldLength::None,
-            1 => ret.has_timestamp = TimeFieldLength::Short,
-            2 => ret.has_timestamp = TimeFieldLength::Long,
-            _ => return Err(DecodeError::new("incorrect has_timestamp")),
+        let has_ntp = bs.read_boolean();
+        let has_ptp = bs.read_boolean();
+        let has_timecode = match bs.read_n_bits(2) {
+            0 => TimeFieldLength::None,
+            1 => TimeFieldLength::Short,
+            2 => TimeFieldLength::Long,
+            _ => TimeFieldLength::Reserved,
+        };
+        let force_reload = bs.read_boolean();
+        let paused = bs.read_boolean();
+        let discontinuity = bs.read_boolean();
+        bs.skip_bits(7);
+        let timeline_id = bs.read_u8();
+        let mut ret = TEMITimelineDescriptor {
+            has_timestamp,
+            has_timecode,
+            force_reload,
+            paused,
+            discontinuity,
+            timeline_id,
+            ..Default::default()
+        };
+
+        if bs.remaining_bytes() + 2 + TEMI_TIMELINE_FLAGS_LENGTH < ret.encoded_len() {
+            return Err(DecodeError::new("not enough bytes to decode temi_timeline_descriptor"));
         }
 
-        let mut n = 5;
         if ret.has_timestamp != TimeFieldLength::None {
-            ret.timescale = BigEndian::read_u32(&buf[5..9]);
+            ret.timescale = bs.read_u32();
             if ret.has_timestamp == TimeFieldLength::Short {
-                ret.media_timestamp = BigEndian::read_u32(&buf[9..=12]) as u64;
-                n += 8;
-            } else {
-                ret.media_timestamp = BigEndian::read_u64(&buf[9..17]);
-                n += 12;
+                ret.media_timestamp = bs.read_u32() as u64;
+            } else if ret.has_timestamp == TimeFieldLength::Long {
+                ret.media_timestamp = bs.read_u64();
             }
         }
-
-        if buf[2] & 0b0010_0000 != 0 {
-            let ts = BigEndian::read_u64(&buf[n..]);
-            n += 8;
-            ret.ntp_timestamp = Some(ts);
+        if has_ntp {
+            ret.ntp_timestamp = Some(bs.read_u64());
         }
-        if buf[2] & 0b0001_0000 != 0 {
-            let mut ts = (BigEndian::read_u16(&buf[n..]) as u128) << 64;
-            n += 2;
-            ts |= BigEndian::read_u64(&buf[n..]) as u128;
-            n += 8;
-            ret.ptp_timestamp = Some(ts);
-        }
-
-        match (buf[2] & 0b0000_1100) >> 2 {
-            0 => ret.has_timecode = TimeFieldLength::None,
-            1 => ret.has_timecode = TimeFieldLength::Short,
-            2 => ret.has_timecode = TimeFieldLength::Long,
-            _ => return Err(DecodeError::new("incorrect has_timecode")),
+        if has_ptp {
+            ret.ptp_timestamp = Some((bs.read_u16() as u128) << 64 | bs.read_u64() as u128);
         }
         if ret.has_timecode != TimeFieldLength::None {
-            ret.drop = buf[n] >> 7 == 1;
-            ret.frames_per_tc_seconds = (buf[n] as u16 & 0b0111_1111) << 8 | buf[n + 1] as u16;
-            ret.duration = (buf[n + 2] as u16) << 8 | buf[n + 3] as u16;
-            n += 4;
+            ret.drop = bs.read_boolean();
+            ret.frames_per_tc_seconds = (bs.read_n_bits(7) as u16) << 8 | bs.read_u8() as u16;
+            ret.duration = bs.read_u16();
             if ret.has_timecode == TimeFieldLength::Short {
-                ret.time_code = (buf[n] as u64) << 16 | (buf[n + 1] as u64) << 8 | buf[n + 2] as u64;
-            } else {
-                ret.time_code = BigEndian::read_u64(&buf[n..]);
+                ret.time_code = (bs.read_u8() as u64) << 16 | bs.read_u16() as u64;
+            } else if ret.has_timecode == TimeFieldLength::Long {
+                ret.time_code = bs.read_u64();
             }
         }
         Ok(ret)
@@ -202,6 +189,7 @@ impl TEMITimelineDescriptor {
 
 #[cfg(test)]
 mod test {
+    use crate::bitstream::{Bitstream, Decode};
     use crate::temi::{TEMITimelineDescriptor, TimeFieldLength};
 
     #[test]
@@ -212,7 +200,8 @@ mod test {
         assert_eq!(len, 5);
         assert_eq!(w, [4, 3, 0, 0, 0]);
 
-        let _ = TEMITimelineDescriptor::decode(&w[..]).unwrap();
+        let mut bitstream = Bitstream::new(&w[2..]);
+        let _ = TEMITimelineDescriptor::decode(&mut bitstream).unwrap();
     }
 
     #[test]
@@ -242,7 +231,8 @@ mod test {
         assert_eq!(len, temi.encoded_len());
         assert_eq!(len, 2 + 3 + 12 + 8 + 10 + 4 + 3);
 
-        let decoded = TEMITimelineDescriptor::decode(&w).unwrap();
+        let mut bitstream = Bitstream::new(&w[2..]);
+        let decoded = TEMITimelineDescriptor::decode(&mut bitstream).unwrap();
         assert_eq!(decoded, temi);
     }
 
@@ -273,7 +263,8 @@ mod test {
         assert_eq!(len, temi.encoded_len());
         assert_eq!(len, 2 + 3 + 8 + 4 + 3);
 
-        let decoded = TEMITimelineDescriptor::decode(&w).unwrap();
+        let mut bitstream = Bitstream::new(&w[2..]);
+        let decoded = TEMITimelineDescriptor::decode(&mut bitstream).unwrap();
         assert_eq!(decoded, temi);
     }
 }
