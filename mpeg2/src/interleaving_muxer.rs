@@ -6,21 +6,19 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 const TS_33BIT_MASK: u64 = 0x1FFFFFFFF;
-const TS_ROLLOVER_FLAG: u64 = 1 << 50; // a value large enough but must not overflow when multiply by 300
-const TS_ROLLOVER_THRESHOLD: u64 = 1 << 23; // ~ 93s
 
 pub struct InterleavingMuxer<W: Write> {
     inner: Muxer<W>,
     max_buffer_duration_90khz: u64,
     largest_ts_in_buffer: u64,
     streams: Vec<InterleavingStream>,
+    last_fixed_timestamp: u64,
 }
 
 pub struct InterleavingStream {
     inner: Stream,
     buffered_packets: VecDeque<Packet>,
     last_written_ts: u64,
-    ts_rollover: bool,
 }
 
 impl<W: Write> InterleavingMuxer<W> {
@@ -31,6 +29,7 @@ impl<W: Write> InterleavingMuxer<W> {
             max_buffer_duration_90khz: (max_buffer_duration.as_millis() * 90) as u64,
             largest_ts_in_buffer: 0,
             streams: vec![],
+            last_fixed_timestamp: 0,
         }
     }
 
@@ -40,63 +39,31 @@ impl<W: Write> InterleavingMuxer<W> {
             inner,
             buffered_packets: VecDeque::new(),
             last_written_ts: 0,
-            ts_rollover: false,
         };
         self.streams.push(interleaving_stream);
     }
 
-    fn handle_ts_rollover(&mut self, stream_index: usize, packet: &mut Packet) {
-        let stream = &mut self.streams[stream_index];
-        if stream.ts_rollover {
-            if let Some(ref mut dts) = packet.dts_90khz {
-                *dts |= TS_ROLLOVER_FLAG;
-            } else if let Some(ref mut pts) = packet.pts_90khz {
-                *pts |= TS_ROLLOVER_FLAG;
-            }
-            return;
-        }
-
-        let buffered_packets = &stream.buffered_packets;
-        if let Some(ref mut dts) = packet.dts_90khz {
-            let largest_ts = buffered_packets
-                .back()
-                .and_then(|p| p.dts_90khz.or(p.pts_90khz))
-                .unwrap_or(stream.last_written_ts);
-            if *dts < largest_ts && largest_ts - *dts > TS_ROLLOVER_THRESHOLD {
-                *dts |= TS_ROLLOVER_FLAG;
-                stream.ts_rollover = true;
-            }
-        } else if let Some(ref mut pts) = packet.pts_90khz {
-            let largest_ts = buffered_packets
-                .back()
-                .and_then(|p| p.dts_90khz.or(p.pts_90khz))
-                .unwrap_or(stream.last_written_ts);
-            if *pts < largest_ts && largest_ts - *pts > TS_ROLLOVER_THRESHOLD {
-                *pts |= TS_ROLLOVER_FLAG;
-                stream.ts_rollover = true;
-            }
-        }
-    }
-
-    fn reset_rollover_ts(&mut self) {
-        // handle the special case where one stream stops, but time is not rolled over
-        if self
-            .streams
-            .iter()
-            .any(|s| self.largest_ts_in_buffer - s.last_written_ts < TS_ROLLOVER_THRESHOLD && !s.ts_rollover)
-        {
-            return;
-        }
-        for s in self.streams.iter_mut() {
-            s.last_written_ts &= TS_33BIT_MASK;
-            s.ts_rollover = false;
-            s.buffered_packets.iter_mut().for_each(reset_dts_pts);
-        }
-        self.largest_ts_in_buffer &= TS_33BIT_MASK;
+    /// This function returns a timestamp with high bits added in order to keep it as close as possible to `last_fixed_timestamp`.
+    /// To correctly track overflows, `last_fixed_timestamp` should be the timestamp that was previously returned by this function.
+    fn fixed_timestamp(&mut self, ts: u64) -> u64 {
+        self.last_fixed_timestamp = if (self.last_fixed_timestamp & TS_33BIT_MASK) > 0x180000000 && ts < 0x80000000 {
+            // It looks like ts rolled over. This must be the first timestamp of a new epoch.
+            ts | ((self.last_fixed_timestamp >> 33) + 1) << 33
+        } else if (self.last_fixed_timestamp & TS_33BIT_MASK) < 0x80000000 && ts > 0x180000000 && self.last_fixed_timestamp > TS_33BIT_MASK {
+            // It looks like ts rolled under. This could happen if we look at timestamps out of order.
+            ts | ((self.last_fixed_timestamp >> 33) - 1) << 33
+        } else {
+            ts | (self.last_fixed_timestamp >> 33) << 33
+        };
+        self.last_fixed_timestamp
     }
 
     pub fn write(&mut self, stream_index: usize, mut p: Packet) -> Result<(), EncodeError> {
-        self.handle_ts_rollover(stream_index, &mut p);
+        if let Some(ref mut dts) = p.dts_90khz {
+            *dts = self.fixed_timestamp(*dts);
+        } else if let Some(ref mut pts) = p.pts_90khz {
+            *pts = self.fixed_timestamp(*pts);
+        }
 
         let last_written_ts = self.streams[stream_index].last_written_ts;
         // if the packet doesn't have a dts, use the pts. if it doesn't have a pts, consider it to have the same timestamp as the last packet
@@ -152,12 +119,7 @@ impl<W: Write> InterleavingMuxer<W> {
                 for packet in packets {
                     self.write_muxer_packet(min_ts_stream_index, packet)?;
                 }
-                let stream = &mut self.streams[min_ts_stream_index];
-                stream.last_written_ts = last_written_ts;
-
-                if stream.ts_rollover {
-                    self.reset_rollover_ts();
-                }
+                self.streams[min_ts_stream_index].last_written_ts = last_written_ts;
             }
         }
         Ok(())
@@ -215,7 +177,6 @@ impl<W: Write> InterleavingMuxer<W> {
                 packets.push((stream_index, stream.last_written_ts, p));
             }
             stream.last_written_ts = 0;
-            stream.ts_rollover = false;
         });
 
         packets.sort_unstable_by_key(|(_, ts, p)| p.dts_90khz.or(p.pts_90khz).unwrap_or(*ts));
@@ -230,14 +191,6 @@ impl<W: Write> Drop for InterleavingMuxer<W> {
     fn drop(&mut self) {
         // Errors are ignored when flushing the buffered packets.
         let _ = self.flush();
-    }
-}
-
-fn reset_dts_pts(packet: &mut Packet) {
-    if let Some(ref mut dts) = packet.dts_90khz {
-        *dts &= TS_33BIT_MASK;
-    } else if let Some(ref mut pts) = packet.pts_90khz {
-        *pts &= TS_33BIT_MASK;
     }
 }
 
@@ -418,33 +371,41 @@ mod test {
     }
 
     #[test]
-    fn test_timestamp_rollover_in_multiple_streams() {
-        let num_of_pes_packets_per_stream: usize = 200;
-        let num_of_streams: usize = 2;
-        let data_in = get_test_stream_data();
-        let pes_packets = get_pes_packets_from_byte_stream(&data_in, num_of_pes_packets_per_stream * num_of_streams, &[0x100], true);
-
-        let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
-        for (i, mut pes_packet) in pes_packets.into_iter().enumerate() {
-            let h = pes_packet.header.optional_header.as_mut().unwrap();
-            if i < num_of_pes_packets_per_stream {
-                if let Some(ref mut dts) = h.dts {
-                    *dts = TS_33BIT_MASK - (num_of_pes_packets_per_stream as u64 - i as u64) * 9_000 + i as u64;
-                } else if let Some(ref mut pts) = h.pts {
-                    *pts = TS_33BIT_MASK - (num_of_pes_packets_per_stream as u64 - i as u64) * 9_000 + i as u64;
-                }
-            } else if let Some(ref mut dts) = h.dts {
-                *dts = (i - num_of_pes_packets_per_stream + 2) as u64 * 9_000 + i as u64;
-            } else if let Some(ref mut pts) = h.pts {
-                *pts = (i - num_of_pes_packets_per_stream + 2) as u64 * 9_000 + i as u64;
+    fn test_timestamp_rolled_over_multiple_times() {
+        let step = 0x1001u64;
+        let mut ts_vec = vec![];
+        let mut f = |mut ts, count| {
+            for _ in 0..count {
+                ts += step;
+                ts_vec.push(ts);
             }
-            pes_packet.header.stream_id += (i % 2) as u8;
+        };
+        f(0x1_fffb_0000u64, 10);
+        f(0x80002, 10);
+        f(0x80000003, 10);
+        let timestamps = std::iter::repeat(ts_vec).take(6).flatten().collect::<Vec<u64>>();
+        // println!("{:02x?}", timestamps);
+
+        let data_in = get_test_stream_data();
+        let pes_packets = get_pes_packets_from_byte_stream(&data_in, timestamps.len(), &[0x100], false);
+
+        let num_of_streams: usize = 2;
+        let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
+        for (i, mut pes_packet) in pes_packets.into_iter().enumerate().take(timestamps.len()) {
+            let h = pes_packet.header.optional_header.as_mut().unwrap();
+            if let Some(ref mut dts) = h.dts {
+                *dts = timestamps[i];
+            } else if let Some(ref mut pts) = h.pts {
+                *pts = timestamps[i];
+            }
+            pes_packet.header.stream_id += (i % num_of_streams) as u8;
             pes_packets_array[i % num_of_streams].push_back(pes_packet);
         }
 
+        let num_of_pes_packets_per_stream: usize = timestamps.len() / num_of_streams;
         let mut data_out = Vec::new();
         {
-            let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(300));
+            let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(10000));
             for i in 0..num_of_streams {
                 muxer.add_stream(StreamConfig {
                     stream_id: 0xe0 + i as u8,
@@ -461,19 +422,17 @@ mod test {
                 }
                 random_access_indicator = false;
             }
-
             muxer.flush().unwrap();
             assert!(muxer.streams.iter().all(|s| s.buffered_packets.is_empty()));
             assert!(muxer.streams.iter().all(|s| s.last_written_ts == 0));
             assert_eq!(muxer.largest_ts_in_buffer, 0);
         }
-        let reconstructed_pes_packets =
-            get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets_per_stream * num_of_streams, &[0x100, 0x101, 0x102], false);
-        assert_eq!(reconstructed_pes_packets.len(), num_of_pes_packets_per_stream * num_of_streams);
+        let reconstructed_pes_packets = get_pes_packets_from_byte_stream(&data_out, num_of_pes_packets_per_stream * num_of_streams, &[0x100, 0x101], false);
+        assert_eq!(reconstructed_pes_packets.len(), timestamps.len());
 
-        verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets[0..num_of_pes_packets_per_stream]);
-        verify_pes_packets_ts_in_sorted_order(&reconstructed_pes_packets[num_of_pes_packets_per_stream..]);
-
-        assert!(get_pes_packet_ts(reconstructed_pes_packets.last().unwrap()) < get_pes_packet_ts(reconstructed_pes_packets.first().unwrap()));
+        for (p, ts) in reconstructed_pes_packets.iter().zip(timestamps) {
+            let h = p.header.optional_header.as_ref().unwrap();
+            assert_eq!(h.dts.or(h.pts).unwrap(), ts);
+        }
     }
 }
