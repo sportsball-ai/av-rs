@@ -92,10 +92,10 @@ impl<'a> Bitstream<'a> {
         }
     }
 
-    pub fn peek_next_byte(&self) -> usize {
+    pub fn get_next_byte(&self) -> usize {
         self.next_byte
     }
-    pub fn peek_next_bit(&self) -> u8 {
+    pub fn get_next_bit(&self) -> u8 {
         self.next_bit
     }
 }
@@ -119,12 +119,16 @@ impl<'a> BitstreamWriter<'a> {
         }
     }
 
-    pub fn write_bit(&mut self, flag: bool) {
+    pub fn write_boolean(&mut self, flag: bool) {
         if flag {
             self.inner[self.next_byte] |= 1 << (7 - self.next_bit);
         }
         self.next_byte += (self.next_bit as usize + 1) >> 3;
         self.next_bit = (self.next_bit + 1) & 0x7;
+    }
+
+    pub fn write_bit(&mut self, val: u8) {
+        self.write_boolean(val & 1 == 1);
     }
 
     // Writes the lower n bits in val, n + self.next_bit <= 8
@@ -158,5 +162,9 @@ impl<'a> BitstreamWriter<'a> {
         n += self.next_bit;
         self.next_byte += (n as usize) >> 3;
         self.next_bit = n as u8 & 0x7;
+    }
+
+    pub fn skip_n_bytes(&mut self, n: usize) {
+        self.next_byte += n;
     }
 }

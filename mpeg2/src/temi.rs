@@ -1,6 +1,5 @@
 use crate::bitstream::{Bitstream, BitstreamWriter, Decode};
 use crate::{DecodeError, EncodeError};
-use core2::io::Write;
 
 pub const AF_DESCR_TAG_TIMELINE: u8 = 0x04;
 const TEMI_TIMELINE_FLAGS_LENGTH: usize = 3;
@@ -66,20 +65,18 @@ impl TEMITimelineDescriptor {
         len
     }
 
-    pub fn encode<W: Write>(&self, mut w: W) -> Result<usize, EncodeError> {
+    pub fn encode(&self, bs: &mut BitstreamWriter) -> Result<usize, EncodeError> {
         let len = self.encoded_len();
-        let mut buf = vec![0u8; len];
-        let mut bs = BitstreamWriter::new(&mut buf);
 
         bs.write_u8(AF_DESCR_TAG_TIMELINE);
         bs.write_u8((len - 2) as u8);
         bs.write_n_bits(self.has_timestamp as u8, 2);
-        bs.write_bit(self.ntp_timestamp.is_some());
-        bs.write_bit(self.ptp_timestamp.is_some());
+        bs.write_boolean(self.ntp_timestamp.is_some());
+        bs.write_boolean(self.ptp_timestamp.is_some());
         bs.write_n_bits(self.has_timecode as u8, 2);
-        bs.write_bit(self.force_reload);
-        bs.write_bit(self.paused);
-        bs.write_bit(self.discontinuity);
+        bs.write_boolean(self.force_reload);
+        bs.write_boolean(self.paused);
+        bs.write_boolean(self.discontinuity);
         bs.skip_n_bits(7);
         bs.write_u8(self.timeline_id);
 
@@ -101,7 +98,7 @@ impl TEMITimelineDescriptor {
         }
 
         if self.has_timecode != TimeFieldLength::None {
-            bs.write_bit(self.drop);
+            bs.write_boolean(self.drop);
             bs.write_n_bits((self.frames_per_tc_seconds >> 8) as u8, 7);
             bs.write_u8(self.frames_per_tc_seconds as u8);
             bs.write_u16(self.duration);
@@ -114,7 +111,6 @@ impl TEMITimelineDescriptor {
             }
         }
 
-        w.write_all(&buf)?;
         Ok(len)
     }
 }
@@ -189,14 +185,17 @@ impl Decode for TEMITimelineDescriptor {
 
 #[cfg(test)]
 mod test {
-    use crate::bitstream::{Bitstream, Decode};
+    use crate::bitstream::{Bitstream, BitstreamWriter, Decode};
     use crate::temi::{TEMITimelineDescriptor, TimeFieldLength};
 
     #[test]
     fn test_default_encode_decode() {
-        let mut w: Vec<u8> = vec![];
         let temi = TEMITimelineDescriptor::default();
-        let len = temi.encode(&mut w).unwrap();
+
+        let mut w: Vec<u8> = vec![0x0u8; temi.encoded_len()];
+        let mut bs = BitstreamWriter::new(&mut w[..]);
+
+        let len = temi.encode(&mut bs).unwrap();
         assert_eq!(len, 5);
         assert_eq!(w, [4, 3, 0, 0, 0]);
 
@@ -206,7 +205,6 @@ mod test {
 
     #[test]
     fn test_encode_decode() {
-        let mut w: Vec<u8> = vec![];
         let temi = TEMITimelineDescriptor {
             has_timestamp: TimeFieldLength::Long,
             timescale: 0xEBF1_3405,
@@ -227,7 +225,9 @@ mod test {
             timeline_id: 0xf3,
         };
 
-        let len = temi.encode(&mut w).unwrap();
+        let mut w: Vec<u8> = vec![0x0u8; temi.encoded_len()];
+        let mut bs = BitstreamWriter::new(&mut w[..]);
+        let len = temi.encode(&mut bs).unwrap();
         assert_eq!(len, temi.encoded_len());
         assert_eq!(len, 2 + 3 + 12 + 8 + 10 + 4 + 3);
 
@@ -238,7 +238,6 @@ mod test {
 
     #[test]
     fn test_ntp_without_media_timestamp() {
-        let mut w: Vec<u8> = vec![];
         let temi = TEMITimelineDescriptor {
             has_timestamp: TimeFieldLength::None,
             timescale: 0,
@@ -259,7 +258,9 @@ mod test {
             timeline_id: 0xf3,
         };
 
-        let len = temi.encode(&mut w).unwrap();
+        let mut w: Vec<u8> = vec![0x0u8; temi.encoded_len()];
+        let mut bs = BitstreamWriter::new(&mut w[..]);
+        let len = temi.encode(&mut bs).unwrap();
         assert_eq!(len, temi.encoded_len());
         assert_eq!(len, 2 + 3 + 8 + 4 + 3);
 
