@@ -81,7 +81,7 @@ impl<'a> Bitstream<'a> {
     }
 
     pub fn remaining_bytes(&self) -> usize {
-        self.inner.len() - self.next_byte
+        self.inner.len().saturating_sub(self.next_byte)
     }
 
     pub fn wrapped_stream(&self, n: usize) -> Self {
@@ -92,10 +92,19 @@ impl<'a> Bitstream<'a> {
         }
     }
 
-    pub fn get_next_byte(&self) -> usize {
+    pub fn get_next_byte(&self) -> u8 {
+        self.inner[self.next_byte]
+    }
+
+    pub fn get_next_bit(&self) -> u8 {
+        self.inner[self.next_byte] >> (7 - self.next_bit) & 1
+    }
+
+    pub fn next_byte(&self) -> usize {
         self.next_byte
     }
-    pub fn get_next_bit(&self) -> u8 {
+
+    pub fn next_bit(&self) -> u8 {
         self.next_bit
     }
 }
@@ -166,5 +175,59 @@ impl<'a> BitstreamWriter<'a> {
 
     pub fn skip_n_bytes(&mut self, n: usize) {
         self.next_byte += n;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::bitstream::*;
+
+    #[test]
+    fn test_bitstream_read() {
+        let buf = [
+            0b10110111, 0b10111010, 0x70, 0x0f, 0x47, 0x55, 0x54, 0xce, 0x3f, 0x82, 0xfa, 0x64, 0x7c, 0x16, 0xf1, 0x55, 0x54, 0xce, 0x3f,
+        ];
+        let mut bs = Bitstream::new(&buf[..]);
+        assert!(bs.read_boolean());
+        assert_eq!(bs.read_bit(), 0);
+        assert_eq!(bs.read_n_bits(2), 0b11);
+        assert_eq!(bs.read_n_bits(3), 0b011);
+        bs.skip_bits(3);
+        assert_eq!(bs.read_n_bits(6), 0b11_1010);
+
+        assert_eq!(bs.read_u8(), 0x70);
+        // assert_eq!(bs.read_u16(), (0x0f<<8) + 0x47);
+        assert_eq!(bs.read_u16(), BigEndian::read_u16(&[0x0f, 0x47]));
+        assert_eq!(bs.read_u32(), 0x55 << 24 | 0x54 << 16 | 0xce << 8 | 0x3f);
+        bs.skip_bytes(1);
+        assert_eq!(bs.remaining_bytes(), 9);
+        assert_eq!(bs.read_u64(), BigEndian::read_u64(&[0xfa, 0x64, 0x7c, 0x16, 0xf1, 0x55, 0x54, 0xce]));
+        bs.skip_bytes(8);
+        assert_eq!(bs.remaining_bytes(), 0);
+    }
+
+    #[test]
+    fn test_bitstream_write() {
+        let data = [
+            0x70, 0b10100100, 0b00111010, 0x0f, 0x47, 0x55, 0x54, 0xce, 0x3f, 0x00, 0x00, 0x64, 0x7c, 0x16, 0xf1, 0x55, 0x54, 0xce, 0x3f,
+        ];
+
+        let mut w = vec![0x00; data.len()];
+        let mut bs = BitstreamWriter::new(&mut w);
+        bs.write_u8(0x70);
+        bs.write_boolean(true);
+        bs.write_n_bits(0b01, 2);
+        bs.skip_n_bits(2);
+        bs.write_bit(1);
+        bs.skip_n_bits(4);
+        bs.write_n_bits(0b11101, 5);
+        bs.write_boolean(false);
+
+        bs.write_u16(0x0f << 8 | 0x47);
+        bs.write_u32(0x55 << 24 | 0x54 << 16 | 0xce << 8 | 0x3f);
+        bs.skip_n_bytes(2);
+        bs.write_u64(0x64 << 56 | 0x7c << 48 | 0x16 << 40 | 0xf1 << 32 | 0x55 << 24 | 0x54 << 16 | 0xce << 8 | 0x3f);
+
+        assert_eq!(&w, &data);
     }
 }
