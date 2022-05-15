@@ -113,9 +113,6 @@ impl AdaptationField {
                             af.temi_timeline_descriptors.push(descr);
                         } else {
                             // Other types of AF descriptors are ignored
-                            if af_descr_bitstream.remaining_bytes() < af_descr_length as usize {
-                                return Err(DecodeError::new("ignored AF descriptor length too long"));
-                            }
                             af_descr_bitstream.skip_bytes(af_descr_length as usize);
                         }
                     }
