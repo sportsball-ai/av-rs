@@ -173,7 +173,7 @@ impl<'a> Future for Connect {
                     unsafe {
                         check_code("srt_connect", sys::srt_connect(socket.raw(), addr, len as _))?;
                     }
-                    Ok(AsyncStream::new(options.stream_id, socket)?)
+                    AsyncStream::new(options.stream_id, socket)
                 });
                 let ret = Pin::new(&mut handle).poll(cx);
                 self.state = State::Busy(handle);
@@ -277,11 +277,11 @@ mod test {
         for i in 0..5 {
             let payload = [i as u8; 1316];
 
-            for _ in 0..10000 {
+            for _ in 0..10 {
                 assert_eq!(client_conn.write(&payload).await.unwrap(), 1316);
             }
 
-            for _ in 0..10000 {
+            for _ in 0..10 {
                 assert_eq!(server_conn.read(&mut buf).await.unwrap(), 1316);
                 assert_eq!(&buf, &payload);
             }
@@ -300,10 +300,12 @@ mod test {
             })
             .unwrap();
 
-        let mut options = ConnectOptions::default();
-        options.stream_id = Some("mystreamid".to_string());
+        let mut options = ConnectOptions {
+            passphrase: Some("notthepassphrase".to_string()),
+            stream_id: Some("mystreamid".to_string()),
+            ..Default::default()
+        };
 
-        options.passphrase = Some("notthepassphrase".to_string());
         assert!(AsyncStream::connect("127.0.0.1:1237", &options).await.is_err());
 
         options.passphrase = Some("thepassphrase".to_string());

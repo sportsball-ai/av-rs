@@ -278,8 +278,8 @@ impl Stream {
                             *rfc6381_codec = rfc6381::codec_from_h265_nalu(nalu.clone());
                             let mut rbsp = h265::Bitstream::new(&mut nalu.rbsp_byte);
                             let sps = h265::SequenceParameterSet::decode(&mut rbsp)?;
-                            *width = sps.pic_width_in_luma_samples.0 as _;
-                            *height = sps.pic_height_in_luma_samples.0 as _;
+                            *width = sps.croppedWidth() as _;
+                            *height = sps.croppedHeight() as _;
                             if sps.vui_parameters_present_flag.0 != 0
                                 && sps.vui_parameters.vui_timing_info_present_flag.0 != 0
                                 && sps.vui_parameters.vui_num_units_in_tick.0 != 0
@@ -630,9 +630,9 @@ impl PTSAnalyzer {
 
         let fps = 90000.0 / (avg_delta as f64);
 
-        if max_delta - min_delta > 5 {
-            // if the deltas were inconsistent (e.g. due to wallclock timestamps) and this was
-            // nearly 30 or 60 fps, we should assume 29.97 or 59.94
+        if max_delta - min_delta > 5 || (0.5 - fps.fract()).abs() < 0.48 {
+            // if the deltas were inconsistent (e.g. due to wallclock timestamps) or not a round
+            // number and this was nearly 30 or 60 fps, we should assume 29.97 or 59.94
             if (fps - 29.97).abs() < 5.0 {
                 return Some(29.97);
             } else if (fps - 59.94).abs() < 5.0 {
@@ -818,6 +818,42 @@ mod test {
                 timecode: None,
                 is_interlaced: false,
             },]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyzer_h265_cropped() {
+        let mut analyzer = Analyzer::new();
+
+        {
+            let mut f = File::open("src/testdata/h265-cropped.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            let packets = ts::decode_packets(&buf).unwrap();
+            analyzer.handle_packets(&packets).unwrap();
+            analyzer.flush().unwrap();
+        }
+
+        assert!(analyzer.has_video());
+        assert_eq!(
+            analyzer.streams(),
+            vec![
+                StreamInfo::Video {
+                    width: 1920,
+                    height: 1080,
+                    frame_rate: 59.94,
+                    frame_count: 39,
+                    rfc6381_codec: Some("hvc1.1.6.L153.B0".to_string()),
+                    timecode: None,
+                    is_interlaced: false,
+                },
+                StreamInfo::Audio {
+                    channel_count: 2,
+                    sample_rate: 48000,
+                    sample_count: 31744,
+                    rfc6381_codec: Some("mp4a.40.2".to_string())
+                }
+            ]
         );
     }
 

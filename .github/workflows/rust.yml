@@ -26,19 +26,19 @@ jobs:
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: 1.56.0
+        toolchain: 1.60.0
         components: clippy
         override: true
     - name: Build
       uses: actions-rs/cargo@v1
       with:
         command: build
-        args: --verbose --workspace --exclude xilinx
+        args: --verbose --workspace --exclude xilinx --features srt/async
     - name: Lint
-      run: cargo clippy --workspace --exclude xilinx --all-targets -- --deny warnings
+      run: cargo clippy --workspace --exclude xilinx --features srt/async --all-targets -- --deny warnings
     - name: Test
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --verbose --workspace --exclude xilinx --exclude xcoder
+        args: --verbose --workspace --exclude xilinx --features srt/async --exclude xcoder
 

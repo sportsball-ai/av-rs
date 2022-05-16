@@ -26,7 +26,17 @@ impl XlnxDecoder {
 
         let in_buf: XmaDataBuffer = Default::default();
 
-        let out_frame = unsafe { xma_frame_alloc(&mut frame_props, false) };
+        let out_frame = unsafe { xma_frame_alloc(&mut frame_props, true) };
+
+            // Loop through the planes. no buffer shouold be allocated yet.
+            // Since this will be used in a pipeline, xvbm will allocate the buffers.
+            // So we need to specify to use device buffers.
+        unsafe {
+            for i in 0..2 {
+                (*out_frame).data[i].buffer_type = XmaBufferType_XMA_DEVICE_BUFFER_TYPE;
+                (*out_frame).data[i].is_clone = true;
+            }
+        }
 
         Ok(Self {
             dec_session,
@@ -212,7 +222,7 @@ mod decoder_tests {
                 loop {
                     match decoder.xlnx_dec_recv_frame() {
                         Ok(_) => {
-                            //the frame was decoded. do nothing yet.
+                            // the frame was decoded. do nothing yet.
                             frames_decoded += 1;
                             // throw away the frame. Clear XVBM buffer
                             unsafe {
@@ -244,7 +254,7 @@ mod decoder_tests {
                 match decoder.xlnx_dec_recv_frame() {
                     Ok(_) => {
                         frames_decoded += 1;
-                        // The frame was successfully decoded.
+                        // the frame was successfully decoded.
                     }
                     Err(e) => match e.err {
                         XlnxErrorType::XlnxEOS => {
