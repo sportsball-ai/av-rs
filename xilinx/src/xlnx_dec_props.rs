@@ -2,7 +2,7 @@ use simple_error::SimpleError;
 
 use crate::{strcpy_to_arr_i8, sys::*};
 
-pub(crate) const MAX_DEC_PARAMS: usize = 11;
+pub const MAX_DEC_PARAMS: usize = 11;
 const BIT_DEPTH_PARAM_NAME: &[u8] = b"bitdepth\0";
 const CODEC_TYPE_PARAM_NAME: &[u8] = b"codec_type\0";
 const LOW_LATENCY_PARAM_NAME: &[u8] = b"low_latency\0";
