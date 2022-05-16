@@ -244,6 +244,28 @@ impl SequenceParameterSet {
             _ => 0,
         }
     }
+
+    pub fn SubWidthC(&self) -> u64 {
+        match (self.chroma_format_idc.0, self.separate_colour_plane_flag.0) {
+            (1, 0) | (2, 0) => 2,
+            _ => 1,
+        }
+    }
+
+    pub fn SubHeightC(&self) -> u64 {
+        match (self.chroma_format_idc.0, self.separate_colour_plane_flag.0) {
+            (1, 0) => 2,
+            _ => 1,
+        }
+    }
+
+    pub fn croppedWidth(&self) -> u64 {
+        self.pic_width_in_luma_samples.0 - self.SubWidthC() * (self.conf_win_left_offset.0 + self.conf_win_right_offset.0)
+    }
+
+    pub fn croppedHeight(&self) -> u64 {
+        self.pic_height_in_luma_samples.0 - self.SubHeightC() * (self.conf_win_top_offset.0 + self.conf_win_bottom_offset.0)
+    }
 }
 
 impl Decode for SequenceParameterSet {
