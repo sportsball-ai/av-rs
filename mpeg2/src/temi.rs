@@ -65,7 +65,8 @@ impl TEMITimelineDescriptor {
         len
     }
 
-    pub fn encode(&self, bs: &mut BitstreamWriter) -> Result<usize, EncodeError> {
+    pub fn encode(&self, buf: &mut [u8]) -> Result<usize, EncodeError> {
+        let mut bs = BitstreamWriter::new(buf);
         let len = self.encoded_len();
 
         bs.write_u8(AF_DESCR_TAG_TIMELINE);
@@ -195,7 +196,7 @@ mod test {
         let mut w: Vec<u8> = vec![0x0u8; temi.encoded_len()];
         let mut bs = BitstreamWriter::new(&mut w[..]);
 
-        let len = temi.encode(&mut bs).unwrap();
+        let len = temi.encode(bs.inner_remaining()).unwrap();
         assert_eq!(len, 5);
         assert_eq!(w, [4, 3, 0, 0, 0]);
 
@@ -227,7 +228,7 @@ mod test {
 
         let mut w: Vec<u8> = vec![0x0u8; temi.encoded_len()];
         let mut bs = BitstreamWriter::new(&mut w[..]);
-        let len = temi.encode(&mut bs).unwrap();
+        let len = temi.encode(bs.inner_remaining()).unwrap();
         assert_eq!(len, temi.encoded_len());
         assert_eq!(len, 2 + 3 + 12 + 8 + 10 + 4 + 3);
 
@@ -260,7 +261,7 @@ mod test {
 
         let mut w: Vec<u8> = vec![0x0u8; temi.encoded_len()];
         let mut bs = BitstreamWriter::new(&mut w[..]);
-        let len = temi.encode(&mut bs).unwrap();
+        let len = temi.encode(bs.inner_remaining()).unwrap();
         assert_eq!(len, temi.encoded_len());
         assert_eq!(len, 2 + 3 + 8 + 4 + 3);
 

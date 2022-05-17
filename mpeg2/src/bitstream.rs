@@ -176,6 +176,10 @@ impl<'a> BitstreamWriter<'a> {
     pub fn skip_n_bytes(&mut self, n: usize) {
         self.next_byte += n;
     }
+
+    pub fn inner_remaining(&mut self) -> &mut [u8] {
+        &mut self.inner[self.next_byte..]
+    }
 }
 
 #[cfg(test)]

@@ -77,43 +77,46 @@ impl AdaptationField {
                 if adaptation_field_extension_length == 0 {
                     return Err(DecodeError::new("invalid adaptation_field_extension_length"));
                 }
+                if bs.remaining_bytes() + 1 < adaptation_field_extension_length as usize {
+                    return Err(DecodeError::new("adaptation descriptor field length too long"));
+                }
 
-                let ltw_flag = bs.read_boolean();
-                let piecewise_rate_flag = bs.read_boolean();
-                let seamless_splice_flag = bs.read_boolean();
-                let af_descriptor_not_present_flag = bs.read_boolean();
-                bs.skip_bits(4);
+                let mut af_extension_bs = bs.wrapped_stream(adaptation_field_extension_length as usize);
+
+                let ltw_flag = af_extension_bs.read_boolean();
+                let piecewise_rate_flag = af_extension_bs.read_boolean();
+                let seamless_splice_flag = af_extension_bs.read_boolean();
+                let af_descriptor_not_present_flag = af_extension_bs.read_boolean();
+                af_extension_bs.skip_bits(4);
 
                 if ltw_flag {
                     // skip ltw
-                    bs.skip_bytes(2);
+                    af_extension_bs.skip_bytes(2);
                 }
                 if piecewise_rate_flag {
                     // skip piecewise_rate
-                    bs.skip_bytes(3);
+                    af_extension_bs.skip_bytes(3);
                 }
                 if seamless_splice_flag {
                     // skip seamless_splice
-                    bs.skip_bytes(5);
+                    af_extension_bs.skip_bytes(5);
                 }
 
                 if !af_descriptor_not_present_flag {
                     // AF descriptors
-                    if bs.remaining_bytes() + 1 < adaptation_field_extension_length as usize {
-                        return Err(DecodeError::new("adaptation descriptor field length too long"));
-                    }
+
                     af.temi_timeline_descriptors = vec![];
-                    let mut af_descr_bitstream = bs.wrapped_stream(adaptation_field_extension_length as usize - 1);
-                    while af_descr_bitstream.remaining_bytes() >= 2 {
-                        let af_descr_tag = af_descr_bitstream.read_u8();
-                        let af_descr_length = af_descr_bitstream.read_u8();
+
+                    while af_extension_bs.remaining_bytes() >= 2 {
+                        let af_descr_tag = af_extension_bs.read_u8();
+                        let af_descr_length = af_extension_bs.read_u8();
                         if af_descr_tag == AF_DESCR_TAG_TIMELINE {
-                            let descr = TEMITimelineDescriptor::decode(&mut af_descr_bitstream.wrapped_stream(af_descr_length as usize))?;
-                            af_descr_bitstream.skip_bytes(af_descr_length as usize);
+                            let descr = TEMITimelineDescriptor::decode(&mut af_extension_bs.wrapped_stream(af_descr_length as usize))?;
+                            af_extension_bs.skip_bytes(af_descr_length as usize);
                             af.temi_timeline_descriptors.push(descr);
                         } else {
                             // Other types of AF descriptors are ignored
-                            af_descr_bitstream.skip_bytes(af_descr_length as usize);
+                            af_extension_bs.skip_bytes(af_descr_length as usize);
                         }
                     }
                 }
@@ -205,7 +208,8 @@ impl AdaptationField {
             bs.write_u8(adaptation_field_extension_length as u8);
             bs.skip_n_bits(8);
             for descr in &self.temi_timeline_descriptors {
-                descr.encode(&mut bs)?;
+                let len = descr.encode(bs.inner_remaining())?;
+                bs.skip_n_bytes(len);
             }
         }
 
@@ -765,33 +769,37 @@ mod test {
             timeline_id: 0xa1,
         };
 
-        let temi2 = TEMITimelineDescriptor {
-            has_timestamp: TimeFieldLength::Long,
-            timescale: 225,
-            media_timestamp: 8232432,
+        // let temi2 = TEMITimelineDescriptor {
+        //     has_timestamp: TimeFieldLength::Long,
+        //     timescale: 225,
+        //     media_timestamp: 8232432,
+        //
+        //     ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
+        //     ptp_timestamp: None,
+        //
+        //     has_timecode: TimeFieldLength::Short,
+        //     drop: true,
+        //     frames_per_tc_seconds: 0x35a3,
+        //     duration: 0x9a8a,
+        //     time_code: 0xfb_82ef,
+        //
+        //     force_reload: true,
+        //     paused: true,
+        //     discontinuity: false,
+        //     timeline_id: 0xf3,
+        // };
 
-            ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
-            ptp_timestamp: None,
-
-            has_timecode: TimeFieldLength::Short,
-            drop: true,
-            frames_per_tc_seconds: 0x35a3,
-            duration: 0x9a8a,
-            time_code: 0xfb_82ef,
-
-            force_reload: true,
-            paused: true,
-            discontinuity: false,
-            timeline_id: 0xf3,
-        };
-
-        let payload = &packet.payload.unwrap()[temi1.encoded_len() + temi2.encoded_len() + 2..];
-        af.temi_timeline_descriptors = vec![temi1, temi2];
+        // let payload = &packet.payload.unwrap()[temi1.encoded_len() + temi2.encoded_len() + 2..];
+        // af.temi_timeline_descriptors = vec![temi1, temi2];
+        // packet.payload = Some(Cow::Borrowed(payload));
+        let payload = &packet.payload.unwrap()[temi1.encoded_len() + 2..];
+        af.temi_timeline_descriptors = vec![temi1];
         packet.payload = Some(Cow::Borrowed(payload));
 
         let mut w = vec![];
         packet.encode(&mut w).unwrap();
 
+        println!("{:?}", packet);
         let decoded_packet = Packet::decode(&w).unwrap();
         assert_eq!(decoded_packet, packet);
     }
