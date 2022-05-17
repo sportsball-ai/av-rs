@@ -50,50 +50,37 @@ impl<F: Send> VideoEncoder<F> {
                 sys::kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as _,
                 Boolean::from(true).cf_type_ref() as _,
             );
-            encoder_specification.set_value(
-                sys::kVTCompressionPropertyKey_AllowFrameReordering as _,
-                Boolean::from(false).cf_type_ref() as _,
-            );
-            encoder_specification.set_value(sys::kVTCompressionPropertyKey_RealTime as _, Boolean::from(true).cf_type_ref() as _);
-            encoder_specification.set_value(
-                sys::kVTCompressionPropertyKey_ExpectedFrameRate as _,
-                Number::from(config.fps).cf_type_ref() as _,
-            );
         }
 
-        match &config.codec {
-            VideoEncoderCodec::H264 { bitrate } => {
-                if let Some(bitrate) = bitrate {
-                    unsafe {
-                        encoder_specification.set_value(
-                            sys::kVTCompressionPropertyKey_AverageBitRate as _,
-                            Number::from(*bitrate as i64).cf_type_ref() as _,
-                        );
+        let mut sess = CompressionSession::new(CompressionSessionConfig {
+            width: config.width as _,
+            height: config.height as _,
+            codec_type: (&config.codec).into(),
+            encoder_specification: Some(encoder_specification.into()),
+        })?;
+
+        unsafe {
+            sess.set_property(sys::kVTCompressionPropertyKey_AllowFrameReordering, Boolean::from(false))?;
+            sess.set_property(sys::kVTCompressionPropertyKey_RealTime, Boolean::from(true))?;
+            sess.set_property(sys::kVTCompressionPropertyKey_ExpectedFrameRate, Number::from(config.fps))?;
+
+            match &config.codec {
+                VideoEncoderCodec::H264 { bitrate } => {
+                    if let Some(bitrate) = bitrate {
+                        sess.set_property(sys::kVTCompressionPropertyKey_AverageBitRate, Number::from(*bitrate as i64))?;
                     }
                 }
-            }
-            VideoEncoderCodec::H265 { bitrate } => {
-                if let Some(bitrate) = bitrate {
-                    unsafe {
-                        encoder_specification.set_value(
-                            sys::kVTCompressionPropertyKey_AverageBitRate as _,
-                            Number::from(*bitrate as i64).cf_type_ref() as _,
-                        );
+                VideoEncoderCodec::H265 { bitrate } => {
+                    if let Some(bitrate) = bitrate {
+                        sess.set_property(sys::kVTCompressionPropertyKey_AverageBitRate, Number::from(*bitrate as i64))?;
                     }
                 }
             }
         }
 
-        Ok(Self {
-            sess: CompressionSession::new(CompressionSessionConfig {
-                width: config.width as _,
-                height: config.height as _,
-                codec_type: (&config.codec).into(),
-                encoder_specification: Some(encoder_specification.into()),
-            })?,
-            config,
-            frame_count: 0,
-        })
+        sess.prepare_to_encode_frames()?;
+
+        Ok(Self { sess, config, frame_count: 0 })
     }
 
     fn next_video_encoder_trait_frame(&mut self) -> Result<Option<VideoEncoderOutput<F>>, OSStatus> {

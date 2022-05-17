@@ -90,6 +90,14 @@ impl<C: Send> CompressionSession<C> {
         })
     }
 
+    pub fn set_property<V: CFType>(&mut self, key: sys::CFStringRef, value: V) -> Result<(), OSStatus> {
+        unsafe { result(sys::VTSessionSetProperty(self.sess as _, key as _, value.cf_type_ref()).into()) }
+    }
+
+    pub fn prepare_to_encode_frames(&mut self) -> Result<(), OSStatus> {
+        unsafe { result(sys::VTCompressionSessionPrepareToEncodeFrames(self.sess).into()) }
+    }
+
     pub fn frames(&self) -> &mpsc::Receiver<Result<CompressionSessionOutputFrame<C>, OSStatus>> {
         &self.frames
     }
