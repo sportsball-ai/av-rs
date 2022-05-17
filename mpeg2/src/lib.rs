@@ -64,7 +64,9 @@ impl std::error::Error for EncodeError {
     }
 }
 
+pub mod bitstream;
 pub mod interleaving_muxer;
 pub mod muxer;
 pub mod pes;
+pub mod temi;
 pub mod ts;

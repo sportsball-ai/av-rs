@@ -1,4 +1,6 @@
 use super::{DecodeError, EncodeError};
+use crate::bitstream::{Bitstream, BitstreamWriter, Decode};
+use crate::temi::{TEMITimelineDescriptor, AF_DESCR_TAG_TIMELINE};
 use alloc::{borrow::Cow, vec::Vec};
 use core2::io::Write;
 
@@ -18,85 +20,188 @@ pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
+    pub private_data_bytes: Vec<u8>,
+    pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
 impl AdaptationField {
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
+        let mut bs = Bitstream::new(buf);
         let mut af = Self::default();
-        let af_length = buf[0];
-        if af_length as usize > buf.len() - 1 {
-            return Err(DecodeError::new("adaptation field length too long"));
-        } else if buf[0] > 0 {
-            af.discontinuity_indicator = Some(buf[1] & 0x80 != 0);
-            af.random_access_indicator = Some(buf[1] & 0x40 != 0);
-            af.program_clock_reference_27mhz = if af_length >= 7 && buf[1] & 0x10 != 0 {
-                let base = (buf[2] as u64) << 25 | (buf[3] as u64) << 17 | (buf[4] as u64) << 9 | (buf[5] as u64) << 1 | (buf[6] as u64) >> 7;
-                let ext = ((buf[6] as u64) & 1) << 8 | (buf[7] as u64);
+        let af_length = bs.read_u8("adaptation_field_length")?;
+        if af_length > 0 {
+            af.discontinuity_indicator = bs.read_boolean("discontinuity_indicator").ok();
+            af.random_access_indicator = bs.read_boolean("random_access_indicator").ok();
+            bs.skip_bits(1); // elementary_stream_priority_indicator
+
+            let pcr_flag = bs.read_boolean("pcr_flag")?;
+            let opcr_flag = bs.read_boolean("opcr_flag")?;
+            let splicing_point_flag = bs.read_boolean("splicing_point_flag")?;
+            let transport_private_data_flag = bs.read_boolean("transport_private_data_flag")?;
+            let adaptation_extension_flag = bs.read_boolean("adaptation_extension_flag")?;
+
+            af.program_clock_reference_27mhz = if af_length >= 7 && pcr_flag {
+                let base = (bs.read_u32("base high")? as u64) << 1 | bs.read_bit("base low")? as u64;
+                bs.skip_bits(6);
+                let ext = (bs.read_bit("ext high")? as u64) << 8 | bs.read_u8("ext low")? as u64;
                 Some(base * 300 + ext)
             } else {
                 None
             };
+
+            if opcr_flag {
+                // skip OPCR
+                bs.skip_bytes(6);
+            }
+            if splicing_point_flag {
+                // skip splice_countdown
+                bs.skip_bytes(1);
+            }
+            if transport_private_data_flag {
+                let transport_private_data_length = bs.read_u8("transport_private_data_length")?;
+                af.private_data_bytes = bs.read_n_bytes(transport_private_data_length as usize, "private_data_bytes")?.to_vec();
+            }
+
+            if adaptation_extension_flag {
+                let adaptation_field_extension_length = bs.read_u8("adaptation_field_extension_length")?;
+                let mut af_extension_bs = bs.wrapped_stream(adaptation_field_extension_length as usize);
+                let ltw_flag = af_extension_bs.read_boolean("ltw_flag")?;
+                let piecewise_rate_flag = af_extension_bs.read_boolean("piecewise_rate_flag")?;
+                let seamless_splice_flag = af_extension_bs.read_boolean("seamless_splice_flag")?;
+                let af_descriptor_not_present_flag = af_extension_bs.read_boolean("af_descriptor_not_present_flag")?;
+                af_extension_bs.skip_bits(4);
+
+                if ltw_flag {
+                    // skip ltw
+                    af_extension_bs.skip_bytes(2);
+                }
+                if piecewise_rate_flag {
+                    // skip piecewise_rate
+                    af_extension_bs.skip_bytes(3);
+                }
+                if seamless_splice_flag {
+                    // skip seamless_splice
+                    af_extension_bs.skip_bytes(5);
+                }
+
+                if !af_descriptor_not_present_flag {
+                    af.temi_timeline_descriptors = vec![];
+                    while af_extension_bs.remaining_bytes() >= 2 {
+                        let af_descr_tag = af_extension_bs.read_u8("af_descr_tag")?;
+                        let af_descr_length = af_extension_bs.read_u8("af_descr_length")?;
+                        if af_descr_tag == AF_DESCR_TAG_TIMELINE {
+                            let descr = TEMITimelineDescriptor::decode(&mut af_extension_bs.wrapped_stream(af_descr_length as usize))?;
+                            af_extension_bs.skip_bytes(af_descr_length as usize);
+                            af.temi_timeline_descriptors.push(descr);
+                        } else {
+                            // Other types of AF descriptors are ignored
+                            af_extension_bs.skip_bytes(af_descr_length as usize);
+                        }
+                    }
+                }
+            }
         }
         Ok(af)
     }
 
     pub fn encoded_len(&self) -> usize {
-        1 + if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() || self.program_clock_reference_27mhz.is_some() {
-            1
-        } else {
-            0
-        } + if self.program_clock_reference_27mhz.is_some() { 6 } else { 0 }
+        let mut len = 1;
+        if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() || self.program_clock_reference_27mhz.is_some() {
+            len += 1;
+        }
+        if self.program_clock_reference_27mhz.is_some() {
+            len += 6;
+        }
+        if !self.private_data_bytes.is_empty() {
+            len += 1 + self.private_data_bytes.len();
+        }
+        if !self.temi_timeline_descriptors.is_empty() {
+            len += 2;
+            for timeline_descriptor in &self.temi_timeline_descriptors {
+                len += timeline_descriptor.encoded_len();
+            }
+        }
+        len
     }
 
     pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> Result<usize, EncodeError> {
-        let mut ret = 1usize;
-        let mut buf = [0u8; 20];
+        let has_af_flags = pad_to_length >= 2
+            || self.program_clock_reference_27mhz.is_some()
+            || !self.private_data_bytes.is_empty()
+            || !self.temi_timeline_descriptors.is_empty();
 
-        if pad_to_length >= 2 {
-            ret = 2;
+        let pcr_length = if self.program_clock_reference_27mhz.is_some() { 6 } else { 0 };
+        let transport_private_data_length = if self.private_data_bytes.is_empty() {
+            0
+        } else {
+            self.private_data_bytes.len() + 1
+        };
+        let adaptation_field_extension_length = match self.temi_timeline_descriptors.iter().map(|temi| temi.encoded_len()).sum::<usize>() {
+            0 => 0,
+            n => n + 1,
+        };
+        if adaptation_field_extension_length > 0xff {
+            return Err(EncodeError::other("adaptation_field_extension_length overflow"));
         }
 
-        if let Some(discontinuity_indicator) = self.discontinuity_indicator {
-            if discontinuity_indicator {
-                buf[1] |= 0b10000000;
-            }
-            ret = 2;
-        }
+        let af_length_no_padding = if has_af_flags { 1 } else { 0 }
+            + pcr_length
+            + transport_private_data_length
+            + if adaptation_field_extension_length > 1 {
+                adaptation_field_extension_length + 1
+            } else {
+                0
+            };
 
-        if let Some(random_access_indicator) = self.random_access_indicator {
-            if random_access_indicator {
-                buf[1] |= 0b01000000;
-            }
-            ret = 2;
-        }
+        let mut buf = vec![0u8; af_length_no_padding + 1];
+        let mut bs = BitstreamWriter::new(&mut buf[1..]);
 
-        if self.program_clock_reference_27mhz.is_some() {
-            buf[1] |= 0b00010000;
-            ret = 2;
+        if has_af_flags {
+            bs.write_boolean(self.discontinuity_indicator.unwrap_or(false));
+            bs.write_boolean(self.random_access_indicator.unwrap_or(false));
+            bs.skip_n_bits(1);
+            bs.write_boolean(self.program_clock_reference_27mhz.is_some());
+            bs.skip_n_bits(2); // splicing_point_flag and transport_private_data_flag are ignored
+            bs.write_boolean(!self.private_data_bytes.is_empty());
+            bs.write_boolean(!self.temi_timeline_descriptors.is_empty());
         }
 
         if let Some(program_clock_reference_27mhz) = self.program_clock_reference_27mhz {
             let base = program_clock_reference_27mhz / 300;
             let ext = program_clock_reference_27mhz % 300;
-            buf[2] = (base >> 25) as _;
-            buf[3] = (base >> 17) as _;
-            buf[4] = (base >> 9) as _;
-            buf[5] = (base >> 1) as _;
-            buf[6] = (base << 7) as u8 | 0b01111110 | (ext >> 8) as u8;
-            buf[7] = ext as _;
-            ret += 6;
+            bs.write_u32((base >> 1) as u32);
+            bs.write_bit((base & 1) as u8);
+            bs.write_n_bits(0b11_1111, 6);
+            bs.write_bit((ext >> 8) as u8);
+            bs.write_u8(ext as u8);
         }
 
-        if ret < pad_to_length {
+        if !self.private_data_bytes.is_empty() {
+            bs.write_u8(self.private_data_bytes.len() as u8);
+            for data_type in &self.private_data_bytes {
+                bs.write_u8(*data_type);
+            }
+        }
+
+        if !self.temi_timeline_descriptors.is_empty() {
+            bs.write_u8(adaptation_field_extension_length as u8);
+            bs.skip_n_bits(8);
+            for descr in &self.temi_timeline_descriptors {
+                let len = descr.encode(bs.inner_remaining())?;
+                bs.skip_n_bytes(len);
+            }
+        }
+
+        if af_length_no_padding + 1 < pad_to_length {
             buf[0] = (pad_to_length - 1) as _;
-            w.write_all(&buf[..ret])?;
-            let padding = vec![0xff; pad_to_length - ret];
+            w.write_all(&buf)?;
+            let padding = vec![0xff; pad_to_length - af_length_no_padding - 1];
             w.write_all(&padding)?;
             Ok(pad_to_length)
         } else {
-            buf[0] = (ret - 1) as _;
-            w.write_all(&buf[..ret])?;
-            Ok(ret)
+            buf[0] = af_length_no_padding as _;
+            w.write_all(&buf)?;
+            Ok(af_length_no_padding + 1)
         }
     }
 }
@@ -481,6 +586,7 @@ pub fn decode_packets(buf: &[u8]) -> Result<Vec<Packet>, DecodeError> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::temi::TimeFieldLength;
     use std::{fs::File, io::Read};
 
     #[test]
@@ -498,6 +604,8 @@ mod test {
                 discontinuity_indicator: Some(false),
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
+                private_data_bytes: vec![],
+                temi_timeline_descriptors: vec![],
             })
         );
         {
@@ -612,5 +720,119 @@ mod test {
         let packet = Packet::decode(&data).unwrap();
         assert_eq!(packet.adaptation_field, Some(AdaptationField::default()));
         assert_eq!(packet.payload.unwrap(), &data[5..]);
+    }
+
+    #[test]
+    fn test_af_temi_timeline_descriptor() {
+        let mut f = File::open("src/testdata/pro-bowl.ts").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        let packets = decode_packets(&buf).unwrap();
+        let mut packet = packets.into_iter().find(|p| p.packet_id == 0x0100).unwrap();
+
+        let af = packet.adaptation_field.as_mut().unwrap();
+        let temi1 = TEMITimelineDescriptor {
+            has_timestamp: TimeFieldLength::None,
+            timescale: 0,
+            media_timestamp: 0,
+            ntp_timestamp: Some(1652398146422),
+            ptp_timestamp: Some(0xcdf8_fdc9_b5f8_25e9_9236),
+            has_timecode: TimeFieldLength::None,
+            drop: false,
+            frames_per_tc_seconds: 0,
+            duration: 0,
+            time_code: 0,
+            force_reload: true,
+            paused: true,
+            discontinuity: true,
+            timeline_id: 0xa1,
+        };
+
+        let temi2 = TEMITimelineDescriptor {
+            has_timestamp: TimeFieldLength::Long,
+            timescale: 225,
+            media_timestamp: 8232432,
+
+            ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
+            ptp_timestamp: None,
+
+            has_timecode: TimeFieldLength::Short,
+            drop: true,
+            frames_per_tc_seconds: 0x35a3,
+            duration: 0x9a8a,
+            time_code: 0xfb_82ef,
+
+            force_reload: true,
+            paused: true,
+            discontinuity: false,
+            timeline_id: 0xf3,
+        };
+
+        let payload = &packet.payload.unwrap()[temi1.encoded_len() + temi2.encoded_len() + 2..];
+        af.temi_timeline_descriptors = vec![temi1, temi2];
+        packet.payload = Some(Cow::Borrowed(payload));
+
+        let mut w = vec![];
+        packet.encode(&mut w).unwrap();
+
+        let decoded_packet = Packet::decode(&w).unwrap();
+        assert_eq!(decoded_packet, packet);
+    }
+
+    #[test]
+    fn test_decode_empty_temi_descriptor() {
+        let packet_data = vec![
+            71, 72, 53, 52, 20, 1, 18, 15, 4, 15, 129, 127, 200, 0, 0, 3, 232, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 224, 19, 148, 143, 192, 10, 49, 126, 133, 202,
+            33, 17, 126, 133, 145, 225, 0, 0, 0, 1, 9, 80, 0, 0, 1, 6, 1, 1, 50, 4, 10, 181, 0, 49, 68, 84, 71, 49, 65, 254, 255, 128, 0, 0, 0, 1, 65, 158,
+            188, 61, 47, 16, 83, 40, 159, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3,
+            0, 0, 3, 0, 0, 3, 0, 0, 3, 0, 0, 3, 2, 26, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 12, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+            255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        ];
+        let packet = Packet::decode(&packet_data).unwrap();
+        let af = packet.adaptation_field.unwrap();
+        let temi_descriptors = af.temi_timeline_descriptors;
+        assert_eq!(temi_descriptors.len(), 1);
+        let decoded_temi = &temi_descriptors[0];
+        let temi = TEMITimelineDescriptor {
+            has_timestamp: TimeFieldLength::Long,
+            timescale: 1000,
+            paused: true,
+            timeline_id: 200,
+            ..TEMITimelineDescriptor::default()
+        };
+        assert_eq!(decoded_temi, &temi);
+    }
+
+    #[test]
+    fn test_decode_af_private_data_type() {
+        let ori_packet_data = vec![
+            71, 66, 89, 60, 34, 3, 13, 2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0, 18, 15, 4, 15, 129, 127, 206, 0, 15, 66, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 1, 224, 52, 128, 139, 128, 5, 33, 70, 181, 81, 147, 0, 0, 1, 0, 1, 223, 255, 251, 184, 0, 0, 1, 181, 131, 51, 51, 156, 0, 0, 0, 1, 1, 34, 164,
+            64, 193, 88, 0, 0, 1, 2, 34, 171, 0, 194, 176, 0, 0, 1, 3, 34, 171, 0, 194, 176, 0, 0, 1, 4, 34, 171, 0, 194, 176, 0, 0, 1, 5, 34, 171, 0, 194,
+            176, 0, 0, 1, 6, 34, 171, 0, 194, 176, 0, 0, 1, 7, 34, 171, 0, 194, 176, 0, 0, 1, 8, 34, 171, 0, 194, 176, 0, 0, 1, 9, 34, 171, 0, 194, 176, 0, 0,
+            1, 10, 34, 171, 0, 194, 176, 0, 0, 1, 11, 34, 171, 0, 194, 176, 0, 0, 1, 12, 34, 171, 0, 194, 176, 0, 0, 1, 13, 34, 171, 0, 194, 176,
+        ];
+        let decoded_packet = Packet::decode(&ori_packet_data).unwrap();
+        let af = decoded_packet.adaptation_field.as_ref().unwrap();
+        let temi_descriptors = &af.temi_timeline_descriptors;
+        assert_eq!(temi_descriptors.len(), 1);
+        let decoded_temi = &temi_descriptors[0];
+        let temi = TEMITimelineDescriptor {
+            has_timestamp: TimeFieldLength::Long,
+            timescale: 1000000,
+            paused: true,
+            timeline_id: 206,
+            ..TEMITimelineDescriptor::default()
+        };
+        assert_eq!(decoded_temi, &temi);
+        assert_eq!(&af.private_data_bytes, &[2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0]);
+    }
+
+    #[test]
+    fn test_decode_video_with_temi_timelines() {
+        let mut f = File::open("src/testdata/uk_psb1_temi.ts").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+        decode_packets(&buf).unwrap();
     }
 }
