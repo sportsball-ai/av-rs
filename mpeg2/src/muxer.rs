@@ -1,4 +1,5 @@
 use super::{pes, ts, EncodeError};
+use alloc::borrow::Cow;
 use alloc::vec::Vec;
 use core2::io::Write;
 
@@ -70,7 +71,7 @@ impl<W: Write> Muxer<W> {
                 }),
                 data_length: if stream.unbounded_data_length { 0 } else { p.data.len() },
             },
-            data: p.data.into(),
+            data: p.data,
         };
         for ts_packet in pes_packet.packetize(pes::PacketizationConfig {
             packet_id: stream.packet_id,
@@ -190,11 +191,22 @@ impl<W: Write> Muxer<W> {
 }
 
 #[derive(Default)]
-pub struct Packet {
-    pub data: Vec<u8>,
+pub struct Packet<'a> {
+    pub data: Cow<'a, [u8]>,
     pub random_access_indicator: bool,
     pub pts_90khz: Option<u64>,
     pub dts_90khz: Option<u64>,
+}
+
+impl<'a> Packet<'a> {
+    pub fn into_owned(self) -> Packet<'static> {
+        Packet {
+            data: Cow::Owned(self.data.into_owned()),
+            random_access_indicator: self.random_access_indicator,
+            pts_90khz: self.pts_90khz,
+            dts_90khz: self.dts_90khz,
+        }
+    }
 }
 
 pub struct Stream {
@@ -247,7 +259,7 @@ mod test {
                         .write(
                             &mut video_out,
                             Packet {
-                                data: frame.data.into(),
+                                data: frame.data,
                                 random_access_indicator,
                                 pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
                                 dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),

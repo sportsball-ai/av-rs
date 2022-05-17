@@ -17,7 +17,7 @@ pub struct InterleavingMuxer<W: Write> {
 
 pub struct InterleavingStream {
     inner: Stream,
-    buffered_packets: VecDeque<Packet>,
+    buffered_packets: VecDeque<Packet<'static>>,
     last_written_ts: u64,
 }
 
@@ -76,7 +76,7 @@ impl<W: Write> InterleavingMuxer<W> {
             }
         } else {
             // and then we need to see if this enabled any other streams to emit their outputs
-            self.streams[stream_index].buffered_packets.push_back(p);
+            self.streams[stream_index].buffered_packets.push_back(p.into_owned());
             if let Some(t) = ts {
                 self.largest_ts_in_buffer = self.largest_ts_in_buffer.max(t);
             }
@@ -226,7 +226,7 @@ mod test {
 
     fn convert_pes_packet_to_muxer_packet(pes_packet: pes::Packet, random_access_indicator: bool) -> Packet {
         Packet {
-            data: pes_packet.data.into(),
+            data: pes_packet.data,
             random_access_indicator,
             pts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.pts),
             dts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.dts),
