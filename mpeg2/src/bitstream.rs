@@ -16,58 +16,81 @@ impl<'a> Bitstream<'a> {
         }
     }
 
-    pub fn read_u8(&mut self) -> u8 {
-        let ret = self.inner[self.next_byte];
-        self.next_byte += 1;
-        ret
+    pub fn read_u8(&mut self, error_msg: &'static str) -> Result<u8, DecodeError> {
+        if self.next_byte < self.inner.len() {
+            let ret = self.inner[self.next_byte];
+            self.next_byte += 1;
+            Ok(ret)
+        } else {
+            Err(DecodeError::new(error_msg))
+        }
     }
 
-    pub fn peek_u8(&self) -> u8 {
-        self.inner[self.next_byte]
+    pub fn read_u16(&mut self, error_msg: &'static str) -> Result<u16, DecodeError> {
+        if self.next_byte + 1 < self.inner.len() {
+            let ret = BigEndian::read_u16(&self.inner[self.next_byte..]);
+            self.next_byte += 2;
+            Ok(ret)
+        } else {
+            Err(DecodeError::new(error_msg))
+        }
     }
 
-    pub fn read_u16(&mut self) -> u16 {
-        let ret = BigEndian::read_u16(&self.inner[self.next_byte..]);
-        self.next_byte += 2;
-        ret
+    pub fn read_u32(&mut self, error_msg: &'static str) -> Result<u32, DecodeError> {
+        if self.next_byte + 3 < self.inner.len() {
+            let ret = BigEndian::read_u32(&self.inner[self.next_byte..]);
+            self.next_byte += 4;
+            Ok(ret)
+        } else {
+            Err(DecodeError::new(error_msg))
+        }
     }
 
-    pub fn read_u32(&mut self) -> u32 {
-        let ret = BigEndian::read_u32(&self.inner[self.next_byte..]);
-        self.next_byte += 4;
-        ret
+    pub fn read_u64(&mut self, error_msg: &'static str) -> Result<u64, DecodeError> {
+        if self.next_byte + 7 < self.inner.len() {
+            let ret = BigEndian::read_u64(&self.inner[self.next_byte..]);
+            self.next_byte += 8;
+            Ok(ret)
+        } else {
+            Err(DecodeError::new(error_msg))
+        }
     }
 
-    pub fn read_u64(&mut self) -> u64 {
-        let ret = BigEndian::read_u64(&self.inner[self.next_byte..]);
-        self.next_byte += 8;
-        ret
+    pub fn read_boolean(&mut self, error_msg: &'static str) -> Result<bool, DecodeError> {
+        Ok(self.read_bit(error_msg)? == 1)
     }
 
-    pub fn read_boolean(&mut self) -> bool {
-        self.read_bit() == 1
+    pub fn read_bit(&mut self, error_msg: &'static str) -> Result<u8, DecodeError> {
+        if self.next_byte < self.inner.len() && self.next_bit < 8 {
+            let ret = (self.inner[self.next_byte] >> (7 - self.next_bit)) & 1;
+            self.next_byte += (self.next_bit as usize + 1) >> 3;
+            self.next_bit = (self.next_bit + 1) & 0x7;
+            Ok(ret)
+        } else {
+            Err(DecodeError::new(error_msg))
+        }
     }
 
-    pub fn read_bit(&mut self) -> u8 {
-        let ret = (self.inner[self.next_byte] >> (7 - self.next_bit)) & 1;
-        self.next_byte += (self.next_bit as usize + 1) >> 3;
-        self.next_bit = (self.next_bit + 1) & 0x7;
-        ret
-    }
-
-    pub fn read_n_bytes(&mut self, n: usize) -> &[u8] {
+    pub fn read_n_bytes(&mut self, n: usize, error_msg: &'static str) -> Result<&[u8], DecodeError> {
         self.next_byte += n;
-        &self.inner[(self.next_byte - n)..self.next_byte]
+        if self.next_byte <= self.inner.len() {
+            Ok(&self.inner[(self.next_byte - n)..self.next_byte])
+        } else {
+            Err(DecodeError::new(error_msg))
+        }
     }
 
-    // caller must make sure the n bits read must be within the byte that next_byte points to
-    // self.next_bit + n <= 8 and n >= 1
-    pub fn read_n_bits(&mut self, mut n: u8) -> u8 {
-        let ret = (self.inner[self.next_byte] >> (8 - self.next_bit - n)) & (0xff >> (8 - n));
-        n += self.next_bit;
-        self.next_byte += n as usize >> 3;
-        self.next_bit = n & 0x7;
-        ret
+    // bits read should be within the next_byte
+    pub fn read_n_bits(&mut self, mut n: u8, error_msg: &'static str) -> Result<u8, DecodeError> {
+        if self.next_byte < self.inner.len() && n != 0 && self.next_bit + n <= 8 {
+            let ret = (self.inner[self.next_byte] >> (8 - self.next_bit - n)) & (0xff >> (8 - n));
+            n += self.next_bit;
+            self.next_byte += n as usize >> 3;
+            self.next_bit = n & 0x7;
+            Ok(ret)
+        } else {
+            Err(DecodeError::new(error_msg))
+        }
     }
 
     pub fn skip_bits(&mut self, mut n: usize) {
@@ -192,20 +215,20 @@ mod tests {
             0b10110111, 0b10111010, 0x70, 0x0f, 0x47, 0x55, 0x54, 0xce, 0x3f, 0x82, 0xfa, 0x64, 0x7c, 0x16, 0xf1, 0x55, 0x54, 0xce, 0x3f,
         ];
         let mut bs = Bitstream::new(&buf[..]);
-        assert!(bs.read_boolean());
-        assert_eq!(bs.read_bit(), 0);
-        assert_eq!(bs.read_n_bits(2), 0b11);
-        assert_eq!(bs.read_n_bits(3), 0b011);
+        assert!(bs.read_boolean("").unwrap());
+        assert_eq!(bs.read_bit("").unwrap(), 0);
+        assert_eq!(bs.read_n_bits(2, "").unwrap(), 0b11);
+        assert_eq!(bs.read_n_bits(3, "").unwrap(), 0b011);
         bs.skip_bits(3);
-        assert_eq!(bs.read_n_bits(6), 0b11_1010);
+        assert_eq!(bs.read_n_bits(6, "").unwrap(), 0b11_1010);
 
-        assert_eq!(bs.read_u8(), 0x70);
+        assert_eq!(bs.read_u8("").unwrap(), 0x70);
         // assert_eq!(bs.read_u16(), (0x0f<<8) + 0x47);
-        assert_eq!(bs.read_u16(), BigEndian::read_u16(&[0x0f, 0x47]));
-        assert_eq!(bs.read_u32(), 0x55 << 24 | 0x54 << 16 | 0xce << 8 | 0x3f);
+        assert_eq!(bs.read_u16("").unwrap(), BigEndian::read_u16(&[0x0f, 0x47]));
+        assert_eq!(bs.read_u32("").unwrap(), 0x55 << 24 | 0x54 << 16 | 0xce << 8 | 0x3f);
         bs.skip_bytes(1);
         assert_eq!(bs.remaining_bytes(), 9);
-        assert_eq!(bs.read_u64(), BigEndian::read_u64(&[0xfa, 0x64, 0x7c, 0x16, 0xf1, 0x55, 0x54, 0xce]));
+        assert_eq!(bs.read_u64("").unwrap(), BigEndian::read_u64(&[0xfa, 0x64, 0x7c, 0x16, 0xf1, 0x55, 0x54, 0xce]));
         bs.skip_bytes(8);
         assert_eq!(bs.remaining_bytes(), 0);
     }

@@ -28,24 +28,22 @@ impl AdaptationField {
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         let mut bs = Bitstream::new(buf);
         let mut af = Self::default();
-        let af_length = bs.read_u8();
-        if bs.remaining_bytes() < af_length as usize {
-            return Err(DecodeError::new("adaptation field length too long"));
-        } else if af_length > 0 {
-            af.discontinuity_indicator = Some(bs.read_boolean());
-            af.random_access_indicator = Some(bs.read_boolean());
+        let af_length = bs.read_u8("adaptation_field_length")?;
+        if af_length > 0 {
+            af.discontinuity_indicator = bs.read_boolean("discontinuity_indicator").ok();
+            af.random_access_indicator = bs.read_boolean("random_access_indicator").ok();
             bs.skip_bits(1); // elementary_stream_priority_indicator
 
-            let pcr_flag = bs.read_boolean();
-            let opcr_flag = bs.read_boolean();
-            let splicing_point_flag = bs.read_boolean();
-            let transport_private_data_flag = bs.read_boolean();
-            let adaptation_extension_flag = bs.read_boolean();
+            let pcr_flag = bs.read_boolean("pcr_flag")?;
+            let opcr_flag = bs.read_boolean("opcr_flag")?;
+            let splicing_point_flag = bs.read_boolean("splicing_point_flag")?;
+            let transport_private_data_flag = bs.read_boolean("transport_private_data_flag")?;
+            let adaptation_extension_flag = bs.read_boolean("adaptation_extension_flag")?;
 
             af.program_clock_reference_27mhz = if af_length >= 7 && pcr_flag {
-                let base = (bs.read_u32() as u64) << 1 | bs.read_bit() as u64;
+                let base = (bs.read_u32("base high")? as u64) << 1 | bs.read_bit("base low")? as u64;
                 bs.skip_bits(6);
-                let ext = (bs.read_bit() as u64) << 8 | bs.read_u8() as u64;
+                let ext = (bs.read_bit("ext high")? as u64) << 8 | bs.read_u8("ext low")? as u64;
                 Some(base * 300 + ext)
             } else {
                 None
@@ -60,33 +58,17 @@ impl AdaptationField {
                 bs.skip_bytes(1);
             }
             if transport_private_data_flag {
-                if bs.remaining_bytes() == 0 {
-                    return Err(DecodeError::new("adaptation field too short for transport_private_data_length"));
-                }
-                let transport_private_data_length = bs.read_u8();
-                if transport_private_data_length as usize > bs.remaining_bytes() {
-                    return Err(DecodeError::new("transport private data length too long"));
-                }
-                af.private_data_types = bs.read_n_bytes(transport_private_data_length as usize).to_vec();
+                let transport_private_data_length = bs.read_u8("transport_private_data_length")?;
+                af.private_data_types = bs.read_n_bytes(transport_private_data_length as usize, "private_data_types")?.to_vec();
             }
+
             if adaptation_extension_flag {
-                if bs.remaining_bytes() < 2 {
-                    return Err(DecodeError::new("adaptation field too short for adaptation field extension"));
-                }
-                let adaptation_field_extension_length = bs.read_u8();
-                if adaptation_field_extension_length == 0 {
-                    return Err(DecodeError::new("invalid adaptation_field_extension_length"));
-                }
-                if bs.remaining_bytes() + 1 < adaptation_field_extension_length as usize {
-                    return Err(DecodeError::new("adaptation descriptor field length too long"));
-                }
-
+                let adaptation_field_extension_length = bs.read_u8("adaptation_field_extension_length")?;
                 let mut af_extension_bs = bs.wrapped_stream(adaptation_field_extension_length as usize);
-
-                let ltw_flag = af_extension_bs.read_boolean();
-                let piecewise_rate_flag = af_extension_bs.read_boolean();
-                let seamless_splice_flag = af_extension_bs.read_boolean();
-                let af_descriptor_not_present_flag = af_extension_bs.read_boolean();
+                let ltw_flag = af_extension_bs.read_boolean("ltw_flag")?;
+                let piecewise_rate_flag = af_extension_bs.read_boolean("piecewise_rate_flag")?;
+                let seamless_splice_flag = af_extension_bs.read_boolean("seamless_splice_flag")?;
+                let af_descriptor_not_present_flag = af_extension_bs.read_boolean("af_descriptor_not_present_flag")?;
                 af_extension_bs.skip_bits(4);
 
                 if ltw_flag {
@@ -103,13 +85,10 @@ impl AdaptationField {
                 }
 
                 if !af_descriptor_not_present_flag {
-                    // AF descriptors
-
                     af.temi_timeline_descriptors = vec![];
-
                     while af_extension_bs.remaining_bytes() >= 2 {
-                        let af_descr_tag = af_extension_bs.read_u8();
-                        let af_descr_length = af_extension_bs.read_u8();
+                        let af_descr_tag = af_extension_bs.read_u8("af_descr_tag")?;
+                        let af_descr_length = af_extension_bs.read_u8("af_descr_length")?;
                         if af_descr_tag == AF_DESCR_TAG_TIMELINE {
                             let descr = TEMITimelineDescriptor::decode(&mut af_extension_bs.wrapped_stream(af_descr_length as usize))?;
                             af_extension_bs.skip_bytes(af_descr_length as usize);
@@ -769,37 +748,33 @@ mod test {
             timeline_id: 0xa1,
         };
 
-        // let temi2 = TEMITimelineDescriptor {
-        //     has_timestamp: TimeFieldLength::Long,
-        //     timescale: 225,
-        //     media_timestamp: 8232432,
-        //
-        //     ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
-        //     ptp_timestamp: None,
-        //
-        //     has_timecode: TimeFieldLength::Short,
-        //     drop: true,
-        //     frames_per_tc_seconds: 0x35a3,
-        //     duration: 0x9a8a,
-        //     time_code: 0xfb_82ef,
-        //
-        //     force_reload: true,
-        //     paused: true,
-        //     discontinuity: false,
-        //     timeline_id: 0xf3,
-        // };
+        let temi2 = TEMITimelineDescriptor {
+            has_timestamp: TimeFieldLength::Long,
+            timescale: 225,
+            media_timestamp: 8232432,
 
-        // let payload = &packet.payload.unwrap()[temi1.encoded_len() + temi2.encoded_len() + 2..];
-        // af.temi_timeline_descriptors = vec![temi1, temi2];
-        // packet.payload = Some(Cow::Borrowed(payload));
-        let payload = &packet.payload.unwrap()[temi1.encoded_len() + 2..];
-        af.temi_timeline_descriptors = vec![temi1];
+            ntp_timestamp: Some(0xfdc9_b5f8_25e9_9236),
+            ptp_timestamp: None,
+
+            has_timecode: TimeFieldLength::Short,
+            drop: true,
+            frames_per_tc_seconds: 0x35a3,
+            duration: 0x9a8a,
+            time_code: 0xfb_82ef,
+
+            force_reload: true,
+            paused: true,
+            discontinuity: false,
+            timeline_id: 0xf3,
+        };
+
+        let payload = &packet.payload.unwrap()[temi1.encoded_len() + temi2.encoded_len() + 2..];
+        af.temi_timeline_descriptors = vec![temi1, temi2];
         packet.payload = Some(Cow::Borrowed(payload));
 
         let mut w = vec![];
         packet.encode(&mut w).unwrap();
 
-        println!("{:?}", packet);
         let decoded_packet = Packet::decode(&w).unwrap();
         assert_eq!(decoded_packet, packet);
     }

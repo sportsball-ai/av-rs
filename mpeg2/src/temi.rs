@@ -122,26 +122,26 @@ impl Decode for TEMITimelineDescriptor {
             return Err(DecodeError::new("not enough bytes for temi_timeline_descriptor flags"));
         }
 
-        let has_timestamp = match bs.read_n_bits(2) {
+        let has_timestamp = match bs.read_n_bits(2, "has_timestamp")? {
             0 => TimeFieldLength::None,
             1 => TimeFieldLength::Short,
             2 => TimeFieldLength::Long,
             _ => TimeFieldLength::Reserved,
         };
 
-        let has_ntp = bs.read_boolean();
-        let has_ptp = bs.read_boolean();
-        let has_timecode = match bs.read_n_bits(2) {
+        let has_ntp = bs.read_boolean("has_ntp")?;
+        let has_ptp = bs.read_boolean("has_ptp")?;
+        let has_timecode = match bs.read_n_bits(2, "has_timecode")? {
             0 => TimeFieldLength::None,
             1 => TimeFieldLength::Short,
             2 => TimeFieldLength::Long,
             _ => TimeFieldLength::Reserved,
         };
-        let force_reload = bs.read_boolean();
-        let paused = bs.read_boolean();
-        let discontinuity = bs.read_boolean();
+        let force_reload = bs.read_boolean("force_reload")?;
+        let paused = bs.read_boolean("paused")?;
+        let discontinuity = bs.read_boolean("discontinuity")?;
         bs.skip_bits(7);
-        let timeline_id = bs.read_u8();
+        let timeline_id = bs.read_u8("timeline_id")?;
         let mut ret = TEMITimelineDescriptor {
             has_timestamp,
             has_timecode,
@@ -157,27 +157,27 @@ impl Decode for TEMITimelineDescriptor {
         }
 
         if ret.has_timestamp != TimeFieldLength::None {
-            ret.timescale = bs.read_u32();
+            ret.timescale = bs.read_u32("timescale")?;
             if ret.has_timestamp == TimeFieldLength::Short {
-                ret.media_timestamp = bs.read_u32() as u64;
+                ret.media_timestamp = bs.read_u32("media_timestamp32")? as u64;
             } else if ret.has_timestamp == TimeFieldLength::Long {
-                ret.media_timestamp = bs.read_u64();
+                ret.media_timestamp = bs.read_u64("media_timestamp64")?;
             }
         }
         if has_ntp {
-            ret.ntp_timestamp = Some(bs.read_u64());
+            ret.ntp_timestamp = bs.read_u64("ntp_timestamp").ok();
         }
         if has_ptp {
-            ret.ptp_timestamp = Some((bs.read_u16() as u128) << 64 | bs.read_u64() as u128);
+            ret.ptp_timestamp = Some((bs.read_u16("ptp_timestamp high")? as u128) << 64 | bs.read_u64("ptp_timestamp low")? as u128);
         }
         if ret.has_timecode != TimeFieldLength::None {
-            ret.drop = bs.read_boolean();
-            ret.frames_per_tc_seconds = (bs.read_n_bits(7) as u16) << 8 | bs.read_u8() as u16;
-            ret.duration = bs.read_u16();
+            ret.drop = bs.read_boolean("drop")?;
+            ret.frames_per_tc_seconds = (bs.read_n_bits(7, "frames_per_tc_seconds high")? as u16) << 8 | bs.read_u8("frames_per_tc_seconds low")? as u16;
+            ret.duration = bs.read_u16("duration")?;
             if ret.has_timecode == TimeFieldLength::Short {
-                ret.time_code = (bs.read_u8() as u64) << 16 | bs.read_u16() as u64;
+                ret.time_code = (bs.read_u8("short_time_code high")? as u64) << 16 | bs.read_u16("short_time_code low")? as u64;
             } else if ret.has_timecode == TimeFieldLength::Long {
-                ret.time_code = bs.read_u64();
+                ret.time_code = bs.read_u64("long_time_code")?;
             }
         }
         Ok(ret)
