@@ -2,7 +2,6 @@ use crate::bitstream::{Bitstream, BitstreamWriter, Decode};
 use crate::{DecodeError, EncodeError};
 
 pub const AF_DESCR_TAG_TIMELINE: u8 = 0x04;
-const TEMI_TIMELINE_FLAGS_LENGTH: usize = 3;
 
 #[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
 pub enum TimeFieldLength {
@@ -118,10 +117,6 @@ impl TEMITimelineDescriptor {
 
 impl Decode for TEMITimelineDescriptor {
     fn decode(bs: &mut Bitstream) -> Result<Self, DecodeError> {
-        if bs.remaining_bytes() < TEMI_TIMELINE_FLAGS_LENGTH {
-            return Err(DecodeError::new("not enough bytes for temi_timeline_descriptor flags"));
-        }
-
         let has_timestamp = match bs.read_n_bits(2, "has_timestamp")? {
             0 => TimeFieldLength::None,
             1 => TimeFieldLength::Short,
@@ -151,10 +146,6 @@ impl Decode for TEMITimelineDescriptor {
             timeline_id,
             ..Default::default()
         };
-
-        if bs.remaining_bytes() + 2 + TEMI_TIMELINE_FLAGS_LENGTH < ret.encoded_len() {
-            return Err(DecodeError::new("not enough bytes to decode temi_timeline_descriptor"));
-        }
 
         if ret.has_timestamp != TimeFieldLength::None {
             ret.timescale = bs.read_u32("timescale")?;

@@ -20,7 +20,7 @@ pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
-    pub private_data_types: Vec<u8>,
+    pub private_data_bytes: Vec<u8>,
     pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
@@ -59,7 +59,7 @@ impl AdaptationField {
             }
             if transport_private_data_flag {
                 let transport_private_data_length = bs.read_u8("transport_private_data_length")?;
-                af.private_data_types = bs.read_n_bytes(transport_private_data_length as usize, "private_data_types")?.to_vec();
+                af.private_data_bytes = bs.read_n_bytes(transport_private_data_length as usize, "private_data_bytes")?.to_vec();
             }
 
             if adaptation_extension_flag {
@@ -112,8 +112,8 @@ impl AdaptationField {
         if self.program_clock_reference_27mhz.is_some() {
             len += 6;
         }
-        if !self.private_data_types.is_empty() {
-            len += 1 + self.private_data_types.len();
+        if !self.private_data_bytes.is_empty() {
+            len += 1 + self.private_data_bytes.len();
         }
         if !self.temi_timeline_descriptors.is_empty() {
             len += 2;
@@ -127,14 +127,14 @@ impl AdaptationField {
     pub fn encode<W: Write>(&self, mut w: W, pad_to_length: usize) -> Result<usize, EncodeError> {
         let has_af_flags = pad_to_length >= 2
             || self.program_clock_reference_27mhz.is_some()
-            || !self.private_data_types.is_empty()
+            || !self.private_data_bytes.is_empty()
             || !self.temi_timeline_descriptors.is_empty();
 
         let pcr_length = if self.program_clock_reference_27mhz.is_some() { 6 } else { 0 };
-        let transport_private_data_length = if self.private_data_types.is_empty() {
+        let transport_private_data_length = if self.private_data_bytes.is_empty() {
             0
         } else {
-            self.private_data_types.len() + 1
+            self.private_data_bytes.len() + 1
         };
         let adaptation_field_extension_length = match self.temi_timeline_descriptors.iter().map(|temi| temi.encoded_len()).sum::<usize>() {
             0 => 0,
@@ -162,7 +162,7 @@ impl AdaptationField {
             bs.skip_n_bits(1);
             bs.write_boolean(self.program_clock_reference_27mhz.is_some());
             bs.skip_n_bits(2); // splicing_point_flag and transport_private_data_flag are ignored
-            bs.write_boolean(!self.private_data_types.is_empty());
+            bs.write_boolean(!self.private_data_bytes.is_empty());
             bs.write_boolean(!self.temi_timeline_descriptors.is_empty());
         }
 
@@ -176,9 +176,9 @@ impl AdaptationField {
             bs.write_u8(ext as u8);
         }
 
-        if !self.private_data_types.is_empty() {
-            bs.write_u8(self.private_data_types.len() as u8);
-            for data_type in &self.private_data_types {
+        if !self.private_data_bytes.is_empty() {
+            bs.write_u8(self.private_data_bytes.len() as u8);
+            for data_type in &self.private_data_bytes {
                 bs.write_u8(*data_type);
             }
         }
@@ -604,7 +604,7 @@ mod test {
                 discontinuity_indicator: Some(false),
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
-                private_data_types: vec![],
+                private_data_bytes: vec![],
                 temi_timeline_descriptors: vec![],
             })
         );
@@ -825,7 +825,7 @@ mod test {
             ..TEMITimelineDescriptor::default()
         };
         assert_eq!(decoded_temi, &temi);
-        assert_eq!(&af.private_data_types, &[2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0]);
+        assert_eq!(&af.private_data_bytes, &[2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0]);
     }
 
     #[test]
