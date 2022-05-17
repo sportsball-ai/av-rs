@@ -16,6 +16,7 @@ fn main() {
             .header("src/lib.hpp")
             .whitelist_function("VTCompressionSession.+")
             .whitelist_function("VTDecompressionSession.+")
+            .whitelist_function("VTSessionSetProperty")
             .whitelist_var("kCMTime.+")
             .whitelist_var("kCVPixelFormatType_.+")
             .whitelist_var("kCMSampleAttachmentKey_.+")
