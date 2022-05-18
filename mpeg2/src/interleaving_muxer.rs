@@ -1,9 +1,9 @@
 use super::EncodeError;
 use crate::muxer::{Muxer, Packet, Stream, StreamConfig};
+use alloc::collections::vec_deque::VecDeque;
 use alloc::vec::Vec;
+use core::time::Duration;
 use core2::io::Write;
-use std::collections::VecDeque;
-use std::time::Duration;
 
 const TS_33BIT_MASK: u64 = 0x1FFFFFFFF;
 
