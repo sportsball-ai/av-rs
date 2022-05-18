@@ -80,26 +80,58 @@ impl<W: Write> InterleavingMuxer<W> {
             if let Some(t) = ts {
                 self.largest_ts_in_buffer = self.largest_ts_in_buffer.max(t);
             }
-            self.write_packets_outside_buffer_duration()?;
+            self.emit_packets()?;
+        }
+        Ok(())
+    }
 
-            // find a stream with smallest packet timestamp and emit all packets in this stream if packets
-            // in all other streams with timestamps are larger
+    fn write_muxer_packet(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
+        let stream = &mut self.streams[stream_index].inner;
+        // no need to reset rollovered dts or ptd because only the lower 33 bits are considered when it's written to TS packet
+        self.inner.write(stream, p)?;
+        Ok(())
+    }
+
+    fn emit_packets_outside_buffer_duration(&mut self) -> Result<(), EncodeError> {
+        let mut packets = vec![];
+        for (stream_index, stream) in self.streams.iter_mut().enumerate() {
+            while let Some(p) = stream.buffered_packets.front() {
+                let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
+                if self.largest_ts_in_buffer - ts > self.max_buffer_duration_90khz {
+                    packets.push((
+                        stream_index,
+                        ts,
+                        stream.buffered_packets.pop_front().expect("there must be at least one packet to pop"),
+                    ));
+                } else {
+                    break;
+                }
+            }
+        }
+        for (stream_index, ts, packet) in packets {
+            self.write_muxer_packet(stream_index, packet)?;
+            self.streams[stream_index].last_written_ts = ts;
+        }
+        Ok(())
+    }
+
+    fn emit_packets(&mut self) -> Result<(), EncodeError> {
+        // emit packets outsize max buffer duration
+        self.emit_packets_outside_buffer_duration()?;
+
+        // find a stream with smallest packet timestamp and emit all packets in this stream if packets
+        // in all other streams with timestamps are larger
+        loop {
+            let mut last_written_ts = 0;
             let mut packets = vec![];
             let mut min_ts_stream_index = 0;
-            let mut last_written_ts = 0;
-            if let Some((index, _)) = self
-                .streams
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| *index != stream_index)
-                .min_by_key(|(_, s)| {
-                    if let Some(p) = s.buffered_packets.front() {
-                        p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts)
-                    } else {
-                        0
-                    }
-                })
-            {
+            if let Some((index, _)) = self.streams.iter().enumerate().min_by_key(|(_, s)| {
+                if let Some(p) = s.buffered_packets.front() {
+                    p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts)
+                } else {
+                    0
+                }
+            }) {
                 if !self.streams[index].buffered_packets.is_empty() {
                     let others_min_ts = self.min_ts_excluding(index);
                     let stream = &mut self.streams[index];
@@ -120,37 +152,9 @@ impl<W: Write> InterleavingMuxer<W> {
                     self.write_muxer_packet(min_ts_stream_index, packet)?;
                 }
                 self.streams[min_ts_stream_index].last_written_ts = last_written_ts;
+            } else {
+                break;
             }
-        }
-        Ok(())
-    }
-
-    fn write_muxer_packet(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
-        let stream = &mut self.streams[stream_index].inner;
-        // no need to reset rollovered dts or ptd because only the lower 33 bits are considered when it's written to TS packet
-        self.inner.write(stream, p)?;
-        Ok(())
-    }
-
-    fn write_packets_outside_buffer_duration(&mut self) -> Result<(), EncodeError> {
-        let mut packets = vec![];
-        for (stream_index, stream) in self.streams.iter_mut().enumerate() {
-            while let Some(p) = stream.buffered_packets.front() {
-                let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
-                if self.largest_ts_in_buffer - ts > self.max_buffer_duration_90khz {
-                    packets.push((
-                        stream_index,
-                        ts,
-                        stream.buffered_packets.pop_front().expect("there must be at least one packet to pop"),
-                    ));
-                } else {
-                    break;
-                }
-            }
-        }
-        for (stream_index, ts, packet) in packets {
-            self.write_muxer_packet(stream_index, packet)?;
-            self.streams[stream_index].last_written_ts = ts;
         }
         Ok(())
     }
