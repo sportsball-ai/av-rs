@@ -269,7 +269,7 @@ mod test {
         fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let mut state = self.state.borrow_mut();
             let n = buf.len();
-            state.buffer.write_all(&buf)?;
+            state.buffer.write_all(buf)?;
             let buffered_bytes = state.buffer.len();
             let remaining_bytes = buffered_bytes % ts::PACKET_LENGTH;
             let incomplete_packet = state.buffer.split_off(buffered_bytes - remaining_bytes);
