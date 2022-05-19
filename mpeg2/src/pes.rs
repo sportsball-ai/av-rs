@@ -15,7 +15,7 @@ pub struct PacketizationConfig {
     pub packet_id: u16,
     pub random_access_indicator: bool,
     pub continuity_counter: u8,
-    pub temi: Vec<TEMITimelineDescriptor>,
+    pub temi: Option<Vec<TEMITimelineDescriptor>>,
 }
 
 impl<'a> Packet<'a> {
@@ -41,7 +41,7 @@ impl<'a> Iterator for Packetize<'a> {
         let adaptation_field = self.header.map(|header| {
             let mut af = ts::AdaptationField {
                 random_access_indicator: if self.config.random_access_indicator { Some(true) } else { None },
-                temi_timeline_descriptors: Cow::Borrowed(&self.config.temi),
+                temi_timeline_descriptors: self.config.temi.take(),
                 ..Default::default()
             };
             if let Some(dts) = header.optional_header.as_ref().and_then(|h| h.dts.or(h.pts)) {

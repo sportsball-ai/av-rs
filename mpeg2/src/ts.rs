@@ -2,7 +2,6 @@ use super::{DecodeError, EncodeError};
 use crate::bitstream::{Bitstream, BitstreamWriter, Decode};
 use crate::temi::{TEMITimelineDescriptor, AF_DESCR_TAG_TIMELINE};
 use alloc::{borrow::Cow, vec::Vec};
-use core::borrow::Borrow;
 use core2::io::Write;
 
 pub const PID_PAT: u16 = 0x00;
@@ -12,20 +11,20 @@ pub struct Packet<'a> {
     pub packet_id: u16,
     pub payload_unit_start_indicator: bool,
     pub continuity_counter: u8,
-    pub adaptation_field: Option<AdaptationField<'a>>,
+    pub adaptation_field: Option<AdaptationField>,
     pub payload: Option<Cow<'a, [u8]>>,
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub struct AdaptationField<'a> {
+pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
     pub private_data_bytes: Vec<u8>,
-    pub temi_timeline_descriptors: Cow<'a, [TEMITimelineDescriptor]>,
+    pub temi_timeline_descriptors: Option<Vec<TEMITimelineDescriptor>>,
 }
 
-impl<'a> AdaptationField<'a> {
+impl AdaptationField {
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         let mut bs = Bitstream::new(buf);
         let mut af = Self::default();
@@ -99,7 +98,7 @@ impl<'a> AdaptationField<'a> {
                             af_extension_bs.skip_bytes(af_descr_length as usize);
                         }
                     }
-                    af.temi_timeline_descriptors = temi_timeline_descriptors.into();
+                    af.temi_timeline_descriptors = Some(temi_timeline_descriptors);
                 }
             }
         }
@@ -117,10 +116,9 @@ impl<'a> AdaptationField<'a> {
         if !self.private_data_bytes.is_empty() {
             len += 1 + self.private_data_bytes.len();
         }
-        if !self.temi_timeline_descriptors.is_empty() {
+        if let Some(temi) = &self.temi_timeline_descriptors {
             len += 2;
-            let descriptors: &[TEMITimelineDescriptor] = self.temi_timeline_descriptors.borrow();
-            for timeline_descriptor in descriptors {
+            for timeline_descriptor in temi {
                 len += timeline_descriptor.encoded_len();
             }
         }
@@ -131,7 +129,7 @@ impl<'a> AdaptationField<'a> {
         let has_af_flags = pad_to_length >= 2
             || self.program_clock_reference_27mhz.is_some()
             || !self.private_data_bytes.is_empty()
-            || !self.temi_timeline_descriptors.is_empty();
+            || self.temi_timeline_descriptors.is_some();
 
         let pcr_length = if self.program_clock_reference_27mhz.is_some() { 6 } else { 0 };
         let transport_private_data_length = if self.private_data_bytes.is_empty() {
@@ -139,10 +137,14 @@ impl<'a> AdaptationField<'a> {
         } else {
             self.private_data_bytes.len() + 1
         };
-        let adaptation_field_extension_length = match self.temi_timeline_descriptors.iter().map(|temi| temi.encoded_len()).sum::<usize>() {
-            0 => 0,
-            n => n + 1,
-        };
+
+        let mut adaptation_field_extension_length = 0;
+        if let Some(temi_timeline_descriptors) = &self.temi_timeline_descriptors {
+            adaptation_field_extension_length = match temi_timeline_descriptors.iter().map(|temi| temi.encoded_len()).sum::<usize>() {
+                0 => 0,
+                n => n + 1,
+            };
+        }
         if adaptation_field_extension_length > 0xff {
             return Err(EncodeError::other("adaptation_field_extension_length overflow"));
         }
@@ -166,7 +168,7 @@ impl<'a> AdaptationField<'a> {
             bs.write_boolean(self.program_clock_reference_27mhz.is_some());
             bs.skip_n_bits(2); // splicing_point_flag and transport_private_data_flag are ignored
             bs.write_boolean(!self.private_data_bytes.is_empty());
-            bs.write_boolean(!self.temi_timeline_descriptors.is_empty());
+            bs.write_boolean(!self.temi_timeline_descriptors.as_ref().map_or(true, |temi| temi.is_empty()));
         }
 
         if let Some(program_clock_reference_27mhz) = self.program_clock_reference_27mhz {
@@ -186,13 +188,14 @@ impl<'a> AdaptationField<'a> {
             }
         }
 
-        if !self.temi_timeline_descriptors.is_empty() {
-            bs.write_u8(adaptation_field_extension_length as u8);
-            bs.skip_n_bits(8);
-            let descriptors: &[TEMITimelineDescriptor] = self.temi_timeline_descriptors.borrow();
-            for descr in descriptors {
-                let len = descr.encode(bs.inner_remaining())?;
-                bs.skip_n_bytes(len);
+        if let Some(temi_timeline_descriptors) = &self.temi_timeline_descriptors {
+            if !temi_timeline_descriptors.is_empty() {
+                bs.write_u8(adaptation_field_extension_length as u8);
+                bs.skip_n_bits(8);
+                for descr in temi_timeline_descriptors {
+                    let len = descr.encode(bs.inner_remaining())?;
+                    bs.skip_n_bytes(len);
+                }
             }
         }
 
@@ -609,7 +612,7 @@ mod test {
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
                 private_data_bytes: vec![],
-                temi_timeline_descriptors: Cow::Borrowed(&[]),
+                temi_timeline_descriptors: None,
             })
         );
         {
@@ -794,7 +797,7 @@ mod test {
         ];
         let packet = Packet::decode(&packet_data).unwrap();
         let af = packet.adaptation_field.unwrap();
-        let temi_descriptors = af.temi_timeline_descriptors;
+        let temi_descriptors = af.temi_timeline_descriptors.unwrap();
         assert_eq!(temi_descriptors.len(), 1);
         let decoded_temi = &temi_descriptors[0];
         let temi = TEMITimelineDescriptor {
@@ -817,8 +820,8 @@ mod test {
             1, 10, 34, 171, 0, 194, 176, 0, 0, 1, 11, 34, 171, 0, 194, 176, 0, 0, 1, 12, 34, 171, 0, 194, 176, 0, 0, 1, 13, 34, 171, 0, 194, 176,
         ];
         let decoded_packet = Packet::decode(&ori_packet_data).unwrap();
-        let af = decoded_packet.adaptation_field.as_ref().unwrap();
-        let temi_descriptors = &af.temi_timeline_descriptors;
+        let af = decoded_packet.adaptation_field.unwrap();
+        let temi_descriptors = &af.temi_timeline_descriptors.unwrap();
         assert_eq!(temi_descriptors.len(), 1);
         let decoded_temi = &temi_descriptors[0];
         let temi = TEMITimelineDescriptor {

@@ -190,7 +190,7 @@ pub struct Packet<'a> {
     pub random_access_indicator: bool,
     pub pts_90khz: Option<u64>,
     pub dts_90khz: Option<u64>,
-    pub temi: Cow<'a, [TEMITimelineDescriptor]>,
+    pub temi: Vec<TEMITimelineDescriptor>,
 }
 
 impl<'a> Packet<'a> {
@@ -200,7 +200,7 @@ impl<'a> Packet<'a> {
             random_access_indicator: self.random_access_indicator,
             pts_90khz: self.pts_90khz,
             dts_90khz: self.dts_90khz,
-            temi: Cow::Owned(self.temi.into()),
+            temi: self.temi,
         }
     }
 }
@@ -267,7 +267,7 @@ mod test {
                                 random_access_indicator,
                                 pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
                                 dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),
-                                temi: vec![].into(),
+                                temi: vec![],
                             },
                         )
                         .unwrap();
