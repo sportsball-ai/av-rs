@@ -63,7 +63,7 @@ impl<W: Write> Muxer<W> {
 
     pub fn write(&mut self, stream: &mut Stream, p: Packet) -> Result<(), EncodeError> {
         let pes_packet = pes::Packet {
-            header: pes::PacketHeader::new(&stream, &p),
+            header: pes::PacketHeader::new(stream, &p),
             data: p.data,
         };
         for ts_packet in pes_packet.packetize(pes::PacketizationConfig {
