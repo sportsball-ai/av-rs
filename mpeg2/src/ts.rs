@@ -2,6 +2,7 @@ use super::{DecodeError, EncodeError};
 use crate::bitstream::{Bitstream, BitstreamWriter, Decode};
 use crate::temi::{TEMITimelineDescriptor, AF_DESCR_TAG_TIMELINE};
 use alloc::{borrow::Cow, vec::Vec};
+use core::borrow::Borrow;
 use core2::io::Write;
 
 pub const PID_PAT: u16 = 0x00;
@@ -11,20 +12,20 @@ pub struct Packet<'a> {
     pub packet_id: u16,
     pub payload_unit_start_indicator: bool,
     pub continuity_counter: u8,
-    pub adaptation_field: Option<AdaptationField>,
+    pub adaptation_field: Option<AdaptationField<'a>>,
     pub payload: Option<Cow<'a, [u8]>>,
 }
 
 #[derive(Debug, Default, PartialEq)]
-pub struct AdaptationField {
+pub struct AdaptationField<'a> {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
     pub private_data_bytes: Vec<u8>,
-    pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
+    pub temi_timeline_descriptors: Cow<'a, [TEMITimelineDescriptor]>,
 }
 
-impl AdaptationField {
+impl<'a> AdaptationField<'a> {
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         let mut bs = Bitstream::new(buf);
         let mut af = Self::default();
@@ -85,19 +86,20 @@ impl AdaptationField {
                 }
 
                 if !af_descriptor_not_present_flag {
-                    af.temi_timeline_descriptors = vec![];
+                    let mut temi_timeline_descriptors = vec![];
                     while af_extension_bs.remaining_bytes() >= 2 {
                         let af_descr_tag = af_extension_bs.read_u8("af_descr_tag")?;
                         let af_descr_length = af_extension_bs.read_u8("af_descr_length")?;
                         if af_descr_tag == AF_DESCR_TAG_TIMELINE {
                             let descr = TEMITimelineDescriptor::decode(&mut af_extension_bs.wrapped_stream(af_descr_length as usize))?;
                             af_extension_bs.skip_bytes(af_descr_length as usize);
-                            af.temi_timeline_descriptors.push(descr);
+                            temi_timeline_descriptors.push(descr);
                         } else {
                             // Other types of AF descriptors are ignored
                             af_extension_bs.skip_bytes(af_descr_length as usize);
                         }
                     }
+                    af.temi_timeline_descriptors = temi_timeline_descriptors.into();
                 }
             }
         }
@@ -117,7 +119,8 @@ impl AdaptationField {
         }
         if !self.temi_timeline_descriptors.is_empty() {
             len += 2;
-            for timeline_descriptor in &self.temi_timeline_descriptors {
+            let descriptors: &[TEMITimelineDescriptor] = self.temi_timeline_descriptors.borrow();
+            for timeline_descriptor in descriptors {
                 len += timeline_descriptor.encoded_len();
             }
         }
@@ -186,7 +189,8 @@ impl AdaptationField {
         if !self.temi_timeline_descriptors.is_empty() {
             bs.write_u8(adaptation_field_extension_length as u8);
             bs.skip_n_bits(8);
-            for descr in &self.temi_timeline_descriptors {
+            let descriptors: &[TEMITimelineDescriptor] = self.temi_timeline_descriptors.borrow();
+            for descr in descriptors {
                 let len = descr.encode(bs.inner_remaining())?;
                 bs.skip_n_bytes(len);
             }
@@ -605,7 +609,7 @@ mod test {
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
                 private_data_bytes: vec![],
-                temi_timeline_descriptors: vec![],
+                temi_timeline_descriptors: Cow::Borrowed(&[]),
             })
         );
         {
@@ -769,7 +773,7 @@ mod test {
         };
 
         let payload = &packet.payload.unwrap()[temi1.encoded_len() + temi2.encoded_len() + 2..];
-        af.temi_timeline_descriptors = vec![temi1, temi2];
+        af.temi_timeline_descriptors = vec![temi1, temi2].into();
         packet.payload = Some(Cow::Borrowed(payload));
 
         let mut w = vec![];

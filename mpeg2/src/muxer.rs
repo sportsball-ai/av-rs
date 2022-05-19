@@ -1,4 +1,5 @@
 use super::{pes, ts, EncodeError};
+use crate::temi::TEMITimelineDescriptor;
 use alloc::borrow::Cow;
 use alloc::vec::Vec;
 use core2::io::Write;
@@ -62,21 +63,14 @@ impl<W: Write> Muxer<W> {
 
     pub fn write(&mut self, stream: &mut Stream, p: Packet) -> Result<(), EncodeError> {
         let pes_packet = pes::Packet {
-            header: pes::PacketHeader {
-                stream_id: stream.stream_id,
-                optional_header: Some(pes::OptionalHeader {
-                    data_alignment_indicator: true,
-                    pts: p.pts_90khz,
-                    dts: p.dts_90khz,
-                }),
-                data_length: if stream.unbounded_data_length { 0 } else { p.data.len() },
-            },
+            header: pes::PacketHeader::new(&stream, &p),
             data: p.data,
         };
         for ts_packet in pes_packet.packetize(pes::PacketizationConfig {
             packet_id: stream.packet_id,
             continuity_counter: stream.continuity_counter,
             random_access_indicator: p.random_access_indicator,
+            temi: p.temi.into(),
         }) {
             if ts_packet.payload.is_some() {
                 stream.continuity_counter = (stream.continuity_counter + 1) % 16;
@@ -196,6 +190,7 @@ pub struct Packet<'a> {
     pub random_access_indicator: bool,
     pub pts_90khz: Option<u64>,
     pub dts_90khz: Option<u64>,
+    pub temi: Cow<'a, [TEMITimelineDescriptor]>,
 }
 
 impl<'a> Packet<'a> {
@@ -205,6 +200,7 @@ impl<'a> Packet<'a> {
             random_access_indicator: self.random_access_indicator,
             pts_90khz: self.pts_90khz,
             dts_90khz: self.dts_90khz,
+            temi: Cow::Owned(self.temi.into()),
         }
     }
 }
@@ -219,6 +215,14 @@ pub struct Stream {
 impl Stream {
     pub fn packet_id(&self) -> u16 {
         self.packet_id
+    }
+
+    pub fn stream_id(&self) -> u8 {
+        self.stream_id
+    }
+
+    pub fn unbounded_data_length(&self) -> bool {
+        self.unbounded_data_length
     }
 }
 
@@ -263,6 +267,7 @@ mod test {
                                 random_access_indicator,
                                 pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
                                 dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),
+                                temi: vec![].into(),
                             },
                         )
                         .unwrap();
