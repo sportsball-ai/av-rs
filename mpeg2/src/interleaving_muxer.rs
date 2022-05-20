@@ -17,7 +17,7 @@ pub struct InterleavingMuxer<W: Write> {
 
 pub struct InterleavingStream {
     inner: Stream,
-    buffered_packets: VecDeque<Packet<'static>>,
+    buffered_packets: VecDeque<(usize, u64, Option<Packet<'static>>)>,
     last_written_ts: u64,
 }
 
@@ -67,76 +67,30 @@ impl<W: Write> InterleavingMuxer<W> {
 
         let last_written_ts = self.streams[stream_index].last_written_ts;
         // if the packet doesn't have a dts, use the pts. if it doesn't have a pts, consider it to have the same timestamp as the last packet
-        let ts = p.dts_90khz.or(p.pts_90khz);
+        let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(last_written_ts);
         // if all other streams have provided packets with timestamps after this packet, we can emit it now
-        if self.min_ts_excluding(stream_index) > ts.unwrap_or(last_written_ts) {
+        if ts < self.min_ts_excluding(stream_index) || ts < self.largest_ts_in_buffer.saturating_sub(self.max_buffer_duration_90khz) {
             self.write_muxer_packet(stream_index, p)?;
-            if let Some(t) = ts {
-                self.streams[stream_index].last_written_ts = t;
-            }
+            self.streams[stream_index].last_written_ts = ts;
         } else {
             // and then we need to see if this enabled any other streams to emit their outputs
-            self.streams[stream_index].buffered_packets.push_back(p.into_owned());
-            if let Some(t) = ts {
-                self.largest_ts_in_buffer = self.largest_ts_in_buffer.max(t);
-            }
-            self.write_packets_outside_buffer_duration()?;
-
-            // find a stream with smallest packet timestamp and emit all packets in this stream if packets
-            // in all other streams with timestamps are larger
-            let mut packets = vec![];
-            let mut min_ts_stream_index = 0;
-            let mut last_written_ts = 0;
-            if let Some((index, _)) = self
-                .streams
-                .iter()
-                .enumerate()
-                .filter(|(index, _)| *index != stream_index)
-                .min_by_key(|(_, s)| {
-                    if let Some(p) = s.buffered_packets.front() {
-                        p.dts_90khz.or(p.pts_90khz).unwrap_or(s.last_written_ts)
-                    } else {
-                        0
-                    }
-                })
-            {
-                if !self.streams[index].buffered_packets.is_empty() {
-                    let others_min_ts = self.min_ts_excluding(index);
-                    let stream = &mut self.streams[index];
-                    min_ts_stream_index = index;
-                    while let Some(p) = stream.buffered_packets.front() {
-                        let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
-                        if ts <= others_min_ts {
-                            packets.push(stream.buffered_packets.pop_front().expect("there must be at least one packet to pop"));
-                            last_written_ts = ts;
-                        } else {
-                            break;
-                        }
-                    }
-                }
-            }
-            if !packets.is_empty() {
-                for packet in packets {
-                    self.write_muxer_packet(min_ts_stream_index, packet)?;
-                }
-                self.streams[min_ts_stream_index].last_written_ts = last_written_ts;
-            }
+            self.largest_ts_in_buffer = self.largest_ts_in_buffer.max(ts);
+            self.emit_packets(stream_index, p, ts)?;
         }
         Ok(())
     }
 
     fn write_muxer_packet(&mut self, stream_index: usize, p: Packet) -> Result<(), EncodeError> {
         let stream = &mut self.streams[stream_index].inner;
-        // no need to reset rollovered dts or ptd because only the lower 33 bits are considered when it's written to TS packet
         self.inner.write(stream, p)?;
         Ok(())
     }
 
-    fn write_packets_outside_buffer_duration(&mut self) -> Result<(), EncodeError> {
+    fn emit_packets_outside_buffer_duration(&mut self) -> Result<(), EncodeError> {
         let mut packets = vec![];
         for (stream_index, stream) in self.streams.iter_mut().enumerate() {
             while let Some(p) = stream.buffered_packets.front() {
-                let ts = p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts);
+                let ts = p.1;
                 if self.largest_ts_in_buffer - ts > self.max_buffer_duration_90khz {
                     packets.push((
                         stream_index,
@@ -149,9 +103,74 @@ impl<W: Write> InterleavingMuxer<W> {
             }
         }
         for (stream_index, ts, packet) in packets {
-            self.write_muxer_packet(stream_index, packet)?;
+            if let Some(p) = packet.2 {
+                self.write_muxer_packet(stream_index, p)?;
+            }
             self.streams[stream_index].last_written_ts = ts;
         }
+        Ok(())
+    }
+
+    fn emit_packets(&mut self, index: usize, p: Packet, ts: u64) -> Result<(), EncodeError> {
+        self.streams[index].buffered_packets.push_back((index, ts, None));
+        let mut enqueue_packet = true;
+
+        // emit packets outsize max buffer duration
+        self.emit_packets_outside_buffer_duration()?;
+
+        let mut packets = vec![];
+        loop {
+            let mut last_written_ts = 0;
+            let mut min_ts_stream_index = 0;
+            // find a stream with smallest packet timestamp and emit all packets in this stream if packets
+            // in all other streams with timestamps are larger
+            let mut emit_packets_found = false;
+            if let Some((i, _)) = self
+                .streams
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, s)| if let Some(p) = s.buffered_packets.front() { p.1 } else { 0 })
+            {
+                if !self.streams[i].buffered_packets.is_empty() {
+                    let others_min_ts = self.min_ts_excluding(i);
+                    let stream = &mut self.streams[i];
+                    min_ts_stream_index = i;
+                    while let Some(first_packet) = stream.buffered_packets.front() {
+                        let first_packet_ts = first_packet.1;
+                        if first_packet_ts <= others_min_ts {
+                            let first_packet = stream.buffered_packets.pop_front().expect("there must be at least one packet to pop");
+                            if first_packet.2.is_none() {
+                                enqueue_packet = false;
+                            }
+                            packets.push(first_packet);
+                            last_written_ts = first_packet_ts;
+                            emit_packets_found = true;
+                        } else {
+                            break;
+                        }
+                    }
+                }
+            }
+            if emit_packets_found {
+                self.streams[min_ts_stream_index].last_written_ts = last_written_ts;
+            } else {
+                break;
+            }
+        }
+
+        for (i, packet_ts, packet) in packets {
+            if let Some(p) = packet {
+                self.write_muxer_packet(i, p)?;
+                self.streams[i].last_written_ts = packet_ts;
+            }
+        }
+        if enqueue_packet {
+            self.streams[index].buffered_packets.pop_back();
+            self.streams[index].buffered_packets.push_back((index, ts, Some(p.into_owned())));
+        } else {
+            self.write_muxer_packet(index, p)?;
+        }
+
         Ok(())
     }
 
@@ -159,7 +178,7 @@ impl<W: Write> InterleavingMuxer<W> {
         let mut min_ts = u64::MAX;
         for (_, stream) in self.streams.iter().enumerate().filter(|&(index, _)| index != stream_id) {
             if let Some(p) = stream.buffered_packets.front() {
-                min_ts = min_ts.min(p.dts_90khz.or(p.pts_90khz).unwrap_or(stream.last_written_ts));
+                min_ts = min_ts.min(p.1);
             } else {
                 min_ts = 0;
                 break;
@@ -174,13 +193,14 @@ impl<W: Write> InterleavingMuxer<W> {
         let mut packets = vec![];
         self.streams.iter_mut().enumerate().for_each(|(stream_index, stream)| {
             while let Some(p) = stream.buffered_packets.pop_front() {
-                packets.push((stream_index, stream.last_written_ts, p));
+                packets.push((stream_index, p));
             }
             stream.last_written_ts = 0;
         });
 
-        packets.sort_unstable_by_key(|(_, ts, p)| p.dts_90khz.or(p.pts_90khz).unwrap_or(*ts));
-        for (stream_index, _, packet) in packets {
+        packets.sort_unstable_by_key(|(_, p)| p.0);
+        for (stream_index, packet) in packets {
+            let packet = packet.2.expect("emit_packets should never leave None packets in the buffer");
             self.write_muxer_packet(stream_index, packet)?;
         }
         Ok(())
@@ -198,7 +218,88 @@ impl<W: Write> Drop for InterleavingMuxer<W> {
 mod test {
     use super::*;
     use crate::{pes, ts};
-    use std::{fs::File, io::Read};
+    use std::{
+        cell::{Ref, RefCell},
+        fs::File,
+        io::{self, Read},
+    };
+
+    #[derive(Debug, PartialEq)]
+    struct WrittenPacket {
+        stream_index: usize,
+        pts_90khz: Option<u64>,
+        dts_90khz: Option<u64>,
+    }
+
+    /// TestWriter is a writer that records the timestamps of all of the PES packets written to it.
+    struct TestWriter {
+        state: RefCell<TestWriterState>,
+    }
+
+    struct TestWriterState {
+        buffer: Vec<u8>,
+        packets: Vec<WrittenPacket>,
+    }
+
+    impl TestWriter {
+        pub fn new() -> Self {
+            Self {
+                state: RefCell::new(TestWriterState {
+                    buffer: vec![],
+                    packets: vec![],
+                }),
+            }
+        }
+
+        pub fn packets(&self) -> Ref<'_, Vec<WrittenPacket>> {
+            Ref::map(self.state.borrow(), |s| &s.packets)
+        }
+    }
+
+    /// Returns the simplest packet possible with the given PTS.
+    fn simple_packet(pts_90khz: u64) -> Packet<'static> {
+        Packet {
+            data: vec![].into(),
+            random_access_indicator: true,
+            pts_90khz: Some(pts_90khz),
+            dts_90khz: None,
+        }
+    }
+
+    impl Write for &TestWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut state = self.state.borrow_mut();
+            let n = buf.len();
+            state.buffer.write_all(buf)?;
+            let buffered_bytes = state.buffer.len();
+            let remaining_bytes = buffered_bytes % ts::PACKET_LENGTH;
+            let incomplete_packet = state.buffer.split_off(buffered_bytes - remaining_bytes);
+            let packets = ts::decode_packets(&state.buffer).unwrap();
+            let mut completed = vec![];
+            for p in packets {
+                if p.packet_id >= 0x100 && p.packet_id <= 0x200 {
+                    let stream_index = (p.packet_id - 0x100) as usize;
+                    if let Some(payload) = p.payload {
+                        if p.payload_unit_start_indicator {
+                            let (header, _) = pes::PacketHeader::decode(&payload).unwrap();
+                            completed.push(WrittenPacket {
+                                stream_index,
+                                pts_90khz: header.optional_header.as_ref().and_then(|h| h.pts),
+                                dts_90khz: header.optional_header.as_ref().and_then(|h| h.dts),
+                            });
+                        }
+                    }
+                }
+            }
+            state.packets.extend(completed.into_iter());
+            state.buffer = incomplete_packet;
+            Ok(n)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
 
     fn get_test_stream_data() -> Vec<u8> {
         let mut buf = Vec::new();
@@ -247,6 +348,18 @@ mod test {
         h.dts.or(h.pts).unwrap()
     }
 
+    /// Adds the given number of streams to the muxer with arbitrary configurations.
+    fn add_streams<W: Write>(muxer: &mut InterleavingMuxer<W>, count: usize) {
+        for _ in 0..count {
+            muxer.add_stream(StreamConfig {
+                stream_id: 0xe0,
+                stream_type: 0x1b,
+                data: vec![],
+                unbounded_data_length: true,
+            });
+        }
+    }
+
     #[test]
     fn test_single_stream() {
         let num_of_pes_packets: usize = 200;
@@ -256,12 +369,8 @@ mod test {
         let mut data_out = Vec::new();
         {
             let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(0));
-            muxer.add_stream(StreamConfig {
-                stream_id: 0xe0,
-                stream_type: 0x1b,
-                data: vec![],
-                unbounded_data_length: true,
-            });
+            add_streams(&mut muxer, 1);
+
             let mut random_access_indicator = true;
             for pes_packet in pes_packets {
                 muxer.write(0, convert_pes_packet_to_muxer_packet(pes_packet, random_access_indicator)).unwrap();
@@ -292,14 +401,8 @@ mod test {
         let mut data_out = Vec::new();
         {
             let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(20));
-            for i in 0..num_of_streams {
-                muxer.add_stream(StreamConfig {
-                    stream_id: 0xe0 + i as u8,
-                    stream_type: 0x1b + i as u8,
-                    data: vec![],
-                    unbounded_data_length: true,
-                });
-            }
+            add_streams(&mut muxer, num_of_streams);
+
             let mut random_access_indicator = true;
             for n in 0..num_of_pes_packets_per_stream {
                 for (i, pes_packets) in pes_packets_array.iter_mut().enumerate() {
@@ -341,14 +444,8 @@ mod test {
         let mut data_out = Vec::new();
         {
             let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(30));
-            for i in 0..3 {
-                muxer.add_stream(StreamConfig {
-                    stream_id: 0xe0 + i,
-                    stream_type: 0x1b + i,
-                    data: vec![],
-                    unbounded_data_length: true,
-                });
-            }
+            add_streams(&mut muxer, 3);
+
             let mut random_access_indicator = true;
             for _ in 0..num_of_pes_packets_per_stream {
                 for i in (0..3).rev() {
@@ -407,14 +504,8 @@ mod test {
         let mut data_out = Vec::new();
         {
             let mut muxer = InterleavingMuxer::new(&mut data_out, Duration::from_millis(10000));
-            for i in 0..num_of_streams {
-                muxer.add_stream(StreamConfig {
-                    stream_id: 0xe0 + i as u8,
-                    stream_type: 0x1b + i as u8,
-                    data: vec![],
-                    unbounded_data_length: true,
-                });
-            }
+            add_streams(&mut muxer, num_of_streams);
+
             let mut random_access_indicator = true;
             for _ in 0..num_of_pes_packets_per_stream {
                 for i in (0..num_of_streams).rev() {
@@ -435,5 +526,71 @@ mod test {
             let h = p.header.optional_header.as_ref().unwrap();
             assert_eq!(h.dts.or(h.pts).unwrap(), ts);
         }
+    }
+
+    /// With only one stream, all packets should simply be written immediately, with no buffering.
+    #[test]
+    fn test_single_stream_latency() {
+        let w = TestWriter::new();
+
+        let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
+        add_streams(&mut muxer, 1);
+
+        muxer.write(0, simple_packet(100)).unwrap();
+        assert_eq!(w.packets().len(), 1);
+
+        muxer.write(0, simple_packet(200)).unwrap();
+        assert_eq!(w.packets().len(), 2);
+
+        muxer.write(0, simple_packet(300)).unwrap();
+        assert_eq!(w.packets().len(), 3);
+    }
+
+    /// With two streams, one stream will always lead the other. And for the stream that's behind,
+    /// packets should always be written through immediately, without buffering.
+    #[test]
+    fn test_multiple_stream_latency() {
+        let w = TestWriter::new();
+
+        let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
+        add_streams(&mut muxer, 2);
+
+        // This first packet should not be written yet. The other stream may have a packet that
+        // comes before it.
+        muxer.write(0, simple_packet(100)).unwrap();
+        assert!(w.packets().is_empty());
+
+        // This packet should be written immediately as the other stream has already provided a
+        // packet after it.
+        muxer.write(1, simple_packet(50)).unwrap();
+        assert_eq!(w.packets().len(), 1);
+
+        // This packet still should not be written yet.
+        muxer.write(0, simple_packet(200)).unwrap();
+        assert_eq!(w.packets().len(), 1);
+
+        // At this point, we can write both the first packet and this one.
+        muxer.write(1, simple_packet(150)).unwrap();
+        println!("{:?}", *w.packets());
+        assert_eq!(
+            *w.packets(),
+            vec![
+                WrittenPacket {
+                    stream_index: 1,
+                    pts_90khz: Some(50),
+                    dts_90khz: None
+                },
+                WrittenPacket {
+                    stream_index: 0,
+                    pts_90khz: Some(100),
+                    dts_90khz: None
+                },
+                WrittenPacket {
+                    stream_index: 1,
+                    pts_90khz: Some(150),
+                    dts_90khz: None
+                }
+            ]
+        );
     }
 }
