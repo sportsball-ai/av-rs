@@ -40,11 +40,9 @@ impl<'a> Iterator for Packetize<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let adaptation_field = self.header.map(|header| {
-            let mut temi_timeline_descriptors = vec![];
-            mem::swap(&mut temi_timeline_descriptors, &mut self.config.temi_timeline_descriptors);
             let mut af = ts::AdaptationField {
                 random_access_indicator: if self.config.random_access_indicator { Some(true) } else { None },
-                temi_timeline_descriptors,
+                temi_timeline_descriptors: mem::replace(&mut self.config.temi_timeline_descriptors, vec![]),
                 ..Default::default()
             };
             if let Some(dts) = header.optional_header.as_ref().and_then(|h| h.dts.or(h.pts)) {
