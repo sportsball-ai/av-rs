@@ -42,7 +42,7 @@ impl<'a> Iterator for Packetize<'a> {
         let adaptation_field = self.header.map(|header| {
             let mut af = ts::AdaptationField {
                 random_access_indicator: if self.config.random_access_indicator { Some(true) } else { None },
-                temi_timeline_descriptors: mem::replace(&mut self.config.temi_timeline_descriptors, vec![]),
+                temi_timeline_descriptors: mem::take(&mut self.config.temi_timeline_descriptors),
                 ..Default::default()
             };
             if let Some(dts) = header.optional_header.as_ref().and_then(|h| h.dts.or(h.pts)) {
