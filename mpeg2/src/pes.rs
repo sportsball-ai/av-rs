@@ -2,7 +2,7 @@ use super::{ts, DecodeError, EncodeError};
 use crate::muxer;
 use crate::temi::TEMITimelineDescriptor;
 use alloc::{borrow::Cow, vec::Vec};
-use std::mem;
+use core::mem;
 use core2::io::Write;
 
 #[derive(Clone, Debug, PartialEq)]
