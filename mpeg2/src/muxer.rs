@@ -70,7 +70,7 @@ impl<W: Write> Muxer<W> {
             packet_id: stream.packet_id,
             continuity_counter: stream.continuity_counter,
             random_access_indicator: p.random_access_indicator,
-            temi_timeline_descriptors: p.temi,
+            temi_timeline_descriptors: p.temi_timeline_descriptors,
         }) {
             if ts_packet.payload.is_some() {
                 stream.continuity_counter = (stream.continuity_counter + 1) % 16;
@@ -190,7 +190,7 @@ pub struct Packet<'a> {
     pub random_access_indicator: bool,
     pub pts_90khz: Option<u64>,
     pub dts_90khz: Option<u64>,
-    pub temi: Vec<TEMITimelineDescriptor>,
+    pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
 impl<'a> Packet<'a> {
@@ -200,7 +200,7 @@ impl<'a> Packet<'a> {
             random_access_indicator: self.random_access_indicator,
             pts_90khz: self.pts_90khz,
             dts_90khz: self.dts_90khz,
-            temi: self.temi,
+            temi_timeline_descriptors: self.temi_timeline_descriptors,
         }
     }
 }
@@ -267,7 +267,7 @@ mod test {
                                 random_access_indicator,
                                 pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
                                 dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),
-                                temi: vec![],
+                                temi_timeline_descriptors: vec![],
                             },
                         )
                         .unwrap();

@@ -230,7 +230,7 @@ mod test {
             random_access_indicator,
             pts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.pts),
             dts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.dts),
-            temi: vec![],
+            temi_timeline_descriptors: vec![],
         }
     }
 
