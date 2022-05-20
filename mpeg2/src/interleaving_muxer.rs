@@ -200,7 +200,8 @@ impl<W: Write> InterleavingMuxer<W> {
 
         packets.sort_unstable_by_key(|(_, p)| p.0);
         for (stream_index, packet) in packets {
-            self.write_muxer_packet(stream_index, packet.2.expect("should not fail"))?;
+            let packet = packet.2.expect("emit_packets should never leave None packets in the buffer");
+            self.write_muxer_packet(stream_index, packet)?;
         }
         Ok(())
     }
