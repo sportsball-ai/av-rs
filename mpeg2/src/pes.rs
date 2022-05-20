@@ -2,6 +2,7 @@ use super::{ts, DecodeError, EncodeError};
 use crate::muxer;
 use crate::temi::TEMITimelineDescriptor;
 use alloc::{borrow::Cow, vec::Vec};
+use std::mem;
 use core2::io::Write;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -15,7 +16,7 @@ pub struct PacketizationConfig {
     pub packet_id: u16,
     pub random_access_indicator: bool,
     pub continuity_counter: u8,
-    pub temi: Option<Vec<TEMITimelineDescriptor>>,
+    pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
 impl<'a> Packet<'a> {
@@ -39,9 +40,11 @@ impl<'a> Iterator for Packetize<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let adaptation_field = self.header.map(|header| {
+            let mut temi_timeline_descriptors = vec![];
+            mem::swap(&mut temi_timeline_descriptors, &mut self.config.temi_timeline_descriptors);
             let mut af = ts::AdaptationField {
                 random_access_indicator: if self.config.random_access_indicator { Some(true) } else { None },
-                temi_timeline_descriptors: self.config.temi.take(),
+                temi_timeline_descriptors,
                 ..Default::default()
             };
             if let Some(dts) = header.optional_header.as_ref().and_then(|h| h.dts.or(h.pts)) {

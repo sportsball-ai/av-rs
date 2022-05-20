@@ -70,7 +70,7 @@ impl<W: Write> Muxer<W> {
             packet_id: stream.packet_id,
             continuity_counter: stream.continuity_counter,
             random_access_indicator: p.random_access_indicator,
-            temi: p.temi.into(),
+            temi_timeline_descriptors: p.temi,
         }) {
             if ts_packet.payload.is_some() {
                 stream.continuity_counter = (stream.continuity_counter + 1) % 16;
