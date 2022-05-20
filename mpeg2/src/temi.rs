@@ -17,7 +17,7 @@ impl Default for TimeFieldLength {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Clone)]
 pub struct TEMITimelineDescriptor {
     pub has_timestamp: TimeFieldLength,
     pub timescale: u32,

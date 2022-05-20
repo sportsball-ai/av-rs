@@ -85,7 +85,6 @@ impl AdaptationField {
                 }
 
                 if !af_descriptor_not_present_flag {
-                    af.temi_timeline_descriptors = vec![];
                     while af_extension_bs.remaining_bytes() >= 2 {
                         let af_descr_tag = af_extension_bs.read_u8("af_descr_tag")?;
                         let af_descr_length = af_extension_bs.read_u8("af_descr_length")?;

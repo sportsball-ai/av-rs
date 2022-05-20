@@ -1,5 +1,8 @@
 use super::{ts, DecodeError, EncodeError};
+use crate::muxer;
+use crate::temi::TEMITimelineDescriptor;
 use alloc::{borrow::Cow, vec::Vec};
+use core::mem;
 use core2::io::Write;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -13,6 +16,7 @@ pub struct PacketizationConfig {
     pub packet_id: u16,
     pub random_access_indicator: bool,
     pub continuity_counter: u8,
+    pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
 impl<'a> Packet<'a> {
@@ -38,6 +42,7 @@ impl<'a> Iterator for Packetize<'a> {
         let adaptation_field = self.header.map(|header| {
             let mut af = ts::AdaptationField {
                 random_access_indicator: if self.config.random_access_indicator { Some(true) } else { None },
+                temi_timeline_descriptors: mem::take(&mut self.config.temi_timeline_descriptors),
                 ..Default::default()
             };
             if let Some(dts) = header.optional_header.as_ref().and_then(|h| h.dts.or(h.pts)) {
@@ -85,6 +90,18 @@ pub struct PacketHeader {
 }
 
 impl PacketHeader {
+    pub fn new(stream: &muxer::Stream, p: &muxer::Packet) -> Self {
+        Self {
+            stream_id: stream.stream_id(),
+            optional_header: Some(OptionalHeader {
+                data_alignment_indicator: true,
+                pts: p.pts_90khz,
+                dts: p.dts_90khz,
+            }),
+            data_length: if stream.unbounded_data_length() { 0 } else { p.data.len() },
+        }
+    }
+
     pub fn decode(buf: &[u8]) -> Result<(Self, usize), DecodeError> {
         if buf.len() < 6 {
             return Err(DecodeError::new("not enough bytes for pes header"));
