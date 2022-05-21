@@ -263,6 +263,7 @@ mod test {
             random_access_indicator: true,
             pts_90khz: Some(pts_90khz),
             dts_90khz: None,
+            temi_timeline_descriptors: vec![]
         }
     }
 
