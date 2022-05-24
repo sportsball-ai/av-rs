@@ -218,7 +218,7 @@ impl OptionalHeader {
 
         if let Some(pts) = self.pts {
             buf[1] |= 0x80;
-            buf[3] = 0b00100001 | (pts >> 29) as u8;
+            buf[3] = 0b00100001 | ((pts >> 29) & 0xf) as u8;
             buf[4] = (pts >> 22) as u8;
             buf[5] = (pts >> 14) as u8 | 1;
             buf[6] = (pts >> 7) as u8;
@@ -229,7 +229,7 @@ impl OptionalHeader {
         if let Some(dts) = self.dts {
             buf[1] |= 0x40;
             buf[3] |= 0b00010000;
-            buf[8] = 0b00010001 | (dts >> 29) as u8;
+            buf[8] = 0b00010001 | ((dts >> 29) & 0xf) as u8;
             buf[9] = (dts >> 22) as u8;
             buf[10] = (dts >> 14) as u8 | 1;
             buf[11] = (dts >> 7) as u8;
@@ -350,5 +350,22 @@ mod test {
         assert!(decoded_oh.data_alignment_indicator);
         assert_eq!(decoded_oh.pts.unwrap(), ts);
         assert_eq!(decoded_oh.dts.unwrap(), ts);
+    }
+
+    /// Tests that if timestamps using more than 33 bits are given, the high bits are dropped and
+    /// don't corrupt the header.
+    #[test]
+    fn test_packet_header_ts_overflow() {
+        let header = OptionalHeader {
+            data_alignment_indicator: false,
+            pts: Some((1 << 35) | 123),
+            dts: Some((1 << 35) | 456),
+        };
+
+        let mut encoded = vec![];
+        header.encode(&mut encoded).unwrap();
+
+        assert_eq!(encoded[3], 0b00110001);
+        assert_eq!(encoded[8], 0b00010001);
     }
 }
