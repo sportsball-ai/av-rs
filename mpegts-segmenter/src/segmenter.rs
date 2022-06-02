@@ -1,6 +1,7 @@
 use super::{analyzer, Analyzer, SegmentStorage, StreamInfo};
 use mpeg2::{
     pes,
+    temi::TEMITimelineDescriptor,
     ts::{Packet, PACKET_LENGTH},
 };
 use std::{fmt, io, time::Duration};
@@ -11,6 +12,7 @@ struct CurrentSegment<S: AsyncWrite + Unpin> {
     pcr: u64,
     pts: Option<Duration>,
     bytes_written: usize,
+    temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
 }
 
 pub struct SegmenterConfig {
@@ -96,8 +98,10 @@ impl<S: SegmentStorage> Segmenter<S> {
             let p = Packet::decode(buf)?;
             self.analyzer.handle_packet(&p)?;
 
+            let mut temi_timeline_descriptor = None;
             if let Some(af) = &p.adaptation_field {
                 self.pcr = af.program_clock_reference_27mhz.or(self.pcr);
+                temi_timeline_descriptor = af.temi_timeline_descriptors.first().cloned();
             }
 
             let mut should_start_new_segment = false;
@@ -163,6 +167,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     pcr: self.pcr.unwrap_or(0),
                     pts: None,
                     bytes_written: 0,
+                    temi_timeline_descriptor,
                 });
 
                 self.analyzer.reset_timecodes();
@@ -217,6 +222,7 @@ pub struct SegmentInfo {
     pub size: usize,
     pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
+    pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
 }
 
 impl SegmentInfo {
@@ -279,6 +285,7 @@ impl SegmentInfo {
                     })
                     .collect()
             },
+            temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
         }
     }
 }
@@ -566,5 +573,32 @@ mod test {
                 }
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn test_segmenter_with_temi_timeline_descriptor() {
+        let mut storage = MemorySegmentStorage::new();
+        {
+            let mut f = File::open("src/testdata/temi_timeline-ntp-ts.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(1),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert_eq!(segments.len(), 3);
+        let ntp_timestamps: Vec<u64> = segments
+            .iter()
+            .map(|s| s.1.temi_timeline_descriptor.as_ref().unwrap().ntp_timestamp.unwrap())
+            .collect();
+        assert_eq!(ntp_timestamps, &[16592063487166754097, 16592063487167157824, 16592063487167574436]);
     }
 }
