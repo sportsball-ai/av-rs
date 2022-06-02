@@ -579,7 +579,7 @@ mod test {
     async fn test_segmenter_with_temi_timeline_descriptor() {
         let mut storage = MemorySegmentStorage::new();
         {
-            let mut f = File::open("src/testdata/temi_timeline-ntp-ts.ts").unwrap();
+            let mut f = File::open("src/testdata/temi-timeline-ntp-ts.ts").unwrap();
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
             segment(
