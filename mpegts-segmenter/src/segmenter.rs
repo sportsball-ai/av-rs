@@ -1,6 +1,7 @@
 use super::{analyzer, Analyzer, SegmentStorage, StreamInfo};
 use mpeg2::{
     pes,
+    temi::TEMITimelineDescriptor,
     ts::{Packet, PACKET_LENGTH},
 };
 use std::{fmt, io, time::Duration};
@@ -11,6 +12,7 @@ struct CurrentSegment<S: AsyncWrite + Unpin> {
     pcr: u64,
     pts: Option<Duration>,
     bytes_written: usize,
+    temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
 }
 
 pub struct SegmenterConfig {
@@ -110,7 +112,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                 && (elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64())
                             {
                                 // start a new segment if this is a keyframe
-                                if p.adaptation_field.and_then(|af| af.random_access_indicator).unwrap_or(false) {
+                                if p.adaptation_field.as_ref().and_then(|af| af.random_access_indicator).unwrap_or(false) {
                                     true
                                 } else if let Some(payload) = &p.payload {
                                     // some muxers don't set RAI bits. if possible, see if this
@@ -163,6 +165,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     pcr: self.pcr.unwrap_or(0),
                     pts: None,
                     bytes_written: 0,
+                    temi_timeline_descriptor: None,
                 });
 
                 self.analyzer.reset_timecodes();
@@ -174,6 +177,12 @@ impl<S: SegmentStorage> Segmenter<S> {
                     if let Some(payload) = p.payload {
                         let (header, _) = pes::PacketHeader::decode(&payload)?;
                         segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
+                    }
+                }
+
+                if segment.temi_timeline_descriptor.is_none() {
+                    if let Some(af) = p.adaptation_field {
+                        segment.temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
                     }
                 }
 
@@ -217,6 +226,7 @@ pub struct SegmentInfo {
     pub size: usize,
     pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
+    pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
 }
 
 impl SegmentInfo {
@@ -279,6 +289,7 @@ impl SegmentInfo {
                     })
                     .collect()
             },
+            temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
         }
     }
 }
@@ -565,6 +576,36 @@ mod test {
                     frames: 22
                 }
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_segmenter_with_temi_timeline_descriptor() {
+        let mut storage = MemorySegmentStorage::new();
+        {
+            let mut f = File::open("src/testdata/temi-timeline-ntp-ts.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(1),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert_eq!(segments.len(), 3);
+        let ntp_timestamps: Vec<Option<u64>> = segments
+            .iter()
+            .map(|s| s.1.temi_timeline_descriptor.as_ref().and_then(|temi| temi.ntp_timestamp))
+            .collect();
+        assert_eq!(
+            ntp_timestamps,
+            &[Some(16592063487166754097), Some(16592063487167157824), Some(16592063487167574436)]
         );
     }
 }
