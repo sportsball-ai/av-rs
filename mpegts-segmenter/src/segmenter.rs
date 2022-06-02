@@ -172,13 +172,14 @@ impl<S: SegmentStorage> Segmenter<S> {
             }
 
             if let Some(segment) = &mut self.current_segment {
-                // set the segment's pts and temi_timeline_descriptor if necessary
+                // set the segment's pts if necessary
                 if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
                     if let Some(payload) = p.payload {
                         let (header, _) = pes::PacketHeader::decode(&payload)?;
                         segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
                     }
                 }
+
                 if segment.temi_timeline_descriptor.is_none() {
                     if let Some(af) = p.adaptation_field {
                         segment.temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
