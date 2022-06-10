@@ -8,6 +8,7 @@ pub struct FragmentHeader {
     pub version: u8,
     pub flags: u32,
     pub sequence_number: u32,
+    pub start_position: u64,
 }
 
 impl AtomData for FragmentHeader {
@@ -20,6 +21,7 @@ impl ReadData for FragmentHeader {
             version: reader.read_u8()?,
             flags: reader.read_u24::<BigEndian>()?,
             sequence_number: reader.read_u32::<BigEndian>()?,
+            start_position: 0,
         })
     }
 }

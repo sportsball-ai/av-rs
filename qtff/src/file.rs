@@ -71,6 +71,8 @@ impl File {
     fn get_moof_data(&mut self) -> Result<Vec<MovieFragment>> {
         let mut fragments = vec![];
         loop {
+            let start_position = self.f.stream_position()?;
+
             let atom = match AtomReader::new(&mut self.f).find(|a| match a {
                 Ok(a) => a.typ == MovieFragment::TYPE,
                 Err(_) => true,
@@ -81,7 +83,10 @@ impl File {
             };
             let mut buf = Vec::new();
             atom.data(&mut self.f).read_to_end(&mut buf)?;
-            fragments.push(MovieFragment::read(Cursor::new(buf.as_slice()))?);
+
+            let mut movie_fragment = MovieFragment::read(Cursor::new(buf.as_slice()))?;
+            movie_fragment.fragment_header.start_position = start_position;
+            fragments.push(movie_fragment);
         }
     }
 
@@ -743,6 +748,7 @@ mod tests {
                 version: 0,
                 flags: 0,
                 sequence_number: 1,
+                start_position: 834,
             }
         );
         assert_eq!(fragment.track_fragments.len(), 1);
