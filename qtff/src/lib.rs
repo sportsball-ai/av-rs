@@ -8,6 +8,7 @@ pub mod data;
 pub mod deserializer;
 pub mod error;
 pub mod file;
+pub mod moof;
 pub mod serializer;
 
 pub use atom::*;
