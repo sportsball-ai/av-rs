@@ -8,7 +8,6 @@ pub struct FragmentHeader {
     pub version: u8,
     pub flags: u32,
     pub sequence_number: u32,
-    pub start_position: u64,
 }
 
 impl AtomData for FragmentHeader {
@@ -21,7 +20,6 @@ impl ReadData for FragmentHeader {
             version: reader.read_u8()?,
             flags: reader.read_u24::<BigEndian>()?,
             sequence_number: reader.read_u32::<BigEndian>()?,
-            start_position: 0,
         })
     }
 }
@@ -57,32 +55,6 @@ impl ReadData for TrackFragmentHeader {
             default_sample_size: if (flags & 0x10) != 0 { Some(reader.read_u32::<BigEndian>()?) } else { None },
             default_sample_flags: if (flags & 0x20) != 0 { Some(reader.read_u32::<BigEndian>()?) } else { None },
             duration_is_empty: flags & 0x10000 != 0,
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TrackFragmentDecodeTime {
-    pub version: u8,
-    pub flags: u32,
-    pub base_media_decode_time: u32,
-}
-
-impl AtomData for TrackFragmentDecodeTime {
-    const TYPE: FourCC = FourCC::TFDT;
-}
-
-impl ReadData for TrackFragmentDecodeTime {
-    fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
-        let version = reader.read_u8()?;
-        Ok(Self {
-            version,
-            flags: reader.read_u24::<BigEndian>()?,
-            base_media_decode_time: if version == 1 {
-                reader.read_u8()? as u32
-            } else {
-                reader.read_u32::<BigEndian>()?
-            },
         })
     }
 }
@@ -185,7 +157,7 @@ impl AtomData for MovieFragment {
 impl ReadData for MovieFragment {
     fn read<R: Read + Seek>(mut reader: R) -> Result<Self> {
         Ok(Self {
-            fragment_header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing movie header"))?,
+            fragment_header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing movie fragment header"))?,
             track_fragments: read_all(&mut reader)?,
         })
     }
