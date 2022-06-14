@@ -68,6 +68,9 @@ fn main() {
             .whitelist_function("ni_.+")
             .whitelist_type("ni_.+")
             .whitelist_var("NI_.+")
+            // bindgen 0.60.0 broke layout tests: https://github.com/rust-lang/rust-bindgen/issues/2218
+            // 0.60.1 claims to have fixed the issue, but does not.
+            .layout_tests(false)
             .clang_arg(format!("-I{}", source_path.to_str().unwrap()))
             .generate()
             .expect("unable to generate bindings");
