@@ -8,11 +8,13 @@ use super::{
     data::{AtomData, MovieData, ReadData},
 };
 
+use crate::moof::MovieFragment;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 pub struct File {
     f: std::fs::File,
     movie_data: Option<MovieData>,
+    movie_fragments: Option<Vec<(u64, MovieFragment)>>,
 }
 
 enum Data {
@@ -34,6 +36,7 @@ impl File {
         Ok(File {
             f: std::fs::File::open(path)?,
             movie_data: None,
+            movie_fragments: None,
         })
     }
 
@@ -61,6 +64,40 @@ impl File {
                 let data = MovieData::read(Cursor::new(buf.as_slice()))?;
                 self.movie_data = Some(data.clone());
                 Ok(data)
+            }
+        }
+    }
+
+    fn get_moof_data(&mut self) -> Result<Vec<(u64, MovieFragment)>> {
+        let mut fragments = vec![];
+        loop {
+            let start_position = self.f.stream_position()?;
+
+            let atom = match AtomReader::new(&mut self.f).find(|a| match a {
+                Ok(a) => a.typ == MovieFragment::TYPE,
+                Err(_) => true,
+            }) {
+                Some(Ok(a)) => a,
+                Some(Err(err)) => return Err(err.into()),
+                None => return Ok(fragments),
+            };
+            let mut buf = Vec::new();
+            atom.data(&mut self.f).read_to_end(&mut buf)?;
+
+            fragments.push((start_position, MovieFragment::read(Cursor::new(buf.as_slice()))?));
+        }
+    }
+
+    pub fn get_movie_fragments(&mut self) -> Result<Vec<(u64, MovieFragment)>> {
+        if self.movie_data.is_none() {
+            self.get_movie_data()?;
+        }
+        match &self.movie_fragments {
+            Some(v) => Ok(v.clone()),
+            None => {
+                let movie_fragments = self.get_moof_data()?;
+                self.movie_fragments = Some(movie_fragments.clone());
+                Ok(movie_fragments)
             }
         }
     }
@@ -484,6 +521,7 @@ impl<'a> Seek for &'a File {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::moof::{FragmentHeader, TrackFragmentHeader, TrackFragmentRunSampleData};
 
     #[test]
     fn test_file_prores() {
@@ -691,5 +729,59 @@ mod tests {
         let mut f = File::open("src/testdata/empty.mov").unwrap();
         let movie_data = f.get_movie_data().unwrap();
         assert_eq!(movie_data.tracks.len(), 3);
+    }
+
+    #[test]
+    fn test_file_fragmented_mp4() {
+        let mut f = File::open("src/testdata/fragmented.mp4").unwrap();
+        let movie_data = f.get_movie_data().unwrap();
+        assert_eq!(movie_data.tracks.len(), 1);
+        let fragments = f.get_movie_fragments().unwrap();
+        assert_eq!(fragments.len(), 2);
+
+        let fragment = &fragments[0];
+        assert_eq!(fragment.0, 834);
+        assert_eq!(
+            fragment.1.fragment_header,
+            FragmentHeader {
+                version: 0,
+                flags: 0,
+                sequence_number: 1,
+            }
+        );
+        assert_eq!(fragment.1.track_fragments.len(), 1);
+
+        let track_fragment = &fragment.1.track_fragments[0];
+        assert_eq!(
+            track_fragment.track_fragment_header,
+            TrackFragmentHeader {
+                version: 0,
+                flags: 57,
+                track_id: 1,
+                base_data_offset: Some(834),
+                sample_description_index: None,
+                default_sample_duration: Some(3003),
+                default_sample_size: Some(1288964),
+                default_sample_flags: Some(16842752),
+                duration_is_empty: false,
+            }
+        );
+
+        assert_eq!(track_fragment.track_fragment_runs.len(), 1);
+
+        let track_fragment_run = &track_fragment.track_fragment_runs[0];
+        assert_eq!(track_fragment_run.sample_count, 64);
+        assert_eq!(track_fragment_run.data_offset, Some(376));
+        assert_eq!(track_fragment_run.first_sample_flags, Some(33554432));
+        assert_eq!(track_fragment_run.sample_data.len(), 64);
+        assert_eq!(
+            track_fragment_run.sample_data[0],
+            TrackFragmentRunSampleData {
+                sample_duration: None,
+                sample_size: Some(1288964,),
+                sample_flags: None,
+                sample_composition_time_offset: None,
+            }
+        );
     }
 }
