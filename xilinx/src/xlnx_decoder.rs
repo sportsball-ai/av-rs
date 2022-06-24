@@ -13,8 +13,6 @@ pub struct XlnxDecoder {
 
 impl XlnxDecoder {
     pub fn new(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<Self, SimpleError> {
-        // reserve the required decoding resources and assign reserve ID
-        xlnx_reserve_dec_resource(xlnx_dec_ctx)?;
 
         let dec_session = xlnx_create_dec_session(xma_dec_props, xlnx_dec_ctx)?;
 
@@ -28,9 +26,9 @@ impl XlnxDecoder {
 
         let out_frame = unsafe { xma_frame_alloc(&mut frame_props, true) };
 
-            // Loop through the planes. no buffer shouold be allocated yet.
-            // Since this will be used in a pipeline, xvbm will allocate the buffers.
-            // So we need to specify to use device buffers.
+        // Loop through the planes. no buffer shouold be allocated yet.
+        // Since this will be used in a pipeline, xvbm will allocate the buffers.
+        // So we need to specify to use device buffers.
         unsafe {
             for i in 0..2 {
                 (*out_frame).data[i].buffer_type = XmaBufferType_XMA_DEVICE_BUFFER_TYPE;

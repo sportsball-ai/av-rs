@@ -1,6 +1,10 @@
 pub mod sys;
 pub use sys::*;
 
+/*---- transcoder ----*/
+pub mod xlnx_transcoder_utils;
+pub use xlnx_transcoder_utils::*;
+
 /*---- decoder ----*/
 pub mod xlnx_decoder;
 pub use xlnx_decoder::*;
@@ -41,7 +45,7 @@ const XCLBIN_FILENAME: &[u8] = b"/opt/xilinx/xcdr/xclbins/transcode.xclbin\0";
 ///
 pub fn xlnx_init_all_devices() -> Result<i32, simple_error::SimpleError> {
     let mut xclbin_params = Vec::new();
-    let device_count =  unsafe { xclProbe() } as i32;
+    let device_count = unsafe { xclProbe() } as i32;
     for i in 0..device_count {
         xclbin_params.push(XmaXclbinParameter {
             xclbin_name: XCLBIN_FILENAME.as_ptr() as *mut i8,

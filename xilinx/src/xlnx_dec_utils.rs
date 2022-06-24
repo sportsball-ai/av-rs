@@ -85,7 +85,7 @@ fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, dec_load: i32)
     Ok(())
 }
 
-pub(crate) fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
+pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // a device has already been chosen, there is no need to assign a reserve id.
     if xlnx_dec_ctx.device_id >= 0 {
         return Ok(());
