@@ -13,7 +13,6 @@ pub struct XlnxDecoder {
 
 impl XlnxDecoder {
     pub fn new(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<Self, SimpleError> {
-
         let dec_session = xlnx_create_dec_session(xma_dec_props, xlnx_dec_ctx)?;
 
         let mut frame_props: XmaFrameProperties = Default::default();
