@@ -14,6 +14,23 @@ pub struct XlnxTranscodeXrmCtx {
     pub reserve_idx: u64,
 }
 
+impl XlnxTranscodeXrmCtx {
+    pub fn new() -> Self {
+        let xrm_ctx = unsafe {xrmCreateContext(XRM_API_VERSION_1)};
+
+        Self {
+            xrm_ctx,
+            transcode_load: XlnxTranscodeLoad {
+                dec_load: 0,
+                scal_load: 0,
+                enc_load: 0,
+                enc_num:0,
+            },
+            reserve_idx: 0 
+        }
+    }
+}
+
 pub fn xlnx_calc_transcode_load(
     xlnx_transcode_xrm_ctx: &mut XlnxTranscodeXrmCtx,
     xma_dec_props: &mut XmaDecoderProperties,
