@@ -159,7 +159,6 @@ mod encoder_tests {
         let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
 
         let cu_list_res: xrmCuListResource = Default::default();
-        let mut _enc_count = 0;
         let enc_load = xlnx_calc_enc_load(xrm_ctx, &mut *xma_enc_props).unwrap();
 
         let mut xlnx_enc_ctx = XlnxEncoderXrmCtx {
