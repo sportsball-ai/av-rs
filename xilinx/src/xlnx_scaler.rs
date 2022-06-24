@@ -14,7 +14,6 @@ pub struct XlnxScaler {
 
 impl XlnxScaler {
     pub fn new(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<Self, SimpleError> {
-        xlnx_reserve_scal_resource(xlnx_scal_ctx)?;
         let scal_session = xlnx_create_scal_session(xma_scal_props, xlnx_scal_ctx)?;
 
         let mut out_frame_list = Vec::new();

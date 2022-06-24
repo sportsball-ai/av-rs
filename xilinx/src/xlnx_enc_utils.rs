@@ -194,6 +194,7 @@ fn xlnx_enc_cu_alloc_reserve_id(xma_enc_props: &mut XmaEncoderProperties, xlnx_e
 }
 
 fn xlnx_enc_cu_alloc(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<(), SimpleError> {
+    xlnx_enc_ctx.enc_load = xlnx_calc_enc_load(xlnx_enc_ctx.xrm_ctx, xma_enc_props)?;
     if xlnx_enc_ctx.device_id >= 0 {
         xlnx_enc_cu_alloc_device_id(xma_enc_props, xlnx_enc_ctx)?;
     } else {

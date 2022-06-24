@@ -9,8 +9,6 @@ pub struct XlnxEncoder {
 
 impl XlnxEncoder {
     pub fn new(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<Self, SimpleError> {
-        xlnx_reserve_enc_resource(xlnx_enc_ctx)?;
-
         let enc_session = xlnx_create_enc_session(xma_enc_props, xlnx_enc_ctx)?;
 
         let out_buffer = unsafe { xma_data_buffer_alloc(0, true) };
