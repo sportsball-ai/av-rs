@@ -154,10 +154,6 @@ impl Drop for XlnxScalerXrmCtx {
             if self.scal_res_in_use {
                 xrmCuRelease(self.xrm_ctx, &mut self.cu_res);
             }
-            if self.xrm_reserve_id != 0 {
-                xrmCuPoolRelinquish(self.xrm_ctx, self.xrm_reserve_id);
-            }
-            xrmDestroyContext(self.xrm_ctx);
         }
     }
 }

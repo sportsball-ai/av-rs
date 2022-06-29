@@ -233,10 +233,6 @@ impl Drop for XlnxDecoderXrmCtx {
             if self.decode_res_in_use {
                 xrmCuListRelease(self.xrm_ctx, &mut self.cu_list_res);
             }
-            if self.xrm_reserve_id != 0 {
-                xrmCuPoolRelinquish(self.xrm_ctx, self.xrm_reserve_id);
-            }
-            xrmDestroyContext(self.xrm_ctx);
         }
     }
 }
