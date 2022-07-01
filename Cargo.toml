@@ -24,6 +24,8 @@ members = [
     "rfc6381",
     "kvazaar-sys",
     "xcoder",
+    "xcoder/xcoder-logan",
+    "xcoder/xcoder-logan/xcoder-logan-sys",
     "xcoder/xcoder-quadra",
     "xcoder/xcoder-quadra/xcoder-quadra-sys",
     "xilinx",

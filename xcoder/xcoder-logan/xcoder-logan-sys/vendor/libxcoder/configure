@@ -1,0 +1,201 @@
+#!/bin/bash
+
+#####################################################################################
+# the main output dir, all configure and make output are in this dir.
+#####################################################################################
+# create the main objs
+XCODER_WORKDIR="."
+XCODER_OBJS_DIR="build"
+XCODER_OBJS="${XCODER_WORKDIR}/${XCODER_OBJS_DIR}"
+XCODER_MAKEFILE="Makefile"
+XCODER_PKG_CONF="${XCODER_WORKDIR}/${XCODER_OBJS_DIR}/xcoder.pc"
+
+# linux shell color support.
+RED="\\033[31m"
+GREEN="\\033[32m"
+YELLOW="\\033[33m"
+BLACK="\\033[0m"
+
+#####################################################################################
+# parse user options, set the variables like:
+#####################################################################################
+# parse options, exit with error when parse options invalid.
+
+. auto/options.sh
+
+# Default install path
+if [ $XCODER_PREFIX != NO ]; then
+    echo "XCODER_PREFIX: ${XCODER_PREFIX}"
+    prefix=${XCODER_PREFIX}
+else
+    prefix='/usr/local'
+fi
+
+if [ $XCODER_BINDIR != NO ]; then
+    echo "XCODER_LIBDIR: ${XCODER_BINDIR}"
+    bindir=${XCODER_BINDIR}
+else
+    bindir=${prefix}/bin
+fi
+
+if [ $XCODER_LIBDIR != NO ]; then
+    echo "XCODER_LIBDIR: ${XCODER_LIBDIR}"
+    libdir=${XCODER_LIBDIR}
+else
+    libdir=${prefix}/lib
+fi
+
+if [ $XCODER_INCLUDEDIR != NO ]; then
+    echo "XCODER_INCLUDEDIR: ${XCODER_INCLUDEDIR}"
+    includedir=${XCODER_INCLUDEDIR}
+else
+    includedir=${prefix}/include
+fi
+
+if [ $XCODER_SHAREDDIR != NO ]; then
+    echo "XCODER_SHAREDDIR: ${XCODER_SHAREDDIR}"
+    shareddir=${XCODER_SHAREDDIR}
+else
+    shareddir=''
+fi
+
+# Create build folder for compilation
+if [ ! -d "${XCODER_WORKDIR}/${XCODER_OBJS_DIR}" ]; then
+     mkdir ${XCODER_WORKDIR}/${XCODER_OBJS_DIR}
+fi
+
+# the auto generated variables.
+. auto/auto_headers.sh
+
+rm ${XCODER_PKG_CONF}
+
+if [ $XCODER_WIN32 = YES ]; then
+cat > ${XCODER_PKG_CONF} << EOF
+prefix=$prefix
+exec_prefix=$exec_prefix
+libdir=$libdir
+bindir=$bindir
+includedir=$includedir
+shareddir=$shareddir
+
+Name: xcoder
+Description: Network Intelligence Xcoder Codec library
+Version: $(grep 'NI_XCODER_REVISION '.* < source/ni_defs.h  | cut -d '"' -f 2)
+Libs: -L$libdir -lxcoder
+Libs.private: -lwinpthread -lws2_32
+Cflags: -D_WIN32 -I$includedir
+EOF
+
+else
+
+cat > ${XCODER_PKG_CONF} << EOF
+prefix=$prefix
+exec_prefix=$exec_prefix
+libdir=$libdir
+bindir=$bindir
+includedir=$includedir
+shareddir=$shareddir
+
+Name: xcoder
+Description: Network Intelligence Xcoder Codec library
+Version: $(grep 'NI_XCODER_REVISION '.* < source/ni_defs.h  | cut -d '"' -f 2)
+Libs: -L$libdir -lxcoder
+Libs.private: -lpthread -lrt
+Cflags: -I$includedir
+EOF
+fi
+
+# Attempt to create dir without root access first
+mkdir $prefix -p
+if [ ! -d "$prefix" ]; then
+    sudo mkdir $prefix
+fi
+
+mkdir $libdir -p
+if [ ! -d "$libdir" ]; then
+    sudo mkdir $libdir
+fi
+
+# Create pkgconfig folder for installation
+mkdir $libdir/pkgconfig -p
+if [ ! -d "$libdir/pkgconfig" ]; then
+    sudo mkdir $libdir/pkgconfig
+fi
+
+
+echo 'configure ok! '
+
+#####################################################################################
+# configure summary
+#####################################################################################
+# summary
+echo ""
+echo "configure summary:"
+echo "      ${XCODER_AUTO_USER_CONFIGURE}"
+echo "      ${XCODER_AUTO_CONFIGURE}"
+
+if [ $XCODER_OLD_NVME_DRIVER = YES ]; then
+	echo -e "${GREEN}XCODER_OLD_NVME_DRIVER is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_OLD_NVME_DRIVER is disabled${BLACK}"
+fi
+
+if [ $XCODER_IO_RW = YES ]; then
+	echo -e "${GREEN}XCODER_IO_RW is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_IO_RW is disabled${BLACK}"
+fi
+
+if [ $XCODER_WIN32 = YES ]; then
+	echo -e "${GREEN}XCODER_WIN32 is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_WIN32 is disabled${BLACK}"
+fi
+
+if [ $XCODER_LINUX_VIRT_IO_DRIVER = YES ]; then
+	echo -e "${GREEN}XCODER_LINUX_VIRT_IO_DRIVER is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_LINUX_VIRT_IO_DRIVER is disabled${BLACK}"
+fi
+
+if [ $XCODER_WIN_NVME_CUSTOM = YES ]; then
+	echo -e "${GREEN}XCODER_WIN_NVME_CUSTOM is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_WIN_NVME_CUSTOM is disabled${BLACK}"
+fi
+
+if [ $XCODER_SELF_KILL_ERR = YES ]; then
+	echo -e "${GREEN}XCODER_SELF_KILL_ERR is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_SELF_KILL_ERR is disabled${BLACK}"
+fi
+
+if [ $XCODER_LINUX_CUSTOM_DRIVER = YES ]; then
+	echo -e "${GREEN}XCODER_LINUX_CUSTOM_DRIVER is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_LINUX_CUSTOM_DRIVER is disabled${BLACK}"
+fi
+
+if [ $XCODER_ENCODER_SYNC_QUERY = YES ]; then
+	echo -e "${GREEN}XCODER_ENCODER_SYNC_QUERY is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_ENCODER_SYNC_QUERY is disabled${BLACK}"
+fi
+
+if [ $XCODER_LATENCY_PATCH = YES ]; then
+	echo -e "${GREEN}XCODER_LATENCY_PATCH is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_LATENCY_PATCH is disabled${BLACK}"
+fi
+
+if [ $XCODER_SIGNATURE_FILE = YES ]; then
+	echo -e "${GREEN}XCODER_SIGNATURE_FILE is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_SIGNATURE_FILE is disabled${BLACK}"
+fi
+
+if [ $XCODER_DUMP_DATA = YES ]; then
+	echo -e "${GREEN}XCODER_DUMP_DATA is enabled${BLACK}"
+else
+	echo -e "${YELLOW}XCODER_DUMP_DATA is disabled${BLACK}"
+fi

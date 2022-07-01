@@ -6,6 +6,8 @@ edition = "2021"
 [features]
 default = ["quadra"]
 quadra = ["xcoder-quadra"]
+logan = ["xcoder-logan"]
 
 [dependencies]
 xcoder-quadra = { path = "./xcoder-quadra", optional = true }
+xcoder-logan = { path = "./xcoder-logan", optional = true }
