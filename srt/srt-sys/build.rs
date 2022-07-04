@@ -6,6 +6,13 @@ fn main() {
     build.define("ENABLE_APPS", "OFF").define("ENABLE_SHARED", "OFF");
 
     if target_os == "macos" {
+        build.define(
+            "CMAKE_OSX_ARCHITECTURES",
+            match target_arch.as_str() {
+                "aarch64" => "arm64",
+                arch => arch,
+            },
+        );
         build.define("OPENSSL_INCLUDE_DIR", format!("{}/vendor/openssl/include", env!("CARGO_MANIFEST_DIR")));
         build.define(
             "OPENSSL_CRYPTO_LIBRARY",
