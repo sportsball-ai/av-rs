@@ -3,10 +3,11 @@ name = "xcoder"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-av-traits = { path = "../av-traits" }
-snafu = { version = "0.7.0", default-features = false }
-scopeguard = "1.1.0"
+[features]
+default = ["quadra"]
+quadra = ["xcoder-quadra"]
+logan = ["xcoder-logan"]
 
-[target.'cfg(target_os = "linux")'.dependencies]
-xcoder-sys = { path = "xcoder-sys" }
+[dependencies]
+xcoder-quadra = { path = "./xcoder-quadra", optional = true }
+xcoder-logan = { path = "./xcoder-logan", optional = true }

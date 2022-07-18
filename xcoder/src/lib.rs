@@ -1,5 +1,5 @@
-#[cfg(target_os = "linux")]
-mod encoder;
+#[cfg(feature = "quadra")]
+pub use xcoder_quadra::*;
 
-#[cfg(target_os = "linux")]
-pub use encoder::*;
+#[cfg(feature = "logan")]
+pub use xcoder_logan::*;

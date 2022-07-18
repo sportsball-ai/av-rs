@@ -2,7 +2,7 @@ use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutp
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
 use std::{collections::VecDeque, mem};
-use xcoder_sys as sys;
+use xcoder_quadra_sys as sys;
 
 #[derive(Debug, Snafu)]
 pub enum XcoderEncoderError {
