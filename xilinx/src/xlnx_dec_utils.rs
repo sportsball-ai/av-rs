@@ -5,6 +5,8 @@ use simple_error::{bail, SimpleError};
 
 use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask};
 
+const DEC_PLUGIN_NAME: &[u8] = b"xrmU30DecPlugin\0";
+
 #[derive(Clone, Debug)]
 pub struct XlnxDecBuffer<'a> {
     pub data: &'a [u8],
@@ -42,10 +44,8 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
         };
     }
 
-    let plugin_name = CString::new("xrmU30DecPlugin").unwrap().into_raw();
-
     unsafe {
-        let ret = xrmExecPluginFunc(xrm_ctx, plugin_name, func_id, &mut plugin_param);
+        let ret = xrmExecPluginFunc(xrm_ctx, DEC_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
         if ret != XRM_SUCCESS as i32 {
             bail!("XRM decoder plugin failed to calculate decoder load. error: {}", ret);
         }
