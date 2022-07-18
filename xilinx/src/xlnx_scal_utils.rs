@@ -4,6 +4,8 @@ use std::{ffi::CString, os::raw::c_char, str::from_utf8};
 
 use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask};
 
+const SCAL_PLUGIN_NAME: &[u8] = b"xrmU30ScalPlugin\0";
+
 pub struct XlnxScalerXrmCtx {
     pub xrm_reserve_id: u64,
     pub device_id: i32,
@@ -34,10 +36,8 @@ pub fn xlnx_calc_scal_load(xrm_ctx: xrmContext, xma_scal_props: *mut XmaScalerPr
         };
     }
 
-    let plugin_name = CString::new("xrmU30ScalPlugin").unwrap().into_raw();
-
     unsafe {
-        let ret = xrmExecPluginFunc(xrm_ctx, plugin_name, func_id, &mut plugin_param);
+        let ret = xrmExecPluginFunc(xrm_ctx, SCAL_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
         if ret != XRM_SUCCESS as i32 {
             bail!("XRM Scaler plugin failed to calculate scaler load. error: {}", ret);
         }

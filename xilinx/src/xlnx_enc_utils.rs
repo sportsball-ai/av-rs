@@ -3,6 +3,8 @@ use libloading::{Library, Symbol};
 use simple_error::{bail, SimpleError};
 use std::{ffi::CString, os::raw::c_char, str::from_utf8};
 
+const ENC_PLUGIN_NAME: &[u8] = b"xrmU30EncPlugin\0";
+
 pub struct XlnxEncoderXrmCtx {
     pub xrm_reserve_id: u64,
     pub device_id: i32,
@@ -33,10 +35,8 @@ pub fn xlnx_calc_enc_load(xrm_ctx: xrmContext, xma_enc_props: *mut XmaEncoderPro
         };
     }
 
-    let plugin_name = CString::new("xrmU30EncPlugin").unwrap().into_raw();
-
     unsafe {
-        let ret = xrmExecPluginFunc(xrm_ctx, plugin_name, func_id, &mut plugin_param);
+        let ret = xrmExecPluginFunc(xrm_ctx, ENC_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
         if ret != XRM_SUCCESS as i32 {
             bail!("XRM encoder plugin failed to calculate encoder load. error: {}", ret);
         }
