@@ -56,7 +56,7 @@ impl<C: Send> CompressionSession<C> {
                 Err(status.into())
             } else {
                 result(status.into()).map(|_| CompressionSessionOutputFrame {
-                    sample_buffer: unsafe { SampleBuffer::with_cf_type_ref(sample_buffer as _) },
+                    sample_buffer: SampleBuffer::with_cf_type_ref(sample_buffer as _),
                     context: frame_context,
                 })
             });
@@ -107,14 +107,12 @@ impl<C: Send> CompressionSession<C> {
         let context = Box::new(context);
         result(
             unsafe {
-                let frame_properties = match frame_type {
+                let mut frame_options = MutableDictionary::new_cf_type();
+                match frame_type {
                     EncodedFrameType::Key => {
-                        let mut md = MutableDictionary::new_cf_type();
-                        md.set_value(sys::kVTEncodeFrameOptionKey_ForceKeyFrame as _, Boolean::from(true).cf_type_ref() as _);
-                        let d = Dictionary::from(md);
-                        d.cf_type_ref()
+                        frame_options.set_value(sys::kVTEncodeFrameOptionKey_ForceKeyFrame as _, Boolean::from(true).cf_type_ref() as _);
                     }
-                    EncodedFrameType::Auto | EncodedFrameType::Predicted => std::ptr::null_mut(),
+                    EncodedFrameType::Auto | EncodedFrameType::Predicted => {}
                 };
 
                 sys::VTCompressionSessionEncodeFrame(
@@ -127,7 +125,7 @@ impl<C: Send> CompressionSession<C> {
                         epoch: presentation_time.epoch,
                     },
                     sys::kCMTimeInvalid,
-                    frame_properties as _,
+                    frame_options.cf_type_ref() as _,
                     Box::into_raw(context) as *mut C as _,
                     std::ptr::null_mut(),
                 )
