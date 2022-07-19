@@ -27,13 +27,13 @@ pub enum EncodedFrameType {
 /// Typical usage should look like this:
 ///
 /// ```
-/// # use av_traits::{RawVideoFrame, VideoEncoder};
+/// # use av_traits::{EncodedFrameType, RawVideoFrame, VideoEncoder};
 /// fn encode<S, E>(mut source: S, mut encoder: E) -> Result<(), E::Error>
 ///     where S: Iterator<Item = Box<dyn RawVideoFrame<u8>>>,
 ///     E: VideoEncoder<RawVideoFrame = Box<dyn RawVideoFrame<u8>>>
 /// {
 ///     while let Some(frame) = source.next() {
-///         if let Some(output) = encoder.encode(frame)? {
+///         if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto)? {
 ///             // do something with output  
 ///         }
 ///     }
