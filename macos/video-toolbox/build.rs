@@ -8,7 +8,7 @@ fn main() {
 
         let sdk_root = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk";
 
-        // the "whilelist_" functions have been renamed in newer bindgen versions, but we use the
+        // the "whitelist_" functions have been renamed in newer bindgen versions, but we use the
         // old names for wider compatibility
         #[allow(deprecated)]
         let bindings = bindgen::Builder::default()
@@ -22,6 +22,7 @@ fn main() {
             .whitelist_var("kCMSampleAttachmentKey_.+")
             .whitelist_var("kVTVideoEncoderSpecification_.+")
             .whitelist_var("kVTCompressionPropertyKey_.+")
+            .whitelist_var("kVTEncodeFrameOptionKey_.+")
             .generate()
             .expect("unable to generate bindings");
 

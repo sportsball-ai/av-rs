@@ -1,5 +1,6 @@
 use super::sys;
-use core_foundation::{result, CFType, Dictionary, OSStatus};
+use av_traits::EncodedFrameType;
+use core_foundation::{result, Boolean, CFType, Dictionary, MutableDictionary, OSStatus};
 use core_media::{SampleBuffer, Time, VideoCodecType};
 use core_video::ImageBuffer;
 use std::{
@@ -102,10 +103,20 @@ impl<C: Send> CompressionSession<C> {
         &self.frames
     }
 
-    pub fn encode_frame(&mut self, image_buffer: ImageBuffer, presentation_time: Time, context: C) -> Result<(), OSStatus> {
+    pub fn encode_frame(&mut self, image_buffer: ImageBuffer, presentation_time: Time, context: C, frame_type: EncodedFrameType) -> Result<(), OSStatus> {
         let context = Box::new(context);
         result(
             unsafe {
+                let frame_properties = match frame_type {
+                    EncodedFrameType::Key => {
+                        let mut md = MutableDictionary::new_cf_type();
+                        md.set_value(sys::kVTEncodeFrameOptionKey_ForceKeyFrame as _, Boolean::from(true).cf_type_ref() as _);
+                        let d = Dictionary::from(md);
+                        d.cf_type_ref()
+                    }
+                    EncodedFrameType::Auto | EncodedFrameType::Predicted => std::ptr::null_mut(),
+                };
+
                 sys::VTCompressionSessionEncodeFrame(
                     self.sess,
                     image_buffer.cf_type_ref() as _,
@@ -116,7 +127,7 @@ impl<C: Send> CompressionSession<C> {
                         epoch: presentation_time.epoch,
                     },
                     sys::kCMTimeInvalid,
-                    std::ptr::null_mut(),
+                    frame_properties as _,
                     Box::into_raw(context) as *mut C as _,
                     std::ptr::null_mut(),
                 )
@@ -179,7 +190,9 @@ mod test {
             frame_data.extend_from_slice(nalu);
             let image_buffer = decompression_session.decode_frame(&frame_data, &format_desc).unwrap();
             frames_sent += 1;
-            compression_session.encode_frame(image_buffer, Time::default(), ()).unwrap();
+            compression_session
+                .encode_frame(image_buffer, Time::default(), (), EncodedFrameType::Auto)
+                .unwrap();
         }
         compression_session.flush().unwrap();
 

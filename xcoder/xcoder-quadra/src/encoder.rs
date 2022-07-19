@@ -1,4 +1,4 @@
-use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
+use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
 use std::{collections::VecDeque, mem};
@@ -351,7 +351,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
     type Error = XcoderEncoderError;
     type RawVideoFrame = F;
 
-    fn encode(&mut self, mut input: F) -> Result<Option<VideoEncoderOutput<F>>> {
+    fn encode(&mut self, mut input: F, _frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<F>>> {
         loop {
             self.try_reading_encoded_frames()?;
             match self.try_write_frame(input)? {

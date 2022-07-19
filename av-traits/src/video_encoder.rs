@@ -16,6 +16,12 @@ pub struct VideoEncoderOutput<F> {
     pub encoded_frame: EncodedVideoFrame,
 }
 
+pub enum EncodedFrameType {
+    Auto,
+    Key,
+    Predicted,
+}
+
 /// Implements basic video encoding behavior.
 ///
 /// Typical usage should look like this:
@@ -50,7 +56,7 @@ pub trait VideoEncoder {
     ///
     /// Because output may be delayed, the returned frame is not necessarily the same as the input
     /// frame.
-    fn encode(&mut self, frame: Self::RawVideoFrame) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error>;
+    fn encode(&mut self, frame: Self::RawVideoFrame, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error>;
 
     /// Indicates to the encoder that no more input will be provided and it should emit any delayed
     /// frames. This should be invoked until no more frames are returned.
