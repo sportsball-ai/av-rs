@@ -295,6 +295,40 @@ mod test {
     }
 
     #[test]
+    fn test_video_encoder_with_encode_frame_type() {
+        let codec = VideoEncoderCodec::H264 { bitrate: Some(10000) };
+        let mut encoder = VideoEncoder::new(VideoEncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 29.97,
+            codec,
+            input_format: VideoEncoderInputFormat::Yuv420Planar,
+        })
+        .unwrap();
+
+        let u = vec![200u8; 1920 * 1080 / 4];
+        let v = vec![128u8; 1920 * 1080 / 4];
+        for i in 0..90 {
+            let mut y = Vec::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    16
+                } else {
+                    (16.0 + (line as f64 / 1080.0) * 219.0).round() as u8
+                };
+                y.resize(y.len() + 1920, sample);
+            }
+            let frame = TestFrame {
+                samples: vec![y, u.clone(), v.clone()],
+            };
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
+                assert!(output.encoded_frame.is_keyframe);
+            }
+        }
+    }
+
+    #[test]
     fn test_video_encoder_h264() {
         test_video_encoder(VideoEncoderCodec::H264 { bitrate: Some(10000) });
     }
