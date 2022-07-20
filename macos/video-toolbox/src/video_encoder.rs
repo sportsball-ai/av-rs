@@ -1,5 +1,5 @@
 use super::*;
-use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoderOutput};
+use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoderOutput};
 use core_foundation::{Boolean, CFType, Dictionary, MutableDictionary, Number, OSStatus};
 use core_media::{Time, VideoCodecType};
 use core_video::{PixelBuffer, PixelBufferPlane};
@@ -161,7 +161,7 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
     type Error = OSStatus;
     type RawVideoFrame = F;
 
-    fn encode(&mut self, input: Self::RawVideoFrame) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error> {
+    fn encode(&mut self, input: Self::RawVideoFrame, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error> {
         let input = Box::pin(input);
         let pixel_buffer = unsafe {
             PixelBuffer::with_planar_bytes(
@@ -222,7 +222,7 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
         let frame_number = self.frame_count;
         self.frame_count += 1;
         self.sess
-            .encode_frame(pixel_buffer.into(), Time::new((fps_den * frame_number) as _, fps_num as _), input)?;
+            .encode_frame(pixel_buffer.into(), Time::new((fps_den * frame_number) as _, fps_num as _), input, frame_type)?;
         self.next_video_encoder_trait_frame()
     }
 
@@ -276,7 +276,7 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(mut output) = encoder.encode(frame).unwrap() {
+            if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.data);
                 encoded_frames += 1;
             }
@@ -292,6 +292,40 @@ mod test {
         // To inspect the output, uncomment these lines:
         //use std::io::Write;
         //std::fs::File::create("tmp.bin").unwrap().write_all(&encoded).unwrap();
+    }
+
+    #[test]
+    fn test_video_encoder_with_encode_frame_type() {
+        let codec = VideoEncoderCodec::H264 { bitrate: Some(10000) };
+        let mut encoder = VideoEncoder::new(VideoEncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 29.97,
+            codec,
+            input_format: VideoEncoderInputFormat::Yuv420Planar,
+        })
+        .unwrap();
+
+        let u = vec![200u8; 1920 * 1080 / 4];
+        let v = vec![128u8; 1920 * 1080 / 4];
+        for i in 0..90 {
+            let mut y = Vec::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    16
+                } else {
+                    (16.0 + (line as f64 / 1080.0) * 219.0).round() as u8
+                };
+                y.resize(y.len() + 1920, sample);
+            }
+            let frame = TestFrame {
+                samples: vec![y, u.clone(), v.clone()],
+            };
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
+                assert!(output.encoded_frame.is_keyframe);
+            }
+        }
     }
 
     #[test]

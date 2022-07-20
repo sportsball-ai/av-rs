@@ -16,18 +16,23 @@ pub struct VideoEncoderOutput<F> {
     pub encoded_frame: EncodedVideoFrame,
 }
 
+pub enum EncodedFrameType {
+    Auto,
+    Key,
+}
+
 /// Implements basic video encoding behavior.
 ///
 /// Typical usage should look like this:
 ///
 /// ```
-/// # use av_traits::{RawVideoFrame, VideoEncoder};
+/// # use av_traits::{EncodedFrameType, RawVideoFrame, VideoEncoder};
 /// fn encode<S, E>(mut source: S, mut encoder: E) -> Result<(), E::Error>
 ///     where S: Iterator<Item = Box<dyn RawVideoFrame<u8>>>,
 ///     E: VideoEncoder<RawVideoFrame = Box<dyn RawVideoFrame<u8>>>
 /// {
 ///     while let Some(frame) = source.next() {
-///         if let Some(output) = encoder.encode(frame)? {
+///         if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto)? {
 ///             // do something with output  
 ///         }
 ///     }
@@ -50,7 +55,7 @@ pub trait VideoEncoder {
     ///
     /// Because output may be delayed, the returned frame is not necessarily the same as the input
     /// frame.
-    fn encode(&mut self, frame: Self::RawVideoFrame) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error>;
+    fn encode(&mut self, frame: Self::RawVideoFrame, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error>;
 
     /// Indicates to the encoder that no more input will be provided and it should emit any delayed
     /// frames. This should be invoked until no more frames are returned.

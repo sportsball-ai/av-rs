@@ -1,4 +1,4 @@
-use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
+use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
 use std::{collections::VecDeque, mem};
@@ -280,13 +280,20 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
     /// Attempts to write the decoded frame to the encoder, performing cropping and scaling
     /// beforehand if necessary. If Some is returned, the caller must try again with the same
     /// frame later.
-    fn try_write_frame(&mut self, f: F) -> Result<Option<F>> {
+    fn try_write_frame(&mut self, f: F, force_key_frame: bool) -> Result<Option<F>> {
         if !self.frame_data_io_has_next_frame {
             let mut frame = unsafe { &mut self.frame_data_io.data.frame };
             frame.start_of_stream = if self.did_start { 0 } else { 1 };
             frame.extra_data_len = sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _;
             frame.pts = self.frames_copied as _;
             frame.dts = frame.pts;
+            if force_key_frame {
+                frame.force_key_frame = 1;
+                frame.ni_pict_type = sys::ni_pic_type_t_PIC_TYPE_IDR;
+            } else {
+                frame.force_key_frame = 0;
+                frame.ni_pict_type = 0;
+            }
 
             for i in 0..3 {
                 let subsampling = match i {
@@ -342,10 +349,16 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
     type Error = XcoderEncoderError;
     type RawVideoFrame = F;
 
-    fn encode(&mut self, mut input: F) -> Result<Option<VideoEncoderOutput<F>>> {
+    fn encode(&mut self, mut input: F, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<F>>> {
         loop {
             self.try_reading_encoded_frames()?;
-            match self.try_write_frame(input)? {
+            match self.try_write_frame(
+                input,
+                match frame_type {
+                    EncodedFrameType::Key => true,
+                    EncodedFrameType::Auto => false,
+                },
+            )? {
                 Some(frame) => input = frame,
                 None => break,
             }
@@ -416,7 +429,7 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(mut output) = encoder.encode(frame).unwrap() {
+            if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.data);
                 encoded_frames += 1;
             }

@@ -1,4 +1,4 @@
-use av_traits::{EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
+use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use snafu::Snafu;
 use std::{marker::PhantomData, mem};
 use x264_sys as sys;
@@ -142,7 +142,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for X264Encoder<F> {
     type Error = X264EncoderError;
     type RawVideoFrame = F;
 
-    fn encode(&mut self, input: F) -> Result<Option<VideoEncoderOutput<F>>> {
+    fn encode(&mut self, input: F, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<F>>> {
         let mut pic = unsafe {
             let mut pic: mem::MaybeUninit<sys::x264_picture_t> = mem::MaybeUninit::uninit();
             sys::x264_picture_init(pic.as_mut_ptr());
@@ -168,6 +168,10 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for X264Encoder<F> {
         }
         pic.opaque = Box::into_raw(input) as _;
         pic.i_pts = self.frame_count as _;
+        pic.i_type = match frame_type {
+            EncodedFrameType::Auto => sys::X264_TYPE_AUTO as _,
+            EncodedFrameType::Key => sys::X264_TYPE_KEYFRAME as _,
+        };
         self.frame_count += 1;
         self.do_encode(Some(pic))
     }
@@ -221,7 +225,7 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(mut output) = encoder.encode(frame).unwrap() {
+            if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.data);
                 encoded_frames += 1;
             }
@@ -238,5 +242,37 @@ mod test {
         // To inspect the output, uncomment these lines:
         //use std::io::Write;
         //std::fs::File::create("tmp.h264").unwrap().write_all(&encoded).unwrap();
+    }
+
+    #[test]
+    fn test_video_encoder_with_encode_frame_type() {
+        let mut encoder = X264Encoder::new(X264EncoderConfig {
+            width: 1920,
+            height: 1080,
+            bitrate: Some(10000),
+            fps: 29.97,
+            input_format: X264EncoderInputFormat::Yuv420Planar,
+        })
+        .unwrap();
+
+        let u = vec![200u8; 1920 * 1080 / 4];
+        let v = vec![128u8; 1920 * 1080 / 4];
+        for i in 0..90 {
+            let mut y = Vec::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    17
+                } else {
+                    (17.0 + (line as f64 / 1080.0) * 219.0).round() as u8
+                };
+                y.resize(y.len() + 1920, sample);
+            }
+            let frame = TestFrame {
+                samples: vec![y, u.clone(), v.clone()],
+            };
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
+                assert!(output.encoded_frame.is_keyframe);
+            }
+        }
     }
 }

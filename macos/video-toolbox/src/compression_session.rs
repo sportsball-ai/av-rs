@@ -1,5 +1,6 @@
 use super::sys;
-use core_foundation::{result, CFType, Dictionary, OSStatus};
+use av_traits::EncodedFrameType;
+use core_foundation::{result, Boolean, CFType, Dictionary, MutableDictionary, OSStatus};
 use core_media::{SampleBuffer, Time, VideoCodecType};
 use core_video::ImageBuffer;
 use std::{
@@ -55,7 +56,7 @@ impl<C: Send> CompressionSession<C> {
                 Err(status.into())
             } else {
                 result(status.into()).map(|_| CompressionSessionOutputFrame {
-                    sample_buffer: unsafe { SampleBuffer::with_cf_type_ref(sample_buffer as _) },
+                    sample_buffer: SampleBuffer::with_cf_type_ref(sample_buffer as _),
                     context: frame_context,
                 })
             });
@@ -102,10 +103,18 @@ impl<C: Send> CompressionSession<C> {
         &self.frames
     }
 
-    pub fn encode_frame(&mut self, image_buffer: ImageBuffer, presentation_time: Time, context: C) -> Result<(), OSStatus> {
+    pub fn encode_frame(&mut self, image_buffer: ImageBuffer, presentation_time: Time, context: C, frame_type: EncodedFrameType) -> Result<(), OSStatus> {
         let context = Box::new(context);
         result(
             unsafe {
+                let mut frame_options = MutableDictionary::new_cf_type();
+                match frame_type {
+                    EncodedFrameType::Key => {
+                        frame_options.set_value(sys::kVTEncodeFrameOptionKey_ForceKeyFrame as _, Boolean::from(true).cf_type_ref() as _);
+                    }
+                    EncodedFrameType::Auto => {}
+                };
+
                 sys::VTCompressionSessionEncodeFrame(
                     self.sess,
                     image_buffer.cf_type_ref() as _,
@@ -116,7 +125,7 @@ impl<C: Send> CompressionSession<C> {
                         epoch: presentation_time.epoch,
                     },
                     sys::kCMTimeInvalid,
-                    std::ptr::null_mut(),
+                    frame_options.cf_type_ref() as _,
                     Box::into_raw(context) as *mut C as _,
                     std::ptr::null_mut(),
                 )
@@ -179,7 +188,9 @@ mod test {
             frame_data.extend_from_slice(nalu);
             let image_buffer = decompression_session.decode_frame(&frame_data, &format_desc).unwrap();
             frames_sent += 1;
-            compression_session.encode_frame(image_buffer, Time::default(), ()).unwrap();
+            compression_session
+                .encode_frame(image_buffer, Time::default(), (), EncodedFrameType::Auto)
+                .unwrap();
         }
         compression_session.flush().unwrap();
 
