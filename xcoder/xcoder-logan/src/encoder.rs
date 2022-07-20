@@ -289,7 +289,7 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             frame.dts = frame.pts;
             if force_key_frame {
                 frame.force_key_frame = 1;
-                frame.ni_pict_type = sys::PIC_TYPE_IDR;
+                frame.ni_pict_type = sys::ni_pic_type_t_PIC_TYPE_IDR;
             } else {
                 frame.force_key_frame = 0;
                 frame.ni_pict_type = 0;
