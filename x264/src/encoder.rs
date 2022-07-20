@@ -171,7 +171,6 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for X264Encoder<F> {
         pic.i_type = match frame_type {
             EncodedFrameType::Auto => sys::X264_TYPE_AUTO as _,
             EncodedFrameType::Key => sys::X264_TYPE_KEYFRAME as _,
-            EncodedFrameType::Predicted => sys::X264_TYPE_P as _,
         };
         self.frame_count += 1;
         self.do_encode(Some(pic))

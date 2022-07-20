@@ -19,7 +19,6 @@ pub struct VideoEncoderOutput<F> {
 pub enum EncodedFrameType {
     Auto,
     Key,
-    Predicted,
 }
 
 /// Implements basic video encoding behavior.

@@ -112,7 +112,7 @@ impl<C: Send> CompressionSession<C> {
                     EncodedFrameType::Key => {
                         frame_options.set_value(sys::kVTEncodeFrameOptionKey_ForceKeyFrame as _, Boolean::from(true).cf_type_ref() as _);
                     }
-                    EncodedFrameType::Auto | EncodedFrameType::Predicted => {}
+                    EncodedFrameType::Auto => {}
                 };
 
                 sys::VTCompressionSessionEncodeFrame(

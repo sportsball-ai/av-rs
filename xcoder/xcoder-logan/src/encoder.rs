@@ -356,7 +356,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
                 input,
                 match frame_type {
                     EncodedFrameType::Key => true,
-                    EncodedFrameType::Auto | EncodedFrameType::Predicted => false,
+                    EncodedFrameType::Auto => false,
                 },
             )? {
                 Some(frame) => input = frame,
