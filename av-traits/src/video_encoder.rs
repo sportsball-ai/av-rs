@@ -16,6 +16,7 @@ pub struct VideoEncoderOutput<F> {
     pub encoded_frame: EncodedVideoFrame,
 }
 
+#[derive(Eq, PartialEq)]
 pub enum EncodedFrameType {
     Auto,
     Key,
