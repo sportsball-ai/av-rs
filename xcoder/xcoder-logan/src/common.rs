@@ -3,7 +3,7 @@ use xcoder_logan_sys as sys;
 
 #[derive(Debug, Snafu)]
 pub enum XcoderInitError {
-    #[snafu(display("error {operation} (code = {code})"))]
+    #[snafu(display("error (code = {code})"))]
     Unknown { code: sys::ni_retcode_t },
 }
 
