@@ -248,6 +248,12 @@ impl<F> XcoderEncoder<F> {
                 let packet = self.encoded_frame.packet();
                 self.did_finish = packet.end_of_stream != 0;
                 if code > 0 {
+                    if (*self.session).pkt_num == 0 {
+                        // If we don't set pkt_num, libxcoder doesn't free up packet buffer
+                        // resources and will assert after 6000 frames. This mimics the FFmpeg
+                        // patch by setting it to 1 after the first successful read.
+                        (*self.session).pkt_num = 1;
+                    }
                     if packet.pts == 0 && packet.avg_frame_qp == 0 {
                         self.encoded_frame.parameter_sets = Some(self.encoded_frame.as_slice().to_vec());
                     } else {
@@ -388,9 +394,11 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use std::sync::Arc;
 
+    #[derive(Clone)]
     struct TestFrame {
-        samples: Vec<Vec<u8>>,
+        samples: Arc<Vec<Vec<u8>>>,
     }
 
     impl RawVideoFrame<u8> for TestFrame {
@@ -427,7 +435,7 @@ mod test {
                 y.resize(y.len() + 1920, sample);
             }
             let frame = TestFrame {
-                samples: vec![y, u.clone(), v.clone()],
+                samples: Arc::new(vec![y, u.clone(), v.clone()]),
             };
             if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.data);
@@ -445,5 +453,42 @@ mod test {
         // To inspect the output, uncomment these lines:
         //use std::io::Write;
         //std::fs::File::create("tmp.h264").unwrap().write_all(&encoded).unwrap();
+    }
+
+    /// This is a regression test. In the past, it would abort before completing due to a resource
+    /// leak.
+    #[test]
+    fn test_video_encoder_endurance() {
+        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+            width: 480,
+            height: 270,
+            fps: 29.97,
+            bitrate: None,
+            codec: XcoderEncoderCodec::H264,
+        })
+        .unwrap();
+
+        let mut encoded_frames = 0;
+
+        const N: usize = 7000;
+
+        let y = vec![16u8; 480 * 270];
+        let u = vec![200u8; 480 * 270 / 4];
+        let v = vec![128u8; 480 * 270 / 4];
+
+        let frame = TestFrame {
+            samples: Arc::new(vec![y, u, v]),
+        };
+
+        for _ in 0..N {
+            if let Some(_) = encoder.encode(frame.clone(), EncodedFrameType::Auto).unwrap() {
+                encoded_frames += 1;
+            }
+        }
+        while let Some(_) = encoder.flush().unwrap() {
+            encoded_frames += 1;
+        }
+
+        assert_eq!(encoded_frames, N);
     }
 }
