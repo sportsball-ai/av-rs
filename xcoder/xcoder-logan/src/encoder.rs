@@ -481,11 +481,11 @@ mod test {
         };
 
         for _ in 0..N {
-            if let Some(_) = encoder.encode(frame.clone(), EncodedFrameType::Auto).unwrap() {
+            if encoder.encode(frame.clone(), EncodedFrameType::Auto).unwrap().is_some() {
                 encoded_frames += 1;
             }
         }
-        while let Some(_) = encoder.flush().unwrap() {
+        while encoder.flush().unwrap().is_some() {
             encoded_frames += 1;
         }
 
