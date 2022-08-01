@@ -200,8 +200,10 @@ impl<W: Write> InterleavingMuxer<W> {
 
         packets.sort_unstable_by_key(|(_, p)| p.0);
         for (stream_index, packet) in packets {
-            let packet = packet.2.expect("emit_packets should never leave None packets in the buffer");
-            self.write_muxer_packet(stream_index, packet)?;
+            // when emit_packets returns an error, it's possible that the None packets are still in the buffer,
+            if let Some(packet) = packet.2 {
+                self.write_muxer_packet(stream_index, packet)?;
+            }
         }
         Ok(())
     }
