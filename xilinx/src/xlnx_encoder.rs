@@ -11,7 +11,8 @@ impl XlnxEncoder {
     pub fn new(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<Self, SimpleError> {
         let enc_session = xlnx_create_enc_session(xma_enc_props, xlnx_enc_ctx)?;
 
-        let out_buffer = unsafe { xma_data_buffer_alloc(0, true) };
+        let buffer_size = xma_enc_props.height * xma_enc_props.width * xma_enc_props.bits_per_pixel;
+        let out_buffer = unsafe { xma_data_buffer_alloc(buffer_size as u64, false) };
 
         Ok(Self {
             enc_session,
@@ -124,7 +125,7 @@ mod encoder_tests {
             custom_rc: 0,
             gop_mode: 0,
             gdr_mode: 0,
-            num_bframes: 2,
+            num_bframes: 0,
             idr_period: 120,
             profile,
             level,
@@ -138,8 +139,8 @@ mod encoder_tests {
             qp_mode: 1,
             filler_data: false,
             aspect_ratio: XlnxAspectRatio::AspectRatio16x9,
-            scaling_list: 1,
-            entropy_mode: 1,
+            scaling_list: 0,
+            entropy_mode: 0,
             loop_filter: true,
             constrained_intra_pred: false,
             prefetch_buffer: true,

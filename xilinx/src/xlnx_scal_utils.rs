@@ -16,6 +16,7 @@ pub struct XlnxScalerXrmCtx {
     pub cu_res: xrmCuResource,
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn xlnx_calc_scal_load(xrm_ctx: xrmContext, xma_scal_props: *mut XmaScalerProperties) -> Result<i32, SimpleError> {
     let func_id = 0;
     let mut plugin_param: xrmPluginFuncParam = Default::default();
