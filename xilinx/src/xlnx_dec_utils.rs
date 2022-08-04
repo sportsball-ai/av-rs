@@ -24,6 +24,7 @@ pub struct XlnxDecoderXrmCtx {
 }
 
 /// Calculates the decoder load uing the xrmU30Dec plugin.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderProperties) -> Result<i32, SimpleError> {
     let func_id = 0;
     let mut plugin_param: xrmPluginFuncParam = Default::default();

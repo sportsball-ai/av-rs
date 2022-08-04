@@ -187,6 +187,37 @@ mod scaler_tests {
             }
         }
 
+        //flush the buffer
+        loop {
+            unsafe {
+                // prepare flush frame.
+                let flush_frame = xma_frame_alloc(&mut frame_props, true);
+                (*flush_frame).is_last_frame = 1;
+                (*flush_frame).pts = u64::MAX;
+
+                let flush_frame = scopeguard::guard(flush_frame, |frame| {
+                    xma_frame_free(frame); // if we allocated a flush frame it needs to be dealocated.
+                });
+
+                match scaler.process_frame(*flush_frame) {
+                    Ok(_) => {
+                        // successfully scaled frame.
+                        processed_frame_count += 1;
+                        // clear xvbm buffers for each return frame
+                        for i in 0..xma_scal_props.num_outputs as usize {
+                            let handle: XvbmBufferHandle = (*scaler.out_frame_list[i]).data[0].buffer;
+                            xvbm_buffer_pool_entry_free(handle);
+                        }
+                    }
+                    Err(e) => match e.err {
+                        XlnxErrorType::XlnxEOS => break,
+                        XlnxErrorType::XlnxFlushAgain => {}
+                        _ => panic!("error receiving flushing xilinx scaler: {:?}", e),
+                    },
+                }
+            }
+        }
+
         assert_eq!(processed_frame_count, 300);
     }
 }

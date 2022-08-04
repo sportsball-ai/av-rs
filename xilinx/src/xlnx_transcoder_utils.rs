@@ -16,7 +16,7 @@ pub struct XlnxTranscodeXrmCtx {
 
 impl XlnxTranscodeXrmCtx {
     pub fn new() -> Self {
-        let xrm_ctx = unsafe {xrmCreateContext(XRM_API_VERSION_1)};
+        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
 
         Self {
             xrm_ctx,
@@ -24,9 +24,9 @@ impl XlnxTranscodeXrmCtx {
                 dec_load: 0,
                 scal_load: 0,
                 enc_load: 0,
-                enc_num:0,
+                enc_num: 0,
             },
-            reserve_idx: 0 
+            reserve_idx: 0,
         }
     }
 }
@@ -121,6 +121,12 @@ pub fn xlnx_reserve_transcode_resource(
     }
 
     Ok(())
+}
+
+impl Default for XlnxTranscodeXrmCtx {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Drop for XlnxTranscodeXrmCtx {

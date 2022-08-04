@@ -15,6 +15,7 @@ pub struct XlnxEncoderXrmCtx {
 }
 
 /// Calculates the encoder load uing the xrmU30Enc plugin.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn xlnx_calc_enc_load(xrm_ctx: xrmContext, xma_enc_props: *mut XmaEncoderProperties) -> Result<i32, SimpleError> {
     let func_id = 0;
     let mut plugin_param: xrmPluginFuncParam = Default::default();
