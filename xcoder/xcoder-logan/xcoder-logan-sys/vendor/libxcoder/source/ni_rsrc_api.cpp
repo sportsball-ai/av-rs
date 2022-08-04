@@ -3561,5 +3561,8 @@ int ni_rsrc_unlock(int device_type, ni_lock_handle_t lock)
     }
     while (status != NI_RETCODE_SUCCESS);
   }
+#ifdef __linux__
+  close(lock);
+#endif   //__linux__ defined
   return NI_RETCODE_SUCCESS;
 }
