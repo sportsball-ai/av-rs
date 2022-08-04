@@ -190,6 +190,8 @@ impl<F> XcoderEncoder<F> {
             }
             let did_finish = guard(false, |did_finish| {
                 sys::ni_device_session_close(*session, if did_finish { 1 } else { 0 }, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER);
+                sys::ni_device_close((**session).device_handle);
+                sys::ni_device_close((**session).blk_io_handle);
             });
 
             let frame_data_io = {
@@ -346,6 +348,8 @@ impl<F> Drop for XcoderEncoder<F> {
         unsafe {
             sys::ni_frame_buffer_free(&mut self.frame_data_io.data.frame as _);
             sys::ni_device_session_close(self.session, if self.did_finish { 1 } else { 0 }, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER);
+            sys::ni_device_close((*self.session).device_handle);
+            sys::ni_device_close((*self.session).blk_io_handle);
             sys::ni_device_session_context_free(self.session);
         }
     }
@@ -394,7 +398,10 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::sync::Arc;
+    use std::{
+        process::{self, Command},
+        sync::Arc,
+    };
 
     #[derive(Clone)]
     struct TestFrame {
@@ -490,5 +497,31 @@ mod test {
         }
 
         assert_eq!(encoded_frames, N);
+    }
+
+    /// This is a regression test. In the past, creating an encoder would open up file descriptors
+    /// for /dev/shm/NI_RETRY_LCK_ENCODERS and other files and never close them.
+    #[test]
+    fn test_video_encoder_file_descriptors() {
+        for _ in 0..400 {
+            XcoderEncoder::<TestFrame>::new(XcoderEncoderConfig {
+                width: 480,
+                height: 270,
+                fps: 29.97,
+                bitrate: None,
+                codec: XcoderEncoderCodec::H264,
+            })
+            .unwrap();
+        }
+
+        let lsof_output = Command::new("lsof").args(["-p", &process::id().to_string()]).output().unwrap();
+        let lsof_output = String::from_utf8_lossy(&lsof_output.stdout);
+        println!("{}", lsof_output);
+        let shm_file_descriptors = lsof_output.matches("/dev/shm/NI_RETRY_LCK_ENCODERS").count();
+        let nvme_file_descriptors = lsof_output.matches("/dev/nvme").count();
+        // If this is the only test running, these should be zero. But even with other tests
+        // running there should be a very small number of open descriptors.
+        assert!(shm_file_descriptors < 100);
+        assert!(nvme_file_descriptors < 100);
     }
 }

@@ -188,6 +188,8 @@ impl<F> XcoderEncoder<F> {
             }
             let did_finish = guard(false, |did_finish| {
                 sys::ni_device_session_close(*session, if did_finish { 1 } else { 0 }, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER);
+                sys::ni_device_close((**session).device_handle);
+                sys::ni_device_close((**session).blk_io_handle);
             });
 
             let frame_data_io = {
@@ -349,6 +351,8 @@ impl<F> Drop for XcoderEncoder<F> {
         unsafe {
             sys::ni_frame_buffer_free(&mut self.frame_data_io.data.frame as _);
             sys::ni_device_session_close(self.session, if self.did_finish { 1 } else { 0 }, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER);
+            sys::ni_device_close((*self.session).device_handle);
+            sys::ni_device_close((*self.session).blk_io_handle);
             sys::ni_device_session_context_free(self.session);
         }
     }
