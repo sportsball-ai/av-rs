@@ -64,267 +64,308 @@ pub struct XlnxEncoderProperties {
     pub num_cores: i32,
     pub latency_logging: i32,
     pub enable_hw_buf: u32,
-    pub enc_options: String,
-    pub enc_options_ptr: *const u8,
 }
 
-fn xlnx_fill_enc_params(enc_props: &mut Box<XlnxEncoderProperties>, enc_params: &mut Box<[XmaParameter; MAX_ENC_PARAMS]>) {
-    enc_params[0].name = ENC_OPTIONS_PARAM_NAME.as_ptr() as *mut i8;
-    enc_params[0].type_ = XmaDataType_XMA_STRING;
-    enc_params[0].length = enc_props.enc_options.len() as u64;
-    enc_params[0].value = &enc_props.enc_options_ptr as *const _ as *mut std::ffi::c_void;
-
-    enc_params[1].name = LATENCY_LOGGING_PARAM_NAME.as_ptr() as *mut i8;
-    enc_params[1].type_ = XmaDataType_XMA_UINT32;
-    enc_params[1].length = 4;
-    enc_params[1].value = &mut enc_props.latency_logging as *mut _ as *mut std::ffi::c_void;
-
-    enc_params[2].name = ENABLE_HW_IN_BUF_PARAM_NAME.as_ptr() as *mut i8;
-    enc_params[2].type_ = XmaDataType_XMA_UINT32;
-    enc_params[2].length = 4;
-    enc_params[2].value = &mut enc_props.enable_hw_buf as *mut _ as *mut std::ffi::c_void;
+pub struct XlnxXmaEncoderProperties {
+    // XXX: The drop order of these fields matters!
+    inner: XmaEncoderProperties,
+    // `inner` references `_params`.
+    _params: Box<[XmaParameter; MAX_ENC_PARAMS]>,
+    // `_params` references `_props`.
+    _props: Box<XlnxEncoderProperties>,
+    // `_params` references `_enc_options_ptr`.
+    _enc_options_ptr: Box<*const u8>,
+    // `_enc_options_ptr` references `_enc_options`.
+    _enc_options: String,
 }
 
-pub fn xlnx_create_xma_enc_props(
-    enc_props: &mut Box<XlnxEncoderProperties>,
-    enc_params: &mut Box<[XmaParameter; MAX_ENC_PARAMS]>,
-) -> Result<Box<XmaEncoderProperties>, SimpleError> {
-    let xma_enc_props: XmaEncoderProperties = Default::default();
-    let mut xma_enc_props = Box::new(xma_enc_props);
+impl TryFrom<XlnxEncoderProperties> for XlnxXmaEncoderProperties {
+    type Error = SimpleError;
 
-    strcpy_to_arr_i8(&mut xma_enc_props.hwvendor_string, "MPSoC")?;
-    xma_enc_props.hwencoder_type = XmaEncoderType_XMA_MULTI_ENCODER_TYPE;
-    xma_enc_props.param_cnt = 3_u32;
-    xma_enc_props.params = enc_params.as_mut_ptr();
-    xma_enc_props.format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
-    xma_enc_props.bits_per_pixel = 8;
-    xma_enc_props.width = enc_props.width;
-    xma_enc_props.height = enc_props.height;
-    xma_enc_props.rc_mode = 0;
-    xma_enc_props.framerate = enc_props.framerate;
-    xma_enc_props.lookahead_depth = 0;
+    fn try_from(props: XlnxEncoderProperties) -> Result<Self, SimpleError> {
+        let mut props = Box::new(props);
+        let mut params: Box<[XmaParameter; MAX_ENC_PARAMS]> = Default::default();
 
-    // Begin filling encoder options
-    let rate_ctrl_mode = match enc_props.control_rate {
-        1 => "CBR",
-        2 => "VBR",
-        3 => "LOW_LATENCY",
-        _ => "CONST_QP",
-    };
+        let mut inner = XmaEncoderProperties::default();
 
-    let framerate = format!("{}/{}", enc_props.framerate.numerator, enc_props.framerate.denominator);
+        strcpy_to_arr_i8(&mut inner.hwvendor_string, "MPSoC").expect("MPSoC should definitely fit");
+        inner.hwencoder_type = XmaEncoderType_XMA_MULTI_ENCODER_TYPE;
+        inner.param_cnt = 3_u32;
+        inner.params = params.as_mut_ptr();
+        inner.format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
+        inner.bits_per_pixel = 8;
+        inner.width = props.width;
+        inner.height = props.height;
+        inner.rc_mode = 0;
+        inner.framerate = props.framerate;
+        inner.lookahead_depth = 0;
 
-    let slice_qp = if enc_props.slice_qp == -1 {
-        "AUTO".to_string()
-    } else {
-        format!("{}", enc_props.slice_qp)
-    };
+        // Begin filling encoder options
+        let rate_ctrl_mode = match props.control_rate {
+            1 => "CBR",
+            2 => "VBR",
+            3 => "LOW_LATENCY",
+            _ => "CONST_QP",
+        };
 
-    let gop_ctrl_mode = match enc_props.gop_mode {
-        1 => "PYRAMIDAL_GOP",
-        2 => "LOW_DELAY_P",
-        3 => "LOW_DELAY_B",
-        _ => "DEFAULT_GOP",
-    };
+        let framerate = format!("{}/{}", props.framerate.numerator, props.framerate.denominator);
 
-    let gdr_mode = match enc_props.gdr_mode {
-        1 => "GDR_VERTICAL",
-        2 => "GDR_HORIZONTAL",
-        _ => "DISABLE",
-    };
+        let slice_qp = if props.slice_qp == -1 {
+            "AUTO".to_string()
+        } else {
+            format!("{}", props.slice_qp)
+        };
 
-    let profile = match enc_props.codec_id {
-        // h264
-        CODEC_ID_H264 => match enc_props.profile {
-            ENC_H264_BASELINE => "AVC_BASELINE",
-            ENC_H264_MAIN => "AVC_MAIN",
-            ENC_H264_HIGH => "AVC_HIGH",
-            _ => bail!("invalid profile {} specified to H264 xilinx encoder", enc_props.profile),
-        },
-        // h265
-        CODEC_ID_HEVC => match enc_props.profile {
-            ENC_HEVC_MAIN => "HEVC_MAIN",
-            ENC_HEVC_MAIN_INTRA => "HEVC_MAIN_INTRA",
-            _ => bail!("invalid profile {} specified to HEVC xilinx encoder", enc_props.profile),
-        },
-        _ => bail!("incompatible codec_id {}", enc_props.codec_id),
-    };
+        let gop_ctrl_mode = match props.gop_mode {
+            1 => "PYRAMIDAL_GOP",
+            2 => "LOW_DELAY_P",
+            3 => "LOW_DELAY_B",
+            _ => "DEFAULT_GOP",
+        };
 
-    let mut is_level_found = true;
-    let mut level = match enc_props.level {
-        10 => "1",
-        20 => "2",
-        21 => "2.1",
-        30 => "3",
-        31 => "3.1",
-        40 => "4",
-        41 => "4.1",
-        50 => "5",
-        51 => "5.1",
-        _ => {
-            is_level_found = false;
-            "1"
-        }
-    };
+        let gdr_mode = match props.gdr_mode {
+            1 => "GDR_VERTICAL",
+            2 => "GDR_HORIZONTAL",
+            _ => "DISABLE",
+        };
 
-    if !is_level_found {
-        match enc_props.codec_id {
-            CODEC_ID_H264 => {
-                level = match enc_props.level {
-                    11 => "1.1",
-                    12 => "1.2",
-                    13 => "1.3",
-                    22 => "2.2",
-                    32 => "3.2",
-                    42 => "4.2",
-                    52 => "5.2",
-                    _ => bail!("invalid H264 codec level value {}", enc_props.level),
-                }
+        let profile = match props.codec_id {
+            // h264
+            CODEC_ID_H264 => match props.profile {
+                ENC_H264_BASELINE => "AVC_BASELINE",
+                ENC_H264_MAIN => "AVC_MAIN",
+                ENC_H264_HIGH => "AVC_HIGH",
+                _ => bail!("invalid profile {} specified to H264 xilinx encoder", props.profile),
+            },
+            // h265
+            CODEC_ID_HEVC => match props.profile {
+                ENC_HEVC_MAIN => "HEVC_MAIN",
+                ENC_HEVC_MAIN_INTRA => "HEVC_MAIN_INTRA",
+                _ => bail!("invalid profile {} specified to HEVC xilinx encoder", props.profile),
+            },
+            _ => bail!("incompatible codec_id {}", props.codec_id),
+        };
+
+        let mut is_level_found = true;
+        let mut level = match props.level {
+            10 => "1",
+            20 => "2",
+            21 => "2.1",
+            30 => "3",
+            31 => "3.1",
+            40 => "4",
+            41 => "4.1",
+            50 => "5",
+            51 => "5.1",
+            _ => {
+                is_level_found = false;
+                "1"
             }
-            CODEC_ID_HEVC => bail!("invalid HEVC codec level value{}", enc_props.level),
-            _ => {}
+        };
+
+        if !is_level_found {
+            match props.codec_id {
+                CODEC_ID_H264 => {
+                    level = match props.level {
+                        11 => "1.1",
+                        12 => "1.2",
+                        13 => "1.3",
+                        22 => "2.2",
+                        32 => "3.2",
+                        42 => "4.2",
+                        52 => "5.2",
+                        _ => bail!("invalid H264 codec level value {}", props.level),
+                    }
+                }
+                CODEC_ID_HEVC => bail!("invalid HEVC codec level value{}", props.level),
+                _ => {}
+            }
         }
+
+        let tier = if props.tier == 1 { "HIGH_TIER" } else { "MAIN_TIER" };
+
+        let mut qp_ctrl_mode = match props.qp_mode {
+            1 => "UNIFORM_QP",
+            2 => "AUTO_QP",
+            _ => "LOAD_QP | RELATIVE_QP",
+        };
+
+        let dependent_slice = if props.dependent_slice { "TRUE" } else { "FALSE" };
+
+        let filler_data = if props.filler_data { "ENABLE" } else { "DISABLE" };
+
+        let aspect_ratio = match props.aspect_ratio {
+            XlnxAspectRatio::AspectRatio4x3 => "ASPECT_RATIO_4_3",
+            XlnxAspectRatio::AspectRatio16x9 => "ASPECT_RATIO_16_9",
+            XlnxAspectRatio::AspectRatioNone => "ASPECT_RATIO_NONE",
+            XlnxAspectRatio::AspectRatioAuto => "ASPECT_RATIO_AUTO",
+        };
+
+        let color_space = "COLOUR_DESC_UNSPECIFIED";
+
+        let mut scaling_list = if props.scaling_list == 0 { "FLAT" } else { "DEFAULT" };
+
+        let loop_filter = if props.loop_filter { "ENABLE" } else { "DISABLE" };
+
+        let entropy_mode = if props.entropy_mode == 0 { "MODE_CAVLC" } else { "MODE_CABAC" };
+
+        let const_intra_pred = if props.constrained_intra_pred { "ENABLE" } else { "DISABLE" };
+
+        let lambda_ctrl_mode = "DEFAULT_LDA";
+
+        let prefetch_buffer = if props.prefetch_buffer { "ENABLE" } else { "DISABLE" };
+
+        if props.tune_metrics {
+            scaling_list = "FLAT";
+            qp_ctrl_mode = "UNIFORM_QP";
+        }
+
+        let width = props.width;
+        let height = props.height;
+        let bit_rate = props.bit_rate;
+        let max_bitrate = props.max_bitrate;
+        let max_qp = props.max_qp;
+        let min_qp = props.min_qp;
+        let cpb_size = props.cpb_size;
+        let initial_delay = props.initial_delay;
+        let gop_size = props.gop_size;
+        let num_bframes = props.num_bframes;
+        let idr_period = props.idr_period;
+        let num_slices = props.num_slices;
+        let slice_size = props.slice_size;
+        let num_cores = props.num_cores;
+
+        let null = "\0";
+        let enc_options = if props.codec_id == CODEC_ID_HEVC {
+            format!(
+                r#"[INPUT]
+                Width = {width}
+                Height = {height}
+                [RATE_CONTROL]
+                RateCtrlMode = {rate_ctrl_mode}
+                FrameRate = {framerate}
+                BitRate = {bit_rate}
+                MaxBitRate = {max_bitrate}
+                SliceQP = {slice_qp}
+                MaxQP = {max_qp}
+                MinQP = {min_qp}
+                CPBSize = {cpb_size}
+                InitialDelay = {initial_delay}
+                [GOP]
+                GopCtrlMode = {gop_ctrl_mode}
+                Gop.GdrMode = {gdr_mode}
+                Gop.Length = {gop_size}
+                Gop.NumB = {num_bframes}
+                Gop.FreqIDR = {idr_period}
+                [SETTINGS]
+                Profile = {profile}
+                Level = {level}
+                Tier = {tier}
+                ChromaMode = CHROMA_4_2_0
+                BitDepth = 8
+                NumSlices = {num_slices}
+                QPCtrlMode = {qp_ctrl_mode}
+                SliceSize = {slice_size}
+                DependentSlice = {dependent_slice}
+                EnableFillerData = {filler_data}
+                AspectRatio = {aspect_ratio}
+                ColourDescription = {color_space}
+                ScalingList = {scaling_list}
+                LoopFilter = {loop_filter}
+                ConstrainedIntraPred = {const_intra_pred}
+                LambdaCtrlMode = {lambda_ctrl_mode}
+                CacheLevel2 = {prefetch_buffer}
+                NumCore = {num_cores}
+                {null}"#
+            )
+        } else {
+            format!(
+                r#"[INPUT]
+                Width = {width}
+                Height = {height}
+                [RATE_CONTROL]
+                RateCtrlMode = {rate_ctrl_mode}
+                FrameRate = {framerate}
+                BitRate = {bit_rate}
+                MaxBitRate = {max_bitrate}
+                SliceQP = {slice_qp}
+                MaxQP = {max_qp}
+                MinQP = {min_qp}
+                CPBSize = {cpb_size}
+                InitialDelay = {initial_delay}
+                [GOP]
+                GopCtrlMode = {gop_ctrl_mode}
+                Gop.GdrMode = {gdr_mode}
+                Gop.Length = {gop_size}
+                Gop.NumB = {num_bframes}
+                Gop.FreqIDR = {idr_period}
+                [SETTINGS]
+                Profile = {profile}
+                Level = {level}
+                ChromaMode = CHROMA_4_2_0
+                BitDepth = 8
+                NumSlices = {num_slices}
+                QPCtrlMode = {qp_ctrl_mode}
+                SliceSize = {slice_size}
+                EnableFillerData = {filler_data}
+                AspectRatio = {aspect_ratio}
+                ColourDescription = {color_space}
+                ScalingList = {scaling_list}
+                EntropyMode = {entropy_mode}
+                LoopFilter = {loop_filter}
+                ConstrainedIntraPred = {const_intra_pred}
+                LambdaCtrlMode = {lambda_ctrl_mode}
+                CacheLevel2 = {prefetch_buffer}
+                NumCore = {num_cores}
+                {null}"#
+            )
+        };
+        let enc_options_ptr = Box::new(enc_options.as_ptr());
+
+        Self::fill_params(&mut props, &mut params, &enc_options, enc_options_ptr.as_ref() as _);
+
+        Ok(Self {
+            inner,
+            _params: params,
+            _props: props,
+            _enc_options: enc_options,
+            _enc_options_ptr: enc_options_ptr,
+        })
     }
+}
 
-    let tier = if enc_props.tier == 1 { "HIGH_TIER" } else { "MAIN_TIER" };
-
-    let mut qp_ctrl_mode = match enc_props.qp_mode {
-        1 => "UNIFORM_QP",
-        2 => "AUTO_QP",
-        _ => "LOAD_QP | RELATIVE_QP",
-    };
-
-    let dependent_slice = if enc_props.dependent_slice { "TRUE" } else { "FALSE" };
-
-    let filler_data = if enc_props.filler_data { "ENABLE" } else { "DISABLE" };
-
-    let aspect_ratio = match enc_props.aspect_ratio {
-        XlnxAspectRatio::AspectRatio4x3 => "ASPECT_RATIO_4_3",
-        XlnxAspectRatio::AspectRatio16x9 => "ASPECT_RATIO_16_9",
-        XlnxAspectRatio::AspectRatioNone => "ASPECT_RATIO_NONE",
-        XlnxAspectRatio::AspectRatioAuto => "ASPECT_RATIO_AUTO",
-    };
-
-    let color_space = "COLOUR_DESC_UNSPECIFIED";
-
-    let mut scaling_list = if enc_props.scaling_list == 0 { "FLAT" } else { "DEFAULT" };
-
-    let loop_filter = if enc_props.loop_filter { "ENABLE" } else { "DISABLE" };
-
-    let entropy_mode = if enc_props.entropy_mode == 0 { "MODE_CAVLC" } else { "MODE_CABAC" };
-
-    let const_intra_pred = if enc_props.constrained_intra_pred { "ENABLE" } else { "DISABLE" };
-
-    let lambda_ctrl_mode = "DEFAULT_LDA";
-
-    let prefetch_buffer = if enc_props.prefetch_buffer { "ENABLE" } else { "DISABLE" };
-
-    if enc_props.tune_metrics {
-        scaling_list = "FLAT";
-        qp_ctrl_mode = "UNIFORM_QP";
+impl AsRef<XmaEncoderProperties> for XlnxXmaEncoderProperties {
+    fn as_ref(&self) -> &XmaEncoderProperties {
+        &self.inner
     }
+}
 
-    let width = enc_props.width;
-    let height = enc_props.height;
-    let bit_rate = enc_props.bit_rate;
-    let max_bitrate = enc_props.max_bitrate;
-    let max_qp = enc_props.max_qp;
-    let min_qp = enc_props.min_qp;
-    let cpb_size = enc_props.cpb_size;
-    let initial_delay = enc_props.initial_delay;
-    let gop_size = enc_props.gop_size;
-    let num_bframes = enc_props.num_bframes;
-    let idr_period = enc_props.idr_period;
-    let num_slices = enc_props.num_slices;
-    let slice_size = enc_props.slice_size;
-    let num_cores = enc_props.num_cores;
+impl AsMut<XmaEncoderProperties> for XlnxXmaEncoderProperties {
+    fn as_mut(&mut self) -> &mut XmaEncoderProperties {
+        &mut self.inner
+    }
+}
 
-    let enc_options = if enc_props.codec_id == CODEC_ID_HEVC {
-        format!(
-            "[INPUT]\n\
-        Width = {width}\n\
-        Height = {height}\n\
-        [RATE_CONTROL]\n\
-        RateCtrlMode = {rate_ctrl_mode}\n\
-        FrameRate = {framerate}\n\
-        BitRate = {bit_rate}\n\
-        MaxBitRate = {max_bitrate}\n\
-        SliceQP = {slice_qp}\n\
-        MaxQP = {max_qp}\n\
-        MinQP = {min_qp}\n\
-        CPBSize = {cpb_size}\n\
-        InitialDelay = {initial_delay}\n\
-        [GOP]\n\
-        GopCtrlMode = {gop_ctrl_mode}\n\
-        Gop.GdrMode = {gdr_mode}\n\
-        Gop.Length = {gop_size}\n\
-        Gop.NumB = {num_bframes}\n\
-        Gop.FreqIDR = {idr_period}\n\
-        [SETTINGS]\n\
-        Profile = {profile}\n\
-        Level = {level}\n\
-        Tier = {tier}\n\
-        ChromaMode = CHROMA_4_2_0\n\
-        BitDepth = 8\n\
-        NumSlices = {num_slices}\n\
-        QPCtrlMode = {qp_ctrl_mode}\n\
-        SliceSize = {slice_size}\n\
-        DependentSlice = {dependent_slice}\n\
-        EnableFillerData = {filler_data}\n\
-        AspectRatio = {aspect_ratio}\n\
-        ColourDescription = {color_space}\n\
-        ScalingList = {scaling_list}\n\
-        LoopFilter = {loop_filter}\n\
-        ConstrainedIntraPred = {const_intra_pred}\n\
-        LambdaCtrlMode = {lambda_ctrl_mode}\n\
-        CacheLevel2 = {prefetch_buffer}\n\
-        NumCore = {num_cores}\n\0"
-        )
-    } else {
-        format!(
-            "[INPUT]\n\
-        Width = {width}\n\
-        Height = {height}\n\
-        [RATE_CONTROL]\n\
-        RateCtrlMode = {rate_ctrl_mode}\n\
-        FrameRate = {framerate}\n\
-        BitRate = {bit_rate}\n\
-        MaxBitRate = {max_bitrate}\n\
-        SliceQP = {slice_qp}\n\
-        MaxQP = {max_qp}\n\
-        MinQP = {min_qp}\n\
-        CPBSize = {cpb_size}\n\
-        InitialDelay = {initial_delay}\n\
-        [GOP]\n\
-        GopCtrlMode = {gop_ctrl_mode}\n\
-        Gop.GdrMode = {gdr_mode}\n\
-        Gop.Length = {gop_size}\n\
-        Gop.NumB = {num_bframes}\n\
-        Gop.FreqIDR = {idr_period}\n\
-        [SETTINGS]\n\
-        Profile = {profile}\n\
-        Level = {level}\n\
-        ChromaMode = CHROMA_4_2_0\n\
-        BitDepth = 8\n\
-        NumSlices = {num_slices}\n\
-        QPCtrlMode = {qp_ctrl_mode}\n\
-        SliceSize = {slice_size}\n\
-        EnableFillerData = {filler_data}\n\
-        AspectRatio = {aspect_ratio}\n\
-        ColourDescription = {color_space}\n\
-        ScalingList = {scaling_list}\n\
-        EntropyMode = {entropy_mode}\n\
-        LoopFilter = {loop_filter}\n\
-        ConstrainedIntraPred = {const_intra_pred}\n\
-        LambdaCtrlMode = {lambda_ctrl_mode}\n\
-        CacheLevel2 = {prefetch_buffer}\n\
-        NumCore = {num_cores}\n\0"
-        )
-    };
+impl XlnxXmaEncoderProperties {
+    fn fill_params(
+        props: &XlnxEncoderProperties,
+        enc_params: &mut Box<[XmaParameter; MAX_ENC_PARAMS]>,
+        enc_options: &str,
+        enc_options_ptr_ptr: *const *const u8,
+    ) {
+        enc_params[0].name = ENC_OPTIONS_PARAM_NAME.as_ptr() as *mut i8;
+        enc_params[0].type_ = XmaDataType_XMA_STRING;
+        enc_params[0].length = enc_options.len() as u64;
+        enc_params[0].value = enc_options_ptr_ptr as *mut std::ffi::c_void;
 
-    enc_props.enc_options = enc_options;
-    enc_props.enc_options_ptr = enc_props.enc_options.as_ptr();
-    xlnx_fill_enc_params(enc_props, enc_params);
+        enc_params[1].name = LATENCY_LOGGING_PARAM_NAME.as_ptr() as *mut i8;
+        enc_params[1].type_ = XmaDataType_XMA_UINT32;
+        enc_params[1].length = 4;
+        enc_params[1].value = &props.latency_logging as *const _ as *mut std::ffi::c_void;
 
-    Ok(xma_enc_props)
+        enc_params[2].name = ENABLE_HW_IN_BUF_PARAM_NAME.as_ptr() as *mut i8;
+        enc_params[2].type_ = XmaDataType_XMA_UINT32;
+        enc_params[2].length = 4;
+        enc_params[2].value = &props.enable_hw_buf as *const _ as *mut std::ffi::c_void;
+    }
 }

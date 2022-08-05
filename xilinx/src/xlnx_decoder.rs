@@ -158,14 +158,11 @@ mod decoder_tests {
             scan_type: 1,
             latency_logging: 1,
             splitbuff_mode: 0,
-            framerate: XmaFraction { numerator: 1, denominator: 25 },
+            framerate: XmaFraction { numerator: 25, denominator: 1 },
         };
-        let mut dec_props = Box::new(dec_props);
+        let frame_duration_secs = dec_props.framerate.denominator as f64 / dec_props.framerate.numerator as f64;
 
-        let dec_params: [XmaParameter; MAX_DEC_PARAMS] = Default::default();
-        let mut dec_params = Box::new(dec_params);
-
-        let mut xma_dec_props = xlnx_create_xma_dec_props(&mut dec_props, &mut dec_params).unwrap();
+        let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
 
         let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
 
@@ -174,14 +171,14 @@ mod decoder_tests {
         let mut xlnx_dec_ctx = XlnxDecoderXrmCtx {
             xrm_reserve_id: 0,
             device_id: -1,
-            dec_load: xlnx_calc_dec_load(xrm_ctx, &mut *xma_dec_props).unwrap(),
+            dec_load: xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap(),
             decode_res_in_use: false,
             xrm_ctx,
             cu_list_res,
         };
 
         // create Xlnx decoder
-        let mut decoder = XlnxDecoder::new(&mut *xma_dec_props, &mut xlnx_dec_ctx).unwrap();
+        let mut decoder = XlnxDecoder::new(xma_dec_props.as_mut(), &mut xlnx_dec_ctx).unwrap();
         let mut frames_decoded = 0;
         let mut packets_sent = 0;
 
@@ -198,7 +195,7 @@ mod decoder_tests {
         }
 
         for (frame_count, nalu) in nalus.into_iter().enumerate() {
-            let pts = ((dec_props.framerate.numerator as f64 / dec_props.framerate.denominator as f64) * 90000.0 * frame_count as f64) as i32;
+            let pts = (frame_duration_secs * 90000.0 * frame_count as f64) as i32;
             let mut data = vec![0, 0, 0, 1];
             data.extend_from_slice(nalu);
             let data = data.as_mut_slice();

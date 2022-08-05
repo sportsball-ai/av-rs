@@ -1,5 +1,4 @@
 use crate::{strcpy_to_arr_i8, sys::*, xlnx_scaler::SCAL_MAX_ABR_CHANNELS};
-use simple_error::SimpleError;
 use std::ptr;
 
 pub const MAX_SCAL_PARAMS: usize = 4;
@@ -21,61 +20,87 @@ pub struct XlnxScalerProperties {
     pub latency_logging: i32,
 }
 
-fn xlnx_fill_scal_params(scal_props: &mut Box<XlnxScalerProperties>, scal_params: &mut Box<[XmaParameter; MAX_SCAL_PARAMS]>) {
-    scal_params[0].name = ENABLE_PIPELINE_PARAM_NAME.as_ptr() as *mut i8;
-    scal_params[0].type_ = XmaDataType_XMA_UINT32;
-    scal_params[0].length = 4;
-    scal_params[0].value = &mut scal_props.enable_pipeline as *mut _ as *mut std::ffi::c_void;
-
-    scal_params[1].name = LOG_LEVEL_PARAM_NAME.as_ptr() as *mut i8;
-    scal_params[1].type_ = XmaDataType_XMA_UINT32;
-    scal_params[1].length = 4;
-    scal_params[1].value = &mut scal_props.log_level as *mut _ as *mut std::ffi::c_void;
-
-    scal_params[2].name = MIX_RATE_PARAM_NAME.as_ptr() as *mut i8;
-    scal_params[2].type_ = XmaDataType_XMA_UINT64;
-    scal_params[2].length = 8;
-    scal_params[2].value = ptr::null_mut();
-
-    scal_params[3].name = LATENCY_LOGGING_PARAM_NAME.as_ptr() as *mut i8;
-    scal_params[3].type_ = XmaDataType_XMA_UINT32;
-    scal_params[3].length = 4;
-    scal_params[3].value = &mut scal_props.latency_logging as *mut _ as *mut std::ffi::c_void;
+pub struct XlnxXmaScalerProperties {
+    // XXX: The drop order of these fields matters!
+    inner: XmaScalerProperties,
+    // `inner` references `_params`.
+    _params: Box<[XmaParameter; MAX_SCAL_PARAMS]>,
+    // `_params` references `_props`.
+    _props: Box<XlnxScalerProperties>,
 }
 
-fn align(x: i32, align: i32) -> i32 {
-    ((x) + (align) - 1) & !((align) - 1)
+impl From<XlnxScalerProperties> for XlnxXmaScalerProperties {
+    fn from(props: XlnxScalerProperties) -> Self {
+        let mut props = Box::new(props);
+        let mut params: Box<[XmaParameter; MAX_SCAL_PARAMS]> = Default::default();
+        Self::fill_params(&mut props, &mut params);
+
+        let mut inner = XmaScalerProperties::default();
+        inner.hwscaler_type = XmaScalerType_XMA_POLYPHASE_SCALER_TYPE;
+        strcpy_to_arr_i8(&mut inner.hwvendor_string, "Xilinx").expect("Xilinx should definitely fit");
+        inner.num_outputs = props.nb_outputs;
+        inner.input.format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
+        inner.input.width = props.in_width;
+        inner.input.height = props.in_height;
+        inner.input.stride = Self::align(props.in_width, TRANSCODE_WIDTH_ALIGN);
+        inner.input.framerate.numerator = props.framerate.numerator;
+        inner.input.framerate.denominator = props.framerate.denominator;
+
+        for i in 0..props.nb_outputs as usize {
+            inner.output[i].format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
+            inner.output[i].bits_per_pixel = 8;
+            inner.output[i].width = props.out_width[i];
+            inner.output[i].height = props.out_height[i];
+            inner.output[i].stride = Self::align(props.out_width[i], TRANSCODE_WIDTH_ALIGN);
+            inner.output[i].coeffLoad = 0;
+            inner.output[i].framerate.numerator = props.framerate.numerator;
+            inner.output[i].framerate.denominator = props.framerate.denominator;
+        }
+
+        Self {
+            inner,
+            _params: params,
+            _props: props,
+        }
+    }
 }
 
-pub fn xlnx_create_xma_scal_props(
-    scal_props: &mut Box<XlnxScalerProperties>,
-    scal_params: &mut Box<[XmaParameter; MAX_SCAL_PARAMS]>,
-) -> Result<Box<XmaScalerProperties>, SimpleError> {
-    let xma_scal_props: XmaScalerProperties = Default::default();
-    let mut xma_scal_props = Box::new(xma_scal_props);
+impl AsRef<XmaScalerProperties> for XlnxXmaScalerProperties {
+    fn as_ref(&self) -> &XmaScalerProperties {
+        &self.inner
+    }
+}
 
-    xma_scal_props.hwscaler_type = XmaScalerType_XMA_POLYPHASE_SCALER_TYPE;
-    strcpy_to_arr_i8(&mut xma_scal_props.hwvendor_string, "Xilinx")?;
-    xma_scal_props.num_outputs = scal_props.nb_outputs;
-    xma_scal_props.input.format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
-    xma_scal_props.input.width = scal_props.in_width;
-    xma_scal_props.input.height = scal_props.in_height;
-    xma_scal_props.input.stride = align(scal_props.in_width, TRANSCODE_WIDTH_ALIGN);
-    xma_scal_props.input.framerate.numerator = scal_props.framerate.numerator;
-    xma_scal_props.input.framerate.denominator = scal_props.framerate.denominator;
+impl AsMut<XmaScalerProperties> for XlnxXmaScalerProperties {
+    fn as_mut(&mut self) -> &mut XmaScalerProperties {
+        &mut self.inner
+    }
+}
 
-    for i in 0..scal_props.nb_outputs as usize {
-        xma_scal_props.output[i].format = XmaFormatType_XMA_VCU_NV12_FMT_TYPE;
-        xma_scal_props.output[i].bits_per_pixel = 8;
-        xma_scal_props.output[i].width = scal_props.out_width[i];
-        xma_scal_props.output[i].height = scal_props.out_height[i];
-        xma_scal_props.output[i].stride = align(scal_props.out_width[i], TRANSCODE_WIDTH_ALIGN);
-        xma_scal_props.output[i].coeffLoad = 0;
-        xma_scal_props.output[i].framerate.numerator = scal_props.framerate.numerator;
-        xma_scal_props.output[i].framerate.denominator = scal_props.framerate.denominator;
+impl XlnxXmaScalerProperties {
+    fn fill_params(scal_props: &XlnxScalerProperties, scal_params: &mut Box<[XmaParameter; MAX_SCAL_PARAMS]>) {
+        scal_params[0].name = ENABLE_PIPELINE_PARAM_NAME.as_ptr() as *mut i8;
+        scal_params[0].type_ = XmaDataType_XMA_UINT32;
+        scal_params[0].length = 4;
+        scal_params[0].value = &scal_props.enable_pipeline as *const _ as *mut std::ffi::c_void;
+
+        scal_params[1].name = LOG_LEVEL_PARAM_NAME.as_ptr() as *mut i8;
+        scal_params[1].type_ = XmaDataType_XMA_UINT32;
+        scal_params[1].length = 4;
+        scal_params[1].value = &scal_props.log_level as *const _ as *mut std::ffi::c_void;
+
+        scal_params[2].name = MIX_RATE_PARAM_NAME.as_ptr() as *mut i8;
+        scal_params[2].type_ = XmaDataType_XMA_UINT64;
+        scal_params[2].length = 8;
+        scal_params[2].value = ptr::null_mut();
+
+        scal_params[3].name = LATENCY_LOGGING_PARAM_NAME.as_ptr() as *mut i8;
+        scal_params[3].type_ = XmaDataType_XMA_UINT32;
+        scal_params[3].length = 4;
+        scal_params[3].value = &scal_props.latency_logging as *const _ as *mut std::ffi::c_void;
     }
 
-    xlnx_fill_scal_params(scal_props, scal_params);
-
-    Ok(xma_scal_props)
+    fn align(x: i32, align: i32) -> i32 {
+        ((x) + (align) - 1) & !((align) - 1)
+    }
 }

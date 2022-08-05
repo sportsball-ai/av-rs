@@ -128,7 +128,7 @@ mod scaler_tests {
         initialize();
 
         // create a Xlnx scalar's context
-        let mut scal_props = Box::new(XlnxScalerProperties {
+        let scal_props = XlnxScalerProperties {
             in_width: 1280,
             in_height: 720,
             framerate: XmaFraction { numerator: 1, denominator: 25 },
@@ -138,12 +138,9 @@ mod scaler_tests {
             enable_pipeline: 0,
             log_level: 3,
             latency_logging: 1,
-        });
+        };
 
-        let scal_params: [XmaParameter; MAX_SCAL_PARAMS] = Default::default();
-        let mut scal_params = Box::new(scal_params);
-
-        let mut xma_scal_props = xlnx_create_xma_scal_props(&mut scal_props, &mut scal_params).unwrap();
+        let mut xma_scal_props = XlnxXmaScalerProperties::from(scal_props);
 
         let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
 
@@ -152,7 +149,7 @@ mod scaler_tests {
         let mut xlnx_scal_ctx = XlnxScalerXrmCtx {
             xrm_reserve_id: 0,
             device_id: -1,
-            scal_load: xlnx_calc_scal_load(xrm_ctx, &mut *xma_scal_props).unwrap(),
+            scal_load: xlnx_calc_scal_load(xrm_ctx, xma_scal_props.as_mut()).unwrap(),
             scal_res_in_use: false,
             xrm_ctx,
             num_outputs: 3,
@@ -160,7 +157,7 @@ mod scaler_tests {
         };
 
         // create xlnx scaler
-        let mut scaler = XlnxScaler::new(&mut *xma_scal_props, &mut xlnx_scal_ctx).unwrap();
+        let mut scaler = XlnxScaler::new(xma_scal_props.as_mut(), &mut xlnx_scal_ctx).unwrap();
 
         let mut processed_frame_count = 0;
 
@@ -170,7 +167,7 @@ mod scaler_tests {
                     // successfully scaled frame.
                     processed_frame_count += 1;
                     // clear xvbm buffers for each return frame
-                    for i in 0..xma_scal_props.num_outputs as usize {
+                    for i in 0..xlnx_scal_ctx.num_outputs as usize {
                         unsafe {
                             let handle: XvbmBufferHandle = (*scaler.out_frame_list[i]).data[0].buffer;
                             xvbm_buffer_pool_entry_free(handle);
@@ -204,7 +201,7 @@ mod scaler_tests {
                         // successfully scaled frame.
                         processed_frame_count += 1;
                         // clear xvbm buffers for each return frame
-                        for i in 0..xma_scal_props.num_outputs as usize {
+                        for i in 0..xlnx_scal_ctx.num_outputs as usize {
                             let handle: XvbmBufferHandle = (*scaler.out_frame_list[i]).data[0].buffer;
                             xvbm_buffer_pool_entry_free(handle);
                         }
