@@ -108,7 +108,7 @@ mod encoder_tests {
         initialize();
 
         // create a Xlnx encoder's context
-        let mut enc_props = Box::new(XlnxEncoderProperties {
+        let enc_props = XlnxEncoderProperties {
             cpb_size: 2.0,
             initial_delay: 1.0,
             max_bitrate: 4000,
@@ -148,19 +148,14 @@ mod encoder_tests {
             num_cores: 0,
             latency_logging: 1,
             enable_hw_buf: 0,
-            enc_options: String::new(),
-            enc_options_ptr: std::ptr::null(),
-        });
+        };
 
-        let enc_params: [XmaParameter; MAX_ENC_PARAMS] = Default::default();
-        let mut enc_params = Box::new(enc_params);
-
-        let mut xma_enc_props = xlnx_create_xma_enc_props(&mut enc_props, &mut enc_params).unwrap();
+        let mut xma_enc_props = XlnxXmaEncoderProperties::try_from(enc_props).unwrap();
 
         let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
 
         let cu_list_res: xrmCuListResource = Default::default();
-        let enc_load = xlnx_calc_enc_load(xrm_ctx, &mut *xma_enc_props).unwrap();
+        let enc_load = xlnx_calc_enc_load(xrm_ctx, xma_enc_props.as_mut()).unwrap();
 
         let mut xlnx_enc_ctx = XlnxEncoderXrmCtx {
             xrm_reserve_id: 0,
@@ -172,7 +167,7 @@ mod encoder_tests {
         };
 
         // create xlnx encoder
-        let mut encoder = XlnxEncoder::new(&mut *xma_enc_props, &mut xlnx_enc_ctx).unwrap();
+        let mut encoder = XlnxEncoder::new(xma_enc_props.as_mut(), &mut xlnx_enc_ctx).unwrap();
 
         let mut processed_frame_count = 0;
 
