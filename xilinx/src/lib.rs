@@ -71,7 +71,7 @@ pub fn xlnx_init_device_by_id(device_id: i32) -> Result<(), simple_error::Simple
 
     xclbin_params.push(XmaXclbinParameter {
         xclbin_name: XCLBIN_FILENAME.as_ptr() as *mut i8,
-        device_id
+        device_id,
     });
 
     let ret = unsafe { xma_initialize(xclbin_params.as_mut_ptr(), 1) };
