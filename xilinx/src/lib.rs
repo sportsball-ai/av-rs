@@ -55,7 +55,7 @@ pub fn xlnx_init_all_devices() -> Result<i32, simple_error::SimpleError> {
 
     let ret = unsafe { xma_initialize(xclbin_params.as_mut_ptr(), device_count) };
     if ret as u32 != XMA_SUCCESS {
-        simple_error::bail!("xma initalization failed")
+        simple_error::bail!("xma initalization failed: {}", ret)
     }
 
     Ok(device_count)
@@ -74,7 +74,7 @@ pub fn xlnx_init_device_by_id(device_id: i32) -> Result<(), simple_error::Simple
 
     let ret = unsafe { xma_initialize(&mut xclbin_param, 1) };
     if ret as u32 != XMA_SUCCESS {
-        simple_error::bail!("xma initalization failed")
+        simple_error::bail!("xma initalization failed: {}", ret)
     }
     Ok(())
 }
