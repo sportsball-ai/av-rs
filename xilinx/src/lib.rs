@@ -62,19 +62,17 @@ pub fn xlnx_init_all_devices() -> Result<i32, simple_error::SimpleError> {
 }
 
 pub fn xlnx_init_device_by_id(device_id: i32) -> Result<(), simple_error::SimpleError> {
-    let mut xclbin_params = Vec::new();
-
     let device_count = unsafe { xclProbe() } as i32;
     if device_id < 0 || device_id >= device_count {
         simple_error::bail!("no device found with supplied device Id: {}", device_id);
     }
 
-    xclbin_params.push(XmaXclbinParameter {
+    let mut xclbin_param = XmaXclbinParameter {
         xclbin_name: XCLBIN_FILENAME.as_ptr() as *mut i8,
         device_id,
-    });
+    };
 
-    let ret = unsafe { xma_initialize(xclbin_params.as_mut_ptr(), 1) };
+    let ret = unsafe { xma_initialize(&mut xclbin_param, 1) };
     if ret as u32 != XMA_SUCCESS {
         simple_error::bail!("xma initalization failed")
     }
@@ -101,7 +99,7 @@ pub(crate) fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simpl
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{sys::*, xlnx_init_all_devices, xlnx_init_device_by_id};
+    use crate::{sys::*, xlnx_init_all_devices};
     use std::sync::Once;
 
     use std::{fs::File, io::Read};
