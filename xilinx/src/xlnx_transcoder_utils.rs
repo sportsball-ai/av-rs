@@ -116,7 +116,7 @@ pub fn xlnx_reserve_transcode_resource(
         }
         xlnx_transcode_xrm_ctx.reserve_idx = xrmCuPoolReserve(xlnx_transcode_xrm_ctx.xrm_ctx, &mut transcode_cu_pool_prop);
         if xlnx_transcode_xrm_ctx.reserve_idx == 0 {
-            bail!("failed to reserve encode cu pool")
+            bail!("failed to reserve transcode cu pool")
         }
     }
 
