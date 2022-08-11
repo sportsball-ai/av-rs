@@ -1,17 +1,15 @@
-extern crate bindgen;
-
 use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    println!("cargo:rustc-link-lib=kvazaar");
-
+    let library = pkg_config::probe_library("kvazaar").unwrap();
     let bindings = bindgen::Builder::default();
 
     // the "whilelist_" functions have been renamed in newer bindgen versions, but we use the old
     // names for wider compatibility
     #[allow(deprecated)]
     let bindings = bindings
+        .clang_args(library.include_paths.iter().map(|p| format!("-I{}", p.to_str().expect("path is valid UTF-8"))))
         .header("src/lib.hpp")
         .whitelist_function("kvz_.+")
         .whitelist_type("kvz_.+")
