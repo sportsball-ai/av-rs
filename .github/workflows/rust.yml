@@ -41,4 +41,49 @@ jobs:
       with:
         command: test
         args: --verbose --workspace --exclude xilinx --features srt/async --exclude xcoder-quadra --exclude xcoder-logan
-
+  test_xcoder_logan:
+    name: Test xcoder-logan
+    runs-on:
+      - self-hosted
+      - netint-t408
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          lfs: true
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.60.0
+          override: true
+      - name: Initialize
+        run: |
+          init_rsrc || true
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose -p xcoder-logan -- --test-threads=1
+  test_xcoder_quadra:
+    name: Test xcoder-quadra
+    runs-on:
+      - self-hosted
+      - netint-quadra
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          lfs: true
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.60.0
+          override: true
+      - name: Initialize
+        run: |
+          init_rsrc || true
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose -p xcoder-quadra -- --test-threads=1
