@@ -363,7 +363,7 @@ mod test {
             let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
             if nalu_type == 5 || nalu_type == 1 {
                 ret.push(Ok(XcoderDecoderInputFrame {
-                    data: mem::replace(&mut buffer, vec![]),
+                    data: mem::take(&mut buffer),
                     pts: ret.len() as _,
                     dts: ret.len() as _,
                 }));
