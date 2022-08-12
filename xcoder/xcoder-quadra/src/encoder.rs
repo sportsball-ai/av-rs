@@ -1,3 +1,4 @@
+use super::{fps_to_rational, XcoderHardware};
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
@@ -12,7 +13,7 @@ pub enum XcoderEncoderError {
     Unknown { code: sys::ni_retcode_t, operation: &'static str },
 }
 
-type Result<T> = core::result::Result<T, XcoderEncoderError>;
+type Result<T> = std::result::Result<T, XcoderEncoderError>;
 
 struct EncodedFrame {
     data_io: sys::ni_session_data_io_t,
@@ -102,18 +103,14 @@ pub struct XcoderEncoderConfig {
     pub fps: f64,
     pub bitrate: Option<u32>,
     pub codec: XcoderEncoderCodec,
+
+    /// To use the encoder with hardware frames, provide this (e.g. from `XcoderDecoder::hardware`).
+    pub hardware: Option<XcoderHardware>,
 }
 
 impl<F> XcoderEncoder<F> {
     pub fn new(config: XcoderEncoderConfig) -> Result<Self> {
-        let fps_denominator = if config.fps.fract() == 0.0 {
-            1000
-        } else {
-            // a denominator of 1001 for 29.97 or 59.94 is more
-            // conventional
-            1001
-        };
-        let fps_numerator = (config.fps * fps_denominator as f64).round() as _;
+        let (fps_denominator, fps_numerator) = fps_to_rational(config.fps);
 
         unsafe {
             let mut params: sys::ni_xcoder_params_t = mem::zeroed();
@@ -158,6 +155,9 @@ impl<F> XcoderEncoder<F> {
                 frame_data_strides.as_mut_ptr(),
                 frame_data_heights.as_mut_ptr(),
             );
+            if config.hardware.is_some() {
+                params.hwframes = 1;
+            }
 
             let params = Box::new(params);
 
@@ -170,6 +170,11 @@ impl<F> XcoderEncoder<F> {
             });
 
             (**session).hw_id = -1;
+            if let Some(hw) = &config.hardware {
+                (**session).hw_id = hw.id;
+                (**session).sender_handle = hw.device_handle;
+                (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
+            }
             (**session).p_session_config = &*params as *const sys::ni_xcoder_params_t as _;
             (**session).codec_format = match config.codec {
                 XcoderEncoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
@@ -193,7 +198,7 @@ impl<F> XcoderEncoder<F> {
             });
 
             let frame_data_io = {
-                let mut frame: sys::ni_frame_t = std::mem::zeroed();
+                let mut frame: sys::ni_frame_t = mem::zeroed();
                 let code = sys::ni_encoder_frame_buffer_alloc(
                     &mut frame as _,
                     config.width as _,
@@ -277,12 +282,73 @@ impl<F> XcoderEncoder<F> {
         }
         Ok(())
     }
+
+    /// Attempts to write the decoded frame to the encoder. If Some is returned, the caller must
+    /// try again with the same frame later.
+    unsafe fn try_write_frame_data_io(&mut self, f: F, data_io: *mut sys::ni_session_data_io_t) -> Result<Option<F>> {
+        self.did_start = true;
+        let written = sys::ni_device_session_write(self.session, data_io, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER);
+        if written < 0 {
+            return Err(XcoderEncoderError::Unknown {
+                code: written,
+                operation: "writing",
+            });
+        }
+
+        if written > 0 {
+            self.frame_data_io_has_next_frame = false;
+            self.input_frames.push_back(f);
+            Ok(None)
+        } else {
+            Ok(Some(f))
+        }
+    }
+
+    /// Can be used to encode using a native NETINT data IO pointer (e.g. to encode using a hardware handle).
+    ///
+    /// # Safety
+    ///
+    /// `data_io` must be a valid data_io pointer for a hardware frame on the device the encoder
+    /// was configured for.
+    pub unsafe fn encode_data_io(&mut self, mut input: F, data_io: *mut sys::ni_session_data_io_t) -> Result<Option<VideoEncoderOutput<F>>> {
+        let mut frame = &mut (*data_io).data.frame;
+        frame.start_of_stream = if self.did_start { 0 } else { 1 };
+        frame.extra_data_len = sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _;
+        frame.force_key_frame = 0;
+        frame.ni_pict_type = 0;
+
+        loop {
+            self.try_reading_encoded_frames()?;
+            match self.try_write_frame_data_io(input, data_io)? {
+                Some(frame) => input = frame,
+                None => break,
+            }
+        }
+        Ok(self.output_frames.pop_front())
+    }
+
+    pub fn flush(&mut self) -> Result<Option<VideoEncoderOutput<F>>> {
+        if !self.did_flush {
+            let code = unsafe { sys::ni_device_session_flush(self.session, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER) };
+            if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
+                return Err(XcoderEncoderError::Unknown { code, operation: "flushing" });
+            }
+            self.did_flush = true;
+        }
+        loop {
+            if let Some(f) = self.output_frames.pop_front() {
+                return Ok(Some(f));
+            } else if self.did_finish || self.input_frames.is_empty() {
+                return Ok(None);
+            }
+            self.try_reading_encoded_frames()?;
+        }
+    }
 }
 
 impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
-    /// Attempts to write the decoded frame to the encoder, performing cropping and scaling
-    /// beforehand if necessary. If Some is returned, the caller must try again with the same
-    /// frame later.
+    /// Attempts to write the decoded frame to the encoder. If Some is returned, the caller must
+    /// try again with the same frame later.
     fn try_write_frame(&mut self, f: F, force_key_frame: bool) -> Result<Option<F>> {
         if !self.frame_data_io_has_next_frame {
             let mut frame = unsafe { &mut self.frame_data_io.data.frame };
@@ -327,22 +393,8 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             self.frames_copied += 1;
         }
 
-        self.did_start = true;
-        let written = unsafe { sys::ni_device_session_write(self.session, &mut self.frame_data_io, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER) };
-        if written < 0 {
-            return Err(XcoderEncoderError::Unknown {
-                code: written,
-                operation: "writing",
-            });
-        }
-
-        if written > 0 {
-            self.frame_data_io_has_next_frame = false;
-            self.input_frames.push_back(f);
-            Ok(None)
-        } else {
-            Ok(Some(f))
-        }
+        let data_io = &mut self.frame_data_io as *mut _;
+        unsafe { self.try_write_frame_data_io(f, data_io) }
     }
 }
 
@@ -380,21 +432,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
     }
 
     fn flush(&mut self) -> Result<Option<VideoEncoderOutput<F>>> {
-        if !self.did_flush {
-            let code = unsafe { sys::ni_device_session_flush(self.session, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER) };
-            if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
-                return Err(XcoderEncoderError::Unknown { code, operation: "flushing" });
-            }
-            self.did_flush = true;
-        }
-        loop {
-            if let Some(f) = self.output_frames.pop_front() {
-                return Ok(Some(f));
-            } else if self.did_finish || self.input_frames.is_empty() {
-                return Ok(None);
-            }
-            self.try_reading_encoded_frames()?;
-        }
+        XcoderEncoder::flush(self)
     }
 }
 
@@ -420,6 +458,7 @@ mod test {
             fps: 29.97,
             bitrate: None,
             codec: XcoderEncoderCodec::H264,
+            hardware: None,
         })
         .unwrap();
 
