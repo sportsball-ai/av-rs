@@ -204,10 +204,8 @@ mod test {
         })
         .unwrap();
 
-        while !decoder.is_finished() {
-            if let Some(frame) = decoder.try_read_decoded_frame().unwrap() {
-                scaler.scale(&frame.into()).unwrap();
-            }
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            scaler.scale(&frame.into()).unwrap();
         }
     }
 }

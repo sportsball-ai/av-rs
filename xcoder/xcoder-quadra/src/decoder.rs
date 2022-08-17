@@ -275,6 +275,16 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
         self.eos_received
     }
 
+    /// Reads a decoded frame. Returns None once the decoder is finished.
+    pub fn read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+        while !self.is_finished() {
+            if let Some(frame) = self.try_read_decoded_frame()? {
+                return Ok(Some(frame));
+            }
+        }
+        Ok(None)
+    }
+
     /// Tries to read a decoded frame. If none is returned and `is_finished` returns false, the caller should try again later.
     pub fn try_read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
         if self.is_finished() {
@@ -424,10 +434,8 @@ pub mod test {
         .unwrap();
 
         let mut frame_count = 0;
-        while !decoder.is_finished() {
-            if decoder.try_read_decoded_frame().unwrap().is_some() {
-                frame_count += 1;
-            }
+        while decoder.read_decoded_frame().unwrap().is_some() {
+            frame_count += 1;
         }
         assert_eq!(frame_count, expected_frame_count);
     }
@@ -462,12 +470,10 @@ pub mod test {
         let mut encoded_frames = 0;
         let mut encoded = vec![];
 
-        while !decoder.is_finished() {
-            if let Some(frame) = decoder.try_read_decoded_frame().unwrap() {
-                if let Some(mut output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
-                    encoded.append(&mut output.encoded_frame.data);
-                    encoded_frames += 1;
-                }
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            if let Some(mut output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
+                encoded.append(&mut output.encoded_frame.data);
+                encoded_frames += 1;
             }
         }
         while let Some(mut output) = encoder.flush().unwrap() {

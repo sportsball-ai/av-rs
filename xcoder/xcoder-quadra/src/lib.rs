@@ -141,24 +141,22 @@ mod test {
         let mut encoded_frames = 0;
         let mut encoded = vec![];
 
-        while !decoder.is_finished() {
-            if let Some(frame) = decoder.try_read_decoded_frame().unwrap() {
-                let frame = cropper
-                    .crop(
-                        &frame.into(),
-                        XcoderCrop {
-                            x: 0,
-                            y: 0,
-                            width: 960,
-                            height: 540,
-                        },
-                    )
-                    .unwrap();
-                let frame = scaler.scale(&frame).unwrap();
-                if let Some(mut output) = encoder.encode_hardware_frame((), frame).unwrap() {
-                    encoded.append(&mut output.encoded_frame.data);
-                    encoded_frames += 1;
-                }
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            let frame = cropper
+                .crop(
+                    &frame.into(),
+                    XcoderCrop {
+                        x: 0,
+                        y: 0,
+                        width: 960,
+                        height: 540,
+                    },
+                )
+                .unwrap();
+            let frame = scaler.scale(&frame).unwrap();
+            if let Some(mut output) = encoder.encode_hardware_frame((), frame).unwrap() {
+                encoded.append(&mut output.encoded_frame.data);
+                encoded_frames += 1;
             }
         }
         while let Some(mut output) = encoder.flush().unwrap() {
@@ -229,29 +227,27 @@ mod test {
         });
 
         let mut frame_number = 0;
-        while !decoder.is_finished() {
-            if let Some(frame) = decoder.try_read_decoded_frame().unwrap() {
-                let frame = frame.into();
-                for enc in encodings.iter_mut() {
-                    let frame = enc
-                        .cropper
-                        .crop(
-                            &frame,
-                            XcoderCrop {
-                                x: frame_number * 16,
-                                y: frame_number * 16,
-                                width: (1920.0 + 20.0 * frame_number as f64) as _,
-                                height: (1080.0 + 20.0 * frame_number as f64) as _,
-                            },
-                        )
-                        .unwrap();
-                    let frame = enc.scaler.scale(&frame).unwrap();
-                    if let Some(mut output) = enc.encoder.encode_hardware_frame((), frame).unwrap() {
-                        enc.output.append(&mut output.encoded_frame.data);
-                    }
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            let frame = frame.into();
+            for enc in encodings.iter_mut() {
+                let frame = enc
+                    .cropper
+                    .crop(
+                        &frame,
+                        XcoderCrop {
+                            x: frame_number * 16,
+                            y: frame_number * 16,
+                            width: (1920.0 + 20.0 * frame_number as f64) as _,
+                            height: (1080.0 + 20.0 * frame_number as f64) as _,
+                        },
+                    )
+                    .unwrap();
+                let frame = enc.scaler.scale(&frame).unwrap();
+                if let Some(mut output) = enc.encoder.encode_hardware_frame((), frame).unwrap() {
+                    enc.output.append(&mut output.encoded_frame.data);
                 }
-                frame_number += 1;
             }
+            frame_number += 1;
         }
         for enc in encodings.iter_mut() {
             while let Some(mut output) = enc.encoder.flush().unwrap() {

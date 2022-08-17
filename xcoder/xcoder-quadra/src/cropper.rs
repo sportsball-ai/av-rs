@@ -202,21 +202,19 @@ mod test {
         let mut cropper = XcoderCropper::new(XcoderCropperConfig { hardware: decoder.hardware() }).unwrap();
 
         let mut frame_count = 0;
-        while !decoder.is_finished() {
-            if let Some(frame) = decoder.try_read_decoded_frame().unwrap() {
-                cropper
-                    .crop(
-                        &frame.into(),
-                        XcoderCrop {
-                            x: 0,
-                            y: 0,
-                            width: 1280 - frame_count,
-                            height: 720 - frame_count,
-                        },
-                    )
-                    .unwrap();
-                frame_count += 1;
-            }
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            cropper
+                .crop(
+                    &frame.into(),
+                    XcoderCrop {
+                        x: 0,
+                        y: 0,
+                        width: 1280 - frame_count,
+                        height: 720 - frame_count,
+                    },
+                )
+                .unwrap();
+            frame_count += 1;
         }
     }
 }
