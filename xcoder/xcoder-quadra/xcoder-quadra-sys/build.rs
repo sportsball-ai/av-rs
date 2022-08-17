@@ -68,6 +68,7 @@ fn main() {
             .whitelist_function("ni_.+")
             .whitelist_type("ni_.+")
             .whitelist_var("NI_.+")
+            .whitelist_var("GC620_.+")
             // bindgen 0.60.0 broke layout tests: https://github.com/rust-lang/rust-bindgen/issues/2218
             // 0.60.1 claims to have fixed the issue, but does not.
             .layout_tests(false)

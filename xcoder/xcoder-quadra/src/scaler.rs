@@ -60,7 +60,7 @@ impl XcoderScaler {
     }
 
     pub fn scale(&mut self, f: &XcoderHardwareFrame) -> Result<XcoderHardwareFrame> {
-        const PIXEL_FORMAT: i32 = 0x103; // GC620_I420;
+        const PIXEL_FORMAT: i32 = sys::GC620_I420_;
         unsafe {
             let frame_in = **f;
             let mut frame_out: sys::ni_frame_t = mem::zeroed();
