@@ -1,0 +1,42 @@
+cc_library_static {
+    name: "libxcdec",
+	vendor_available: true,
+    shared_libs: ["liblog", "libcutils","libutils","libxcoder"],
+
+    cflags: [
+        "-fPIC",
+        "-Wall",
+        "-Werror",
+        "-Wno-unused-parameter",
+        "-Wno-unused-variable",
+        "-Wno-macro-redefined",
+		"-Wno-unused-function",
+    ] + [
+        "-D_ANDROID",
+        "-D_FILE_OFFSET_BITS=64",
+    ],
+	
+	include_dirs: [
+        "external/libxcoder/source",
+    ],
+
+
+    srcs: [
+        "decoder/ifwh264d_api.c",
+    ],
+	
+	local_include_dirs: [
+        "decoder",
+        "common",
+    ],
+
+    sanitize: {
+    	cfi: true,
+        diag: {
+            cfi: true,
+        },
+        blacklist: "cfi_blacklist.txt",
+    },
+}
+
+subdirs = ["test"]

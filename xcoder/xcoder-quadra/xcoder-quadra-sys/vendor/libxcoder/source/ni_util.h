@@ -36,6 +36,7 @@
 
 #include "ni_device_api.h"
 #include "ni_log.h"
+#include "ni_defs.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -213,18 +214,6 @@ LIB_API int ni_insert_emulation_prevent_bytes(uint8_t *buf, int size);
  ******************************************************************************/
 LIB_API int ni_remove_emulation_prevent_bytes(uint8_t *buf, int size);
 
-#ifdef MEASURE_LATENCY
-// NI latency measurement queue operations
-ni_lat_meas_q_t *ni_lat_meas_q_create(unsigned capacity);
-
-void *ni_lat_meas_q_add_entry(ni_lat_meas_q_t *dec_frame_time_q,
-                              uint64_t abs_time, int64_t ts_time);
-
-uint64_t ni_lat_meas_q_check_latency(ni_lat_meas_q_t *dec_frame_time_q,
-                                     uint64_t abs_time, int64_t ts_time);
-
-#endif
-
 /*!*****************************************************************************
  *  \brief Get time for logs with microsecond timestamps
  *
@@ -237,7 +226,6 @@ LIB_API int32_t ni_gettimeofday(struct timeval *p_tp, void *p_tzp);
 
 int32_t ni_posix_memalign(void **pp_memptr, size_t alignment, size_t size);
 uint32_t ni_round_up(uint32_t number_to_round, uint32_t multiple);
-uint64_t ni_gettime_ns(void);
 
 #define ni_aligned_free(p_memptr)                                              \
 {                                                                              \
@@ -245,7 +233,7 @@ uint64_t ni_gettime_ns(void);
     p_memptr = NULL;                                                           \
 }
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 uint32_t ni_get_kernel_max_io_size(const char * p_dev);
 #endif
 
@@ -282,6 +270,27 @@ LIB_API void ni_calculate_sha256(const uint8_t aui8Data[],
 ******************************************************************************/
 LIB_API void ni_copy_hw_descriptors(uint8_t *p_dst[NI_MAX_NUM_DATA_POINTERS],
                                     uint8_t *p_src[NI_MAX_NUM_DATA_POINTERS]);
+
+/*!*****************************************************************************
+ *  \brief  Get libxcoder API version
+ *
+ *  \return char pointer to libxcoder API version
+ ******************************************************************************/
+LIB_API char* ni_get_libxcoder_api_ver(void);
+
+/*!*****************************************************************************
+ *  \brief  Get FW API version libxcoder is compatible with
+ *
+ *  \return char pointer to FW API version libxcoder is compatible with
+ ******************************************************************************/
+LIB_API char* ni_get_compat_fw_api_ver(void);
+
+/*!*****************************************************************************
+ *  \brief  Get libxcoder SW release version
+ *
+ *  \return char pointer to libxcoder SW release version
+ ******************************************************************************/
+LIB_API char* ni_get_libxcoder_release_ver(void);
 
 /*!******************************************************************************
  *  \brief  initialize a mutex

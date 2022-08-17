@@ -26,25 +26,26 @@
 *
 *******************************************************************************/
 
-#ifdef _WIN32
-
 #include <stdio.h>
+#include <string.h>
+
 #include "ni_getopt.h"
 
-TCHAR *optarg = NULL;   // global argument pointer
-int optind = 0;         // global argv index
+char    *optarg = NULL; // global argument pointer
+int     optind = 0;     // global argv index
+int     opterr = 1;     // global erroneous switch
+int     optopt = 0;     // global erroneous option character
 
-int getopt(int argc, TCHAR *argv[], const TCHAR *optstring)
+int getopt(int argc, char *argv[], const char *optstring)
 {
-    static TCHAR *nextchar = NULL;
+    static char *nextchar = NULL;
 
-    if (nextchar == NULL || nextchar == _T('\0'))
+    if (nextchar == NULL || *nextchar == '\0')
     {
         if (optind == 0)
             optind++;
 
-        if (optind >= argc || argv[optind][0] != _T('-') ||
-            argv[optind][1] == _T('\0'))
+        if (optind >= argc || argv[optind][0] != '-' || argv[optind][1] == '\0')
         {
             optarg = NULL;
             if (optind < argc)
@@ -52,7 +53,7 @@ int getopt(int argc, TCHAR *argv[], const TCHAR *optstring)
             return EOF;
         }
 
-        if (_tcsncmp(argv[optind], _T("--"), _tcslen(_T("--"))) == 0)
+        if (strncmp(argv[optind], "--", strlen("--")) == 0)
         {
             optind++;
             optarg = NULL;
@@ -62,68 +63,78 @@ int getopt(int argc, TCHAR *argv[], const TCHAR *optstring)
         }
 
         nextchar = argv[optind];
-        nextchar += _tcslen(_T("-"));
+        nextchar += strlen("-");
         optind++;
     }
 
-    TCHAR c = *nextchar++;
-    TCHAR *cp = _tcschr(optstring, c);
-
-    if (cp == NULL || c == _T(':'))
-        return _T('?');
+    char c = *nextchar++;
+    char *cp = strchr(optstring, c);
+    optopt = (int)c;
+    if (cp == NULL || c == ':')
+    {
+        return '?';
+    }
 
     cp++;
-    if (*cp == _T(':'))
+    if (*cp == ':')
     {
-        if (*nextchar != _T('\0'))
+        if (*nextchar != '\0')
         {
             optarg = nextchar;
-            nextchar = NULL;   // for next invocation
-        } else if (optind < argc)
+            nextchar = NULL;  // for next invocation
+        }
+        else if (optind < argc)
         {
             optarg = argv[optind];
             optind++;
-        } else
+        }
+        else
         {
-            return _T('?');
+            return '?';
         }
     }
 
     return c;
 }
 
-int getopt_long(int argc, TCHAR *argv[], const TCHAR *optstring,
-                const struct option *longopts, int *longindex)
-{
-    int i;
-    static TCHAR *nextchar = NULL;
 
-    if (nextchar == NULL || *nextchar == _T('\0'))
+int getopt_long(int argc, char* argv[], const char* optstring,
+                const struct option* longopts, int* longindex)
+{
+    int i, parse_long_mismatch = 0;
+    static char* nextchar = NULL;
+
+    if (nextchar == NULL || *nextchar == '\0')
     {
         if (optind == 0)
         {
             optind++;
         }
 
-        if (optind >= argc || argv[optind][0] != _T('-') ||
-            argv[optind][1] == _T('\0'))
+        if (optind >= argc || argv[optind][0] != '-' || argv[optind][1] == '\0')
         {
             optarg = NULL;
             if (optind < argc)
+            {
                 optarg = argv[optind];
+            }
             return EOF;
         }
 
         nextchar = argv[optind];
-        if (_tcsncmp(argv[optind], _T("--"), 2) == 0)
+        if (strncmp(argv[optind], "--", 2) == 0)
         {
-            nextchar += _tcslen(_T("--"));
+            parse_long_mismatch = 1;
+            nextchar += strlen("--");
             optarg = NULL;
             if (optind < argc)
+            {
                 optarg = argv[optind];
-        } else
+            }
+        }
+        else
         {
-            nextchar += _tcslen(_T("-"));
+            nextchar += strlen("-");
         }
 
         optind++;
@@ -132,79 +143,102 @@ int getopt_long(int argc, TCHAR *argv[], const TCHAR *optstring,
     // Parse long option string
     for (i = 0; longopts != NULL && longopts[i].name != NULL; i++)
     {
-        size_t optlen = _tcslen(_T(longopts[i].name));
-        if (_tcsncmp(nextchar, _T(longopts[i].name), optlen) == 0)
+        size_t optlen = strlen(longopts[i].name);
+        if (strncmp(nextchar, longopts[i].name, optlen) == 0)
         {
-            optarg = nextchar + optlen;
+            nextchar += optlen;
             switch (longopts[i].has_arg)
             {
-                case 0:
-                    if (*optarg != _T('\0') || argv[optind][0] != _T('-'))
-                    {
-                        return _T('?');
-                    } else
-                    {
-                        return longopts[i].flag == NULL ? longopts[i].val : 0;
-                    }
-                case 1:
-                    if (*optarg == _T('='))
-                    {
-                        optarg += _tcslen(_T("="));
-                        return longopts[i].flag == NULL ? longopts[i].val : 0;
-                    } else if (*optarg != _T('\0') ||
-                               argv[optind][0] == _T('-'))
-                    {
-                        return _T('?');
-                    } else
+            case 0:
+                if (*nextchar != '\0' || (optind < argc && argv[optind][0] != '-'))
+                {
+                    optind++;
+                    return '?';
+                }
+                else
+                {
+                    optind++;
+                    return longopts[i].flag == NULL ? longopts[i].val : 0;
+                }
+            case 1:
+                if (*nextchar == '=')
+                {
+                    optarg = nextchar + 1;
+                    optind++;
+                    return longopts[i].flag == NULL ? longopts[i].val : 0;
+                }
+                else if (*nextchar != '\0' || (optind < argc && argv[optind][0] == '-'))
+                {
+                    optind++;
+                    return '?';
+                }
+                else if (optind < argc)
+                {
+                    optarg = argv[optind];
+                    optind++;
+                    return longopts[i].flag == NULL ? longopts[i].val : 0;
+                }
+                else
+                {
+                    return '?';
+                }
+            case 2:
+                if (*nextchar == '=')
+                {
+                    optarg = nextchar + 1;
+                }
+                else if (*nextchar == '\0' || (optind < argc && argv[optind][0] == '-'))
+                {
+                    optarg = NULL;
+                }
+                else
+                {
+                    if (*nextchar == '\0' && optind < argc)
                     {
                         optarg = argv[optind];
-                        return longopts[i].flag == NULL ? longopts[i].val : 0;
                     }
-                case 2:
-                    if (*optarg == _T('\0') || argv[optind][0] == _T('-'))
-                    {
-                        optarg = NULL;
-                    } else
-                    {
-                        if (*optarg == _T('\0'))
-                        {
-                            optarg = argv[optind];
-                        }
-                    }
-                    return longopts[i].flag == NULL ? longopts[i].val : 0;
-                default:
-                    return _T('?');
+                }
+                optind++;
+                return longopts[i].flag == NULL ? longopts[i].val : 0;
+            default:
+                return '?';
             }
         }
     }
 
-    // Parse short option string
-    TCHAR c = *nextchar++;
-    TCHAR *cp = _tcschr(optstring, c);
-
-    if (cp == NULL || c == _T(':'))
+    if (parse_long_mismatch)
     {
-        return _T('?');
+        return '?';
+    }
+
+    // Parse short option string
+    char c = *nextchar++;
+    char* cp = strchr(optstring, c);
+    optopt = (int)c;
+    if (cp == NULL || c == ':')
+    {
+        return '?';
     }
 
     cp++;
     // Whether there is any argument
-    if (*cp == _T(':'))
+    if (*cp == ':')
     {
-        if (*nextchar != _T('\0'))
+        if (*nextchar != '\0')
         {
             optarg = nextchar;
-            nextchar = NULL;   // for next invocation
-        } else if (optind < argc)
+            nextchar = NULL;  // for next invocation
+        }
+        else if (optind < argc)
         {
             optarg = argv[optind];
             optind++;
-        } else
+        }
+        else
         {
-            return _T('?');
+            return '?';
         }
     }
 
     return c;
 }
-#endif

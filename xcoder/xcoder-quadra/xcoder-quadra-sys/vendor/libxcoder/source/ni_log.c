@@ -28,7 +28,6 @@
 
 #include <string.h>
 #include <stdio.h>
-#include <stdarg.h>
 #include <stdint.h>
 #include <time.h>
 #include <inttypes.h>
@@ -110,7 +109,12 @@ void ni_log_default_callback(int level, const char* fmt, va_list vl)
 #endif
 
 #ifdef _ANDROID
-        ALOGV(fmt, vl);
+        if (level == NI_LOG_INFO)
+            ALOGI(fmt, vl);
+        else if (level >= NI_LOG_ERROR)
+            ALOGE(fmt, vl);
+        else
+            ALOGV(fmt, vl);
 #else
         vfprintf(stderr, fmt, vl);
 #endif

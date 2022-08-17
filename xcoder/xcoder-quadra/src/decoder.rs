@@ -1,4 +1,4 @@
-use super::{fps_to_rational, XcoderHardware};
+use super::{fps_to_rational, XcoderHardware, XcoderHardwareFrame};
 use scopeguard::{guard, ScopeGuard};
 use snafu::{Error, Snafu};
 use std::{marker::PhantomData, mem, ops::Deref};
@@ -69,7 +69,7 @@ impl XcoderDecoderInputFrame {
 }
 
 pub struct XcoderDecodedFrame {
-    data_io: sys::ni_session_data_io_t,
+    data_io: Option<sys::ni_session_data_io_t>,
 }
 
 impl XcoderDecodedFrame {
@@ -96,14 +96,20 @@ impl XcoderDecodedFrame {
             });
         }
         Ok(Self {
-            data_io: sys::ni_session_data_io_t {
+            data_io: Some(sys::ni_session_data_io_t {
                 data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
-            },
+            }),
         })
     }
 
     pub fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t {
-        &mut self.data_io as _
+        self.data_io.as_mut().expect("data_io should be some until we're dropped or consumed") as _
+    }
+}
+
+impl From<XcoderDecodedFrame> for XcoderHardwareFrame {
+    fn from(mut frame: XcoderDecodedFrame) -> Self {
+        unsafe { Self::new(frame.data_io.take().expect("data_io should be some until we're dropped or consumed")) }
     }
 }
 
@@ -114,15 +120,27 @@ impl Deref for XcoderDecodedFrame {
     type Target = sys::ni_frame_t;
 
     fn deref(&self) -> &Self::Target {
-        unsafe { &self.data_io.data.frame }
+        unsafe {
+            &self
+                .data_io
+                .as_ref()
+                .expect("data_io should be some until we're dropped or consumed")
+                .data
+                .frame
+        }
     }
 }
 
 impl Drop for XcoderDecodedFrame {
     fn drop(&mut self) {
-        unsafe {
-            sys::ni_hwframe_p2p_buffer_recycle(&mut self.data_io.data.frame as _);
-            sys::ni_frame_buffer_free(&mut self.data_io.data.frame as _);
+        if let Some(mut data_io) = self.data_io.take() {
+            unsafe {
+                let index = (*(data_io.data.frame.p_data[3] as *const sys::niFrameSurface1_t)).ui16FrameIdx;
+                if index > 0 {
+                    sys::ni_hwframe_p2p_buffer_recycle(&mut data_io.data.frame as _);
+                }
+                sys::ni_frame_buffer_free(&mut data_io.data.frame as _);
+            }
         }
     }
 }
@@ -182,7 +200,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     where
         II: IntoIterator<IntoIter = I>,
     {
-        let (fps_denominator, fps_numerator) = fps_to_rational(config.fps);
+        let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
 
         unsafe {
             let mut params: sys::ni_xcoder_params_t = mem::zeroed();
@@ -257,8 +275,18 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
         self.eos_received
     }
 
+    /// Reads a decoded frame. Returns None once the decoder is finished.
+    pub fn read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+        while !self.is_finished() {
+            if let Some(frame) = self.try_read_decoded_frame()? {
+                return Ok(Some(frame));
+            }
+        }
+        Ok(None)
+    }
+
     /// Tries to read a decoded frame. If none is returned and `is_finished` returns false, the caller should try again later.
-    pub fn try_read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+    fn try_read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
         if self.is_finished() {
             return Ok(None);
         }
@@ -343,12 +371,12 @@ impl<I, E> Drop for XcoderDecoder<I, E> {
 }
 
 #[cfg(test)]
-mod test {
+pub mod test {
     use super::{super::*, *};
     use std::io::{self, Read};
 
-    /// Reads frames from a raw .h264 file.
-    fn read_frames(path: &str) -> Vec<Result<XcoderDecoderInputFrame, io::Error>> {
+    /// Reads frames from a raw .h264 or .h265 file.
+    pub fn read_frames(path: &str) -> Vec<Result<XcoderDecoderInputFrame, io::Error>> {
         let mut f = std::fs::File::open(path).unwrap();
         let mut buf = Vec::new();
         f.read_to_end(&mut buf).unwrap();
@@ -357,17 +385,34 @@ mod test {
 
         let mut ret = vec![];
         let mut buffer = vec![];
+        let mut h264_counter = h264::AccessUnitCounter::new();
+        let mut h265_counter = h265::AccessUnitCounter::new();
         for nalu in nalus {
-            buffer.extend_from_slice(&[0, 0, 0, 1]);
-            buffer.extend_from_slice(nalu);
-            let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
-            if nalu_type == 5 || nalu_type == 1 {
+            let is_new_frame = if path.contains(".h264") {
+                let before = h264_counter.count();
+                h264_counter.count_nalu(nalu).unwrap();
+                h264_counter.count() != before
+            } else {
+                let before = h265_counter.count();
+                h265_counter.count_nalu(nalu).unwrap();
+                h265_counter.count() != before
+            };
+            if is_new_frame && !buffer.is_empty() {
                 ret.push(Ok(XcoderDecoderInputFrame {
                     data: mem::take(&mut buffer),
                     pts: ret.len() as _,
                     dts: ret.len() as _,
                 }));
             }
+            buffer.extend_from_slice(&[0, 0, 0, 1]);
+            buffer.extend_from_slice(nalu);
+        }
+        if !buffer.is_empty() {
+            ret.push(Ok(XcoderDecoderInputFrame {
+                data: mem::take(&mut buffer),
+                pts: ret.len() as _,
+                dts: ret.len() as _,
+            }));
         }
         ret
     }
@@ -389,10 +434,8 @@ mod test {
         .unwrap();
 
         let mut frame_count = 0;
-        while !decoder.is_finished() {
-            if decoder.try_read_decoded_frame().unwrap().is_some() {
-                frame_count += 1;
-            }
+        while decoder.read_decoded_frame().unwrap().is_some() {
+            frame_count += 1;
         }
         assert_eq!(frame_count, expected_frame_count);
     }
@@ -427,12 +470,10 @@ mod test {
         let mut encoded_frames = 0;
         let mut encoded = vec![];
 
-        while !decoder.is_finished() {
-            if let Some(mut frame) = decoder.try_read_decoded_frame().unwrap() {
-                if let Some(mut output) = unsafe { encoder.encode_data_io((), frame.as_data_io_mut_ptr()).unwrap() } {
-                    encoded.append(&mut output.encoded_frame.data);
-                    encoded_frames += 1;
-                }
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            if let Some(mut output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
+                encoded.append(&mut output.encoded_frame.data);
+                encoded_frames += 1;
             }
         }
         while let Some(mut output) = encoder.flush().unwrap() {

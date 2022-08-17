@@ -36,11 +36,13 @@
 #include <ntddstor.h>
 #include <winioctl.h>
 #include <Ntddscsi.h>
-#elif __linux__
-  #include <linux/types.h>
-  #include <sys/ioctl.h>
-  #include <sys/stat.h>
-  #include <unistd.h>
+#elif __linux__ || __APPLE__
+#if __linux__
+#include <linux/types.h>
+#endif
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 #include "ni_nvme.h"
@@ -325,6 +327,7 @@ int32_t ni_nvme_send_admin_cmd(ni_nvme_admin_opcode_t opcode,
         rc = ni_nvme_get_identity(handle, NI_INVALID_EVENT_HANDLE, p_data);
         *p_result = NI_RETCODE_SUCCESS;
     }
+#elif __APPLE__
 #else
     ni_nvme_passthrough_cmd_t nvme_cmd = {0};
 
@@ -362,6 +365,7 @@ int32_t ni_nvme_send_io_cmd(ni_nvme_opcode_t opcode, ni_device_handle_t handle,
 {
     int32_t rc = -1;
 #ifdef _WIN32
+#elif __APPLE__
 #else
     ni_nvme_passthrough_cmd_t nvme_cmd;
     //int32_t *p_addr = NULL;
@@ -504,7 +508,7 @@ void ni_parse_lba(uint64_t lba)
 }
 
 /*!******************************************************************************
- *  \brief  Compose a io read command
+ *  \brief  Compose an io read command
  *
  *  \param
  *
@@ -551,7 +555,33 @@ int32_t ni_nvme_send_read_cmd(ni_device_handle_t handle,
 #else
     if (handle != 0 && p_data != NULL)
     {
-        rc = pread(handle, p_data, data_len, offset);
+        if (((uintptr_t)p_data) % NI_MEM_PAGE_ALIGNMENT)
+        {
+            ni_log(NI_LOG_DEBUG,
+                   "%s: Buffer not %d aligned = %p! Reading to aligned memory "
+                   "and copying.\n",
+                   __func__, NI_MEM_PAGE_ALIGNMENT, p_data);
+            void *p_buf = NULL;
+            if (ni_posix_memalign(&p_buf, sysconf(_SC_PAGESIZE), data_len))
+            {
+                ni_log(NI_LOG_ERROR,
+                       "ERROR %d: %s() alloc data buffer failed\n", NI_ERRNO,
+                       __func__);
+                rc = NI_RETCODE_ERROR_MEM_ALOC;
+            }
+            else
+            {
+                rc = pread(handle, p_buf, data_len, offset);
+                if (rc >= 0)//copy only if anything has been read
+                {
+                    memcpy(p_data, p_buf, data_len);
+                }
+                ni_aligned_free(p_buf);
+            }
+        } else
+        {
+            rc = pread(handle, p_data, data_len, offset);
+        }
         ni_log(NI_LOG_TRACE,
                "%s: handle=%" PRIx64
                ", offset 0x%lx, lba=0x%x, len=%d, rc=%d\n",
@@ -629,7 +659,31 @@ int32_t ni_nvme_send_write_cmd(ni_device_handle_t handle,
 #else
     if (handle != 0 && p_data != NULL)
     {
-        rc = pwrite(handle, p_data, data_len, offset);
+        if (((uintptr_t)p_data) % NI_MEM_PAGE_ALIGNMENT)
+        {
+            ni_log(NI_LOG_DEBUG,
+                   "%s: Buffer not %d aligned = %p! Copying to aligned memory "
+                   "and writing.\n",
+                   __func__, NI_MEM_PAGE_ALIGNMENT, p_data);
+            void *p_buf = NULL;
+            if (ni_posix_memalign(&p_buf, sysconf(_SC_PAGESIZE), data_len))
+            {
+                ni_log(NI_LOG_ERROR,
+                       "ERROR %d: %s() alloc data buffer failed\n", NI_ERRNO,
+                       __func__);
+                rc = NI_RETCODE_ERROR_MEM_ALOC;
+            }
+            else
+            {
+                memcpy(p_buf, p_data, data_len);
+                rc = pwrite(handle, p_buf, data_len, offset);
+                ni_aligned_free(p_buf);
+            }
+        }
+        else
+        {
+            rc = pwrite(handle, p_data, data_len, offset);
+        }
         ni_log(NI_LOG_TRACE,
                "%s: handle=%" PRIx64 ", lba=0x%x, len=%d, rc=%d\n", __func__,
                (int64_t)handle, (lba << 3), data_len, rc);

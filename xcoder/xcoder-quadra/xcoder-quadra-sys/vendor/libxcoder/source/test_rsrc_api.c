@@ -210,7 +210,7 @@ void listModuleId(void)
         {
             ni_device_info_t *p_device_info =
                 ni_rsrc_get_device_info(k, ptr->xcoders[k][i]);
-            printf("[%u]. %d (load: %d inst: %d   %s.%d)\n", i,
+            printf("[%u]. %d (load: %d inst: %u   %s.%d)\n", i,
                    ptr->xcoders[k][i], p_device_info->load,
                    p_device_info->active_num_inst, p_device_info->dev_name,
                    p_device_info->hw_id);
@@ -498,10 +498,12 @@ int main(void)
       change_log_level();
       break;
     case 'V':
-        printf("Ver:  %s\n"
-               "Date: %s\n"
-               "ID:   %s\n",
-               NI_XCODER_REVISION, NI_SW_RELEASE_TIME, NI_SW_RELEASE_ID);
+        printf("Release ver: %s\n"
+               "API ver:     %s\n"
+               "Date:        %s\n"
+               "ID:          %s\n",
+               NI_XCODER_REVISION, LIBXCODER_API_VERSION, NI_SW_RELEASE_TIME,
+               NI_SW_RELEASE_ID);
         break;
     case 'l':
       listOneTypeCoders();

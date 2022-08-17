@@ -1,9 +1,43 @@
+/*******************************************************************************
+ *
+ * Copyright (C) 2022 NETINT Technologies
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ *
+ ******************************************************************************/
+
+/*!*****************************************************************************
+*  \file   ni_p2p_ioctl.h
+*
+*  \brief  Definitions related to NETINT P2P kernel driver interface
+*
+*******************************************************************************/
+
 #ifndef _NETINT_IOCTL_H
 #define _NETINT_IOCTL_H
 
 #define NI_DMABUF_READ_FENCE (1 << 0)
 #define NI_DMABUF_SYNC_FILE_OUT_FENCE (1 << 1)
 #define NI_DMABUF_SYNC_FILE_IN_FENCE (1 << 2)
+
+enum
+{
+    NI_DMABUF_READ_FROM_DEVICE = 0,
+    NI_DMABUF_WRITE_TO_DEVICE = 1,
+};
 
 struct netint_iocmd_export_dmabuf
 {
@@ -22,6 +56,7 @@ struct netint_iocmd_issue_request
 {
     int fd;
     unsigned int len;
+    int dir;
     unsigned char *data;
 };
 
