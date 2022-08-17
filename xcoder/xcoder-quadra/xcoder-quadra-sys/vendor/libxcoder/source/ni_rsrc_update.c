@@ -36,7 +36,7 @@
 #include <string.h>
 #include "ni_log.h"
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #include <unistd.h>
 #include <sys/types.h>
 #endif 
@@ -50,6 +50,8 @@
 #define DEV_NAME_PREFIX "\\\\.\\Scsi"
 #elif __linux__
 #define DEV_NAME_PREFIX "/dev/nvme"
+#elif __APPLE__
+#define DEV_NAME_PREFIX "/dev/disk"
 #endif
 
 /*!******************************************************************************
@@ -109,7 +111,7 @@ int main(int argc, char *argv[])
   char char_dev_name[64];
   int should_match_rev = 1;
   int add_dev = 1; // default is to add(not delete) a resource
-  ni_log_level_t log_level;
+  ni_log_level_t log_level = NI_LOG_INFO;
 
   if (argc == 1) {
     display_help();
@@ -148,11 +150,12 @@ int main(int argc, char *argv[])
                 }
                 break;
             case 'v':
-                printf("Ver:  %s\n"
-                       "Date: %s\n"
-                       "ID:   %s\n",
-                       NI_XCODER_REVISION, NI_SW_RELEASE_TIME,
-                       NI_SW_RELEASE_ID);
+                printf("Release ver: %s\n"
+                       "API ver:     %s\n"
+                       "Date:        %s\n"
+                       "ID:          %s\n",
+                       NI_XCODER_REVISION, LIBXCODER_API_VERSION,
+                       NI_SW_RELEASE_TIME, NI_SW_RELEASE_ID);
                 return 0;
             case 'h':
             default:

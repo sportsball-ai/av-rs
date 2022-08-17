@@ -43,6 +43,20 @@
 extern "C" {
 #endif
 
+#ifdef _WIN32
+  #ifdef XCODER_DLL
+    #ifdef LIB_EXPORTS
+      #define LIB_API_BITSTREAM __declspec(dllexport)
+    #else
+      #define LIB_API_BITSTREAM __declspec(dllimport)
+    #endif
+  #else
+    #define LIB_API_BITSTREAM
+  #endif
+#elif __linux__ || __APPLE__
+  #define LIB_API_BITSTREAM
+#endif
+
 // the following is for bitstream put operations
 #define NI_DATA_CHUNK_SIZE 4096
 
@@ -112,26 +126,26 @@ typedef struct _ni_bitstream_reader_t
 } ni_bitstream_reader_t;
 
 // bitstream reader init
-void ni_bitstream_reader_init(ni_bitstream_reader_t *br, const uint8_t *data,
+LIB_API_BITSTREAM void ni_bitstream_reader_init(ni_bitstream_reader_t *br, const uint8_t *data,
                               int bit_size);
 
 // return number of bits already parsed
-int ni_bs_reader_bits_count(ni_bitstream_reader_t *br);
+LIB_API_BITSTREAM int ni_bs_reader_bits_count(ni_bitstream_reader_t *br);
 
 // return number of bits left to parse
-int ni_bs_reader_get_bits_left(ni_bitstream_reader_t *br);
+LIB_API_BITSTREAM int ni_bs_reader_get_bits_left(ni_bitstream_reader_t *br);
 
 // skip a number of bits ahead in the bitstream reader
-void ni_bs_reader_skip_bits(ni_bitstream_reader_t *br, int n);
+LIB_API_BITSTREAM void ni_bs_reader_skip_bits(ni_bitstream_reader_t *br, int n);
 
 // read bits (up to 32) from the bitstream reader, after reader init
-uint32_t ni_bs_reader_get_bits(ni_bitstream_reader_t *br, int n);
+LIB_API_BITSTREAM uint32_t ni_bs_reader_get_bits(ni_bitstream_reader_t *br, int n);
 
 // read an unsigned Exp-Golomb code ue(v)
-uint32_t ni_bs_reader_get_ue(ni_bitstream_reader_t *br);
+LIB_API_BITSTREAM uint32_t ni_bs_reader_get_ue(ni_bitstream_reader_t *br);
 
 // read a signed Exp-Golomb code se(v)
-int32_t ni_bs_reader_get_se(ni_bitstream_reader_t *br);
+LIB_API_BITSTREAM int32_t ni_bs_reader_get_se(ni_bitstream_reader_t *br);
 
 #ifdef __cplusplus
 }

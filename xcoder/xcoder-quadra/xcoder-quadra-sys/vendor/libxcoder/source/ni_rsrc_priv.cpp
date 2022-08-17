@@ -33,7 +33,7 @@
 #include <errno.h>
 #include <ctype.h>
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -51,7 +51,7 @@
 #include "ni_log.h"
 #include "ni_util.h"
 
-uint32_t stop_process = 0;
+uint32_t g_xcoder_stop_process = 0;
 
 /*!******************************************************************************
  *  \brief
@@ -224,7 +224,7 @@ void ni_rsrc_get_lock_name(ni_device_type_t device_type, int32_t guid, char* p_n
     char type = device_type_chr[GET_XCODER_DEVICE_TYPE(device_type)];
     if (NULL != p_name)
     {
-        snprintf(p_name, max_name_len, "%s/lck_%c%d", LOCK_DIR, type, guid);
+        snprintf(p_name, max_name_len, "%s/NI_lck_%c%d", LOCK_DIR, type, guid);
     }
 }
 
@@ -241,7 +241,7 @@ void ni_rsrc_get_shm_name(ni_device_type_t device_type, int32_t guid, char* p_na
     /*! assume there is enough space allocated in name */
     if (NULL != p_name)
     {
-        snprintf(p_name, max_name_len, "shm_%c%d", type, guid);
+        snprintf(p_name, max_name_len, "NI_shm_%c%d", type, guid);
     }
 }
 
@@ -388,12 +388,12 @@ END:
  *******************************************************************************/
 void ni_rsrc_update_record(ni_device_context_t* p_device_context, ni_session_context_t* p_session_context)
 {
-  int i = 0;
+    uint32_t i = 0;
 
-  if( (!p_device_context) || (!p_session_context) )
-  {
-    return;
-  }
+    if ((!p_device_context) || (!p_session_context))
+    {
+        return;
+    }
 
   p_device_context->p_device_info->load = p_session_context->load_query.current_load;
   p_device_context->p_device_info->active_num_inst = p_session_context->load_query.total_contexts;
@@ -420,7 +420,7 @@ void ni_rsrc_update_record(ni_device_context_t* p_device_context, ni_session_con
       p_session_context->load_query.context_status[i].fps;
   }
 }
-#elif __linux__
+#elif __linux__ || __APPLE__
 
 /*!******************************************************************************
  *  \brief
@@ -567,12 +567,12 @@ END:
  *******************************************************************************/
 void ni_rsrc_update_record(ni_device_context_t *p_device_context, ni_session_context_t *p_session_context)
 {
-  int j;
+    uint32_t j;
 
-  if( (!p_device_context) || (!p_session_context) )
-  {
-    return;
-  }
+    if ((!p_device_context) || (!p_session_context))
+    {
+        return;
+    }
 
   p_device_context->p_device_info->load = p_session_context->load_query.current_load;
   p_device_context->p_device_info->active_num_inst = p_session_context->load_query.total_contexts;

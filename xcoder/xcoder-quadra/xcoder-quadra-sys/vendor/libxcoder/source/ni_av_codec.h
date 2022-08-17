@@ -450,29 +450,6 @@ LIB_API int ni_should_send_sei_with_frame(ni_session_context_t *p_enc_ctx,
                                           ni_xcoder_params_t *p_param);
 
 /*!*****************************************************************************
- *  \brief  Set SPS VUI part of encoded stream header
- *
- *  \param[in/out]  p_param encoder parameters, its VUI data member will be
- *                  updated.
- *  \param[in]  color_primaries color primaries
- *  \param[in]  color_trc color transfer characteristic
- *  \param[in]  color_space YUV colorspace type
- *  \param[in]  video_full_range_flag
- *  \param[in]  sar_num/sar_den sample aspect ration in numerator/denominator
- *  \param[in]  codec_format H.264 or H.265
- *  \param[out]  hrd_params struct for HRD parameters, may be updated.
- *
- *  \return NONE
- ******************************************************************************/
-LIB_API void ni_set_vui(ni_xcoder_params_t *p_param,
-                        ni_color_primaries_t color_primaries,
-                        ni_color_transfer_characteristic_t color_trc,
-                        ni_color_space_t color_space, int video_full_range_flag,
-                        int sar_num, int sar_den,
-                        ni_codec_format_t codec_format,
-                        ni_hrd_params_t *hrd_params);
-
-/*!*****************************************************************************
  *  \brief  Retrieve auxiliary data (close caption, various SEI) associated with
  *          this frame that is returned by decoder, convert them to appropriate
  *          format and save them in the frame's auxiliary data storage for

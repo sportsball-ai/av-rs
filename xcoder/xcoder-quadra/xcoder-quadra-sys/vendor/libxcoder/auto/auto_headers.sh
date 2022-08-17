@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # output variables:
 # XCODER_AUTO_HEADERS_H: the auto generated header file.

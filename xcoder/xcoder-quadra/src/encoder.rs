@@ -1,4 +1,4 @@
-use super::{fps_to_rational, XcoderHardware};
+use super::{fps_to_rational, XcoderHardware, XcoderHardwareFrame};
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
@@ -88,6 +88,9 @@ pub struct XcoderEncoder<F> {
     frame_data_heights: [i32; sys::NI_MAX_NUM_DATA_POINTERS as usize],
     input_frames: VecDeque<F>,
     output_frames: VecDeque<VideoEncoderOutput<F>>,
+
+    // We have to keep hardware frames alive until the encoder says we can recycle them.
+    hardware_frames: Vec<Option<XcoderHardwareFrame>>,
 }
 
 #[derive(Clone, Debug)]
@@ -110,7 +113,7 @@ pub struct XcoderEncoderConfig {
 
 impl<F> XcoderEncoder<F> {
     pub fn new(config: XcoderEncoderConfig) -> Result<Self> {
-        let (fps_denominator, fps_numerator) = fps_to_rational(config.fps);
+        let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
 
         unsafe {
             let mut params: sys::ni_xcoder_params_t = mem::zeroed();
@@ -238,6 +241,12 @@ impl<F> XcoderEncoder<F> {
                 frames_copied: 0,
                 input_frames: VecDeque::new(),
                 output_frames: VecDeque::new(),
+                hardware_frames: {
+                    let size = 1 + sys::NI_MAX_DR_HWDESC_FRAME_INDEX.max(sys::NI_MAX_SR_HWDESC_FRAME_INDEX) as usize;
+                    let mut frames = Vec::with_capacity(size);
+                    frames.resize_with(size, || None);
+                    frames
+                },
             })
         }
     }
@@ -256,6 +265,9 @@ impl<F> XcoderEncoder<F> {
                 let packet = self.encoded_frame.packet();
                 self.did_finish = packet.end_of_stream != 0;
                 if code > 0 {
+                    if packet.recycle_index > 0 && (packet.recycle_index as usize) < self.hardware_frames.len() {
+                        self.hardware_frames[packet.recycle_index as usize] = None;
+                    }
                     if packet.pts == 0 && packet.avg_frame_qp == 0 {
                         self.encoded_frame.parameter_sets = Some(self.encoded_frame.as_slice().to_vec());
                     } else {
@@ -304,14 +316,8 @@ impl<F> XcoderEncoder<F> {
         }
     }
 
-    /// Can be used to encode using a native NETINT data IO pointer (e.g. to encode using a hardware handle).
-    ///
-    /// # Safety
-    ///
-    /// `data_io` must be a valid data_io pointer for a hardware frame on the device the encoder
-    /// was configured for.
-    pub unsafe fn encode_data_io(&mut self, mut input: F, data_io: *mut sys::ni_session_data_io_t) -> Result<Option<VideoEncoderOutput<F>>> {
-        let mut frame = &mut (*data_io).data.frame;
+    pub fn encode_hardware_frame(&mut self, mut input: F, mut hw_frame: XcoderHardwareFrame) -> Result<Option<VideoEncoderOutput<F>>> {
+        let mut frame = *hw_frame;
         frame.start_of_stream = if self.did_start { 0 } else { 1 };
         frame.extra_data_len = sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _;
         frame.force_key_frame = 0;
@@ -319,9 +325,13 @@ impl<F> XcoderEncoder<F> {
 
         loop {
             self.try_reading_encoded_frames()?;
-            match self.try_write_frame_data_io(input, data_io)? {
+            match unsafe { self.try_write_frame_data_io(input, hw_frame.as_data_io_mut_ptr())? } {
                 Some(frame) => input = frame,
-                None => break,
+                None => {
+                    let idx = hw_frame.surface().ui16FrameIdx as usize;
+                    self.hardware_frames[idx] = Some(hw_frame);
+                    break;
+                }
             }
         }
         Ok(self.output_frames.pop_front())

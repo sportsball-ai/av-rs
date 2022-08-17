@@ -33,7 +33,7 @@
 #include <errno.h>
 #include <ctype.h>
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #include <unistd.h>
 #include <fcntl.h> /* For O_* constants */
 #include <dirent.h>
@@ -48,9 +48,6 @@
 #include "ni_rsrc_priv.h"
 #include "ni_util.h"
 
-static uint32_t g_xcoder_guid[NI_DEVICE_TYPE_XCODER_MAX] = {0};
-static char g_xcoder_dev_names[NI_MAX_DEVICE_CNT][NI_MAX_DEVICE_NAME_LEN] = {0};
-static int g_xcoder_dev_count = 0;
 
 // Decoder/Encoder reference (resolution_width, resolution_height, framerate) table
 ni_rsrc_device_video_ref_cap_t g_device_reference_table[2][2] = 
@@ -84,6 +81,65 @@ static bool is_str_in_str_array(const char key[],
     return false;
 }
 
+void print_device(ni_device_t *p_device)
+{
+    if (!p_device)
+    {
+        ni_log(NI_LOG_INFO, "WARNING: NULL parameter passed in!\n");
+        return;
+    }
+
+    ni_device_info_t *p_dev_info = NULL;
+    for (size_t xcoder_index_1 = 0;
+         xcoder_index_1 < p_device->xcoder_cnt[NI_DEVICE_TYPE_DECODER];
+         xcoder_index_1++)
+    {
+        p_dev_info = &p_device->xcoders[NI_DEVICE_TYPE_DECODER][xcoder_index_1];
+        ni_log(NI_LOG_INFO, "Device #%zu:\n", xcoder_index_1);
+        ni_log(NI_LOG_INFO, "  Serial number: %.*s\n",
+               (int)sizeof(p_dev_info->serial_number),
+               p_dev_info->serial_number);
+        ni_log(NI_LOG_INFO, "  Model number: %.*s\n",
+               (int)sizeof(p_dev_info->model_number),
+               p_dev_info->model_number);
+        ni_log(NI_LOG_INFO, "  F/W rev: %.*s\n",
+               (int)sizeof(p_dev_info->fw_rev), p_dev_info->fw_rev);
+        ni_log(NI_LOG_INFO, "  F/W & S/W compatibility: %s\n",
+               p_dev_info->fw_ver_compat_warning ?
+               "no, possible missing features" : "yes");
+        ni_log(NI_LOG_INFO, "  F/W branch: %s\n",
+               p_dev_info->fw_branch_name);
+        ni_log(NI_LOG_INFO, "  F/W commit time: %s\n",
+               p_dev_info->fw_commit_time);
+        ni_log(NI_LOG_INFO, "  F/W commit hash: %s\n",
+               p_dev_info->fw_commit_hash);
+        ni_log(NI_LOG_INFO, "  F/W build time: %s\n",
+               p_dev_info->fw_build_time);
+        ni_log(NI_LOG_INFO, "  F/W build id: %s\n",p_dev_info->fw_build_id);
+        ni_log(NI_LOG_INFO, "  DeviceID: %s\n", p_dev_info->dev_name);
+        ni_log(NI_LOG_INFO, "  BlockDeviceID: %s\n", p_dev_info->blk_name);
+        ni_log(NI_LOG_INFO, "  PixelFormats: yuv420p, yuv420p10le, nv12, p010le"
+               ", ni_quadra\n");
+
+        for (size_t dev_type = NI_DEVICE_TYPE_DECODER;
+             dev_type != NI_DEVICE_TYPE_XCODER_MAX; dev_type++)
+        {
+            for (size_t xcoder_index_2 = 0;
+                 xcoder_index_2 < p_device->xcoder_cnt[NI_DEVICE_TYPE_DECODER];
+                 xcoder_index_2++)
+            {
+                if (strcmp(p_dev_info->dev_name,
+                           p_device->xcoders[dev_type][xcoder_index_2].dev_name)
+	            == 0 && p_dev_info->module_id >= 0)
+                {
+                    ni_rsrc_print_device_info(&(p_device->xcoders[dev_type]
+                                                [xcoder_index_2]));
+                }
+            }
+        }
+    }
+}
+
 /*!*****************************************************************************
  *  \brief   Scan and refresh all resources on the host, taking into account
  *           hot-plugged and pulled out cards.
@@ -99,66 +155,58 @@ static bool is_str_in_str_array(const char key[],
  ******************************************************************************/
 ni_retcode_t ni_rsrc_refresh(int should_match_rev)
 {
+    char xcoder_dev_names[NI_MAX_DEVICE_CNT][NI_MAX_DEVICE_NAME_LEN] = {0};
+    int xcoder_dev_count = 0;
     char curr_dev_names[NI_MAX_DEVICE_CNT][NI_MAX_DEVICE_NAME_LEN] = {0};
     int curr_dev_count = 0;
     int i = 0;
-    ni_device_t *p_saved_coders;
+    ni_device_t saved_coders = {0};
 
-    p_saved_coders = (ni_device_t *)malloc(sizeof(ni_device_t));
-    if (p_saved_coders == NULL)
+    // retrieve saved info from resource pool at start up
+    if (NI_RETCODE_SUCCESS ==
+        ni_rsrc_list_devices(
+            NI_DEVICE_TYPE_DECODER,
+            saved_coders.xcoders[NI_DEVICE_TYPE_DECODER],
+            &(saved_coders.xcoder_cnt[NI_DEVICE_TYPE_DECODER])))
     {
-        printf("Memory allocation failed, fatal error, exiting ...\n");
-        return NI_RETCODE_FAILURE;
-    }
-
-    if (0 == g_xcoder_dev_count)
-    {
-        // retrieve saved info from resource pool at start up
-        if (NI_RETCODE_SUCCESS ==
-            ni_rsrc_list_devices(
-                NI_DEVICE_TYPE_DECODER,
-                p_saved_coders->xcoders[NI_DEVICE_TYPE_DECODER],
-                &p_saved_coders->xcoder_cnt[NI_DEVICE_TYPE_DECODER]))
+        for (i = 0; i < saved_coders.xcoder_cnt[NI_DEVICE_TYPE_DECODER];
+              i++)
         {
-            for (i = 0; i < p_saved_coders->xcoder_cnt[NI_DEVICE_TYPE_DECODER];
-                 i++)
-            {
-                strcpy(g_xcoder_dev_names[i],
-                       p_saved_coders->xcoders[NI_DEVICE_TYPE_DECODER][i]
-                           .dev_name);
-            }
-            g_xcoder_dev_count =
-                p_saved_coders->xcoder_cnt[NI_DEVICE_TYPE_DECODER];
-            ni_log(NI_LOG_INFO,
-                   "%d devices retrieved from current pool at start up\n",
-                   g_xcoder_dev_count);
-        } else
-        {
-            ni_log(NI_LOG_ERROR, "Error retrieving from current pool at start "
-                   "up\n");
+            strcpy(xcoder_dev_names[i],
+                    saved_coders.xcoders[NI_DEVICE_TYPE_DECODER][i]
+                        .dev_name);
         }
+        xcoder_dev_count =
+            saved_coders.xcoder_cnt[NI_DEVICE_TYPE_DECODER];
+        ni_log(NI_LOG_INFO,
+                "%d devices retrieved from current pool at start up\n",
+                xcoder_dev_count);
+    } else
+    {
+        ni_log(NI_LOG_ERROR, "Error retrieving from current pool at start "
+                "up\n");
     }
 
     curr_dev_count =
         ni_rsrc_get_local_device_list(curr_dev_names, NI_MAX_DEVICE_CNT);
     // remove from resource pool any device that is not available now
-    for (i = 0; i < g_xcoder_dev_count; i++)
+    for (i = 0; i < xcoder_dev_count; i++)
     {
-        if (!is_str_in_str_array(g_xcoder_dev_names[i], curr_dev_names,
+        if (!is_str_in_str_array(xcoder_dev_names[i], curr_dev_names,
                                  curr_dev_count))
         {
             ni_log(NI_LOG_INFO,
                    "\n\n%d. %s NOT in current scanned list, removing !\n", i,
-                   g_xcoder_dev_names[i]);
+                   xcoder_dev_names[i]);
             if (NI_RETCODE_SUCCESS ==
-                ni_rsrc_remove_device(g_xcoder_dev_names[i]))
+                ni_rsrc_remove_device(xcoder_dev_names[i]))
             {
                 ni_log(NI_LOG_INFO, "%s deleted successfully !\n",
-                       g_xcoder_dev_names[i]);
+                       xcoder_dev_names[i]);
             } else
             {
                 ni_log(NI_LOG_ERROR, "%s failed to delete !\n",
-                       g_xcoder_dev_names[i]);
+                       xcoder_dev_names[i]);
             }
         }
     }
@@ -166,8 +214,8 @@ ni_retcode_t ni_rsrc_refresh(int should_match_rev)
     // and add into resource pool any newly discoved ones
     for (i = 0; i < curr_dev_count; i++)
     {
-        if (!is_str_in_str_array(curr_dev_names[i], g_xcoder_dev_names,
-                                 g_xcoder_dev_count))
+        if (!is_str_in_str_array(curr_dev_names[i], xcoder_dev_names,
+                                 xcoder_dev_count))
         {
             ni_log(NI_LOG_INFO, "\n\n%s NOT in previous list, adding !\n",
                    curr_dev_names[i]);
@@ -182,14 +230,6 @@ ni_retcode_t ni_rsrc_refresh(int should_match_rev)
         }
     }
 
-    // update the saved device name list
-    for (i = 0; i < curr_dev_count; i++)
-    {
-        strcpy(g_xcoder_dev_names[i], curr_dev_names[i]);
-    }
-    g_xcoder_dev_count = curr_dev_count;
-
-    free(p_saved_coders);
     return NI_RETCODE_SUCCESS;
 }
 
@@ -365,6 +405,7 @@ int ni_rsrc_init(int should_match_rev, int timeout_seconds)
   HANDLE map_file_handle = NULL;
   ni_device_capability_t device_capabilites = { 0 };
   ni_device_handle_t handle;
+  uint32_t xcoder_guid[NI_DEVICE_TYPE_XCODER_MAX] = {0};
 
   map_file_handle = CreateFileMapping(
       INVALID_HANDLE_VALUE,     // use paging file
@@ -409,7 +450,7 @@ int ni_rsrc_init(int should_match_rev, int timeout_seconds)
     else if (0 == xcoder_device_cnt)
     {
       ni_log(NI_LOG_INFO, "NVMe Devices not ready, will retry again ...\n");
-      if (stop_process)
+      if (g_xcoder_stop_process)
       {
         ni_log(NI_LOG_ERROR, "Requested to stop, exiting ...\n");
         CloseHandle(map_file_handle);
@@ -527,9 +568,12 @@ int ni_rsrc_init(int should_match_rev, int timeout_seconds)
                          sizeof(device_info.blk_name));
         device_info.hw_id = device_capabilites.xcoder_devices[j].hw_id;
         device_info.fw_ver_compat_warning = fw_ver_compat_warning;
+        memcpy(device_info.serial_number, device_capabilites.serial_number,
+               sizeof(device_info.serial_number));
+        memcpy(device_info.model_number, device_capabilites.model_number,
+               sizeof(device_info.model_number));
         memcpy(device_info.fw_rev, device_capabilites.fw_rev,
                sizeof(device_info.fw_rev));
-
         memcpy(device_info.fw_branch_name, device_capabilites.fw_branch_name,
                sizeof(device_info.fw_branch_name) - 1);
         memcpy(device_info.fw_commit_time, device_capabilites.fw_commit_time,
@@ -592,14 +636,14 @@ int ni_rsrc_init(int should_match_rev, int timeout_seconds)
             {
                 /*! add the h/w device_info entry */
                 p_device_info->module_id =
-                    g_xcoder_guid[device_info.device_type]++;
+                    xcoder_guid[device_info.device_type]++;
                 p_device_queue->xcoder_cnt[device_info.device_type] =
-                    g_xcoder_guid[device_info.device_type];
+                    xcoder_guid[device_info.device_type];
                 p_device_queue->xcoders[device_info.device_type]
                                        [p_device_info->module_id] =
                     p_device_info->module_id;
                 ni_rsrc_get_one_device_info(&device_info);
-          }
+            }
         }
       } /*! for each device_info */
     } /*! if device supports xcoder */
@@ -617,9 +661,8 @@ int ni_rsrc_init(int should_match_rev, int timeout_seconds)
 
   for (k = 0; k < NI_DEVICE_TYPE_XCODER_MAX; k++)
   {
-      p_device_queue->xcoder_cnt[k] = g_xcoder_guid[k];
+      p_device_queue->xcoder_cnt[k] = xcoder_guid[k];
   }
-
   rc = NI_RETCODE_SUCCESS;
   if (NULL != p_device_queue)
   {
@@ -750,8 +793,14 @@ END:
     return p_device_context;
 }
 
-#elif __linux__
+#elif __linux__ || __APPLE__
 jmp_buf shm_open_test_buf;
+
+#if __APPLE__
+#define DEV_NAME_PREFIX "rdisk"
+#else
+#define DEV_NAME_PREFIX "nvme"
+#endif
 
 /*!*****************************************************************************
  *  \brief  Scans system for all NVMe devices and returns the system device
@@ -804,9 +853,9 @@ int ni_rsrc_get_local_device_list(char   ni_devices[][NI_MAX_DEVICE_NAME_LEN],
     /* pick only those files with name nvmeX where X consists of 1-n
        digits */
     size_t lenstr = strlen(in_file->d_name);
-    if (!strncmp(in_file->d_name, "nvme", strlen("nvme")))
+    if (!strncmp(in_file->d_name, DEV_NAME_PREFIX, strlen(DEV_NAME_PREFIX)))
     {
-      for (i = strlen("nvme"); i < lenstr; i++)
+      for (i = strlen(DEV_NAME_PREFIX); i < lenstr; i++)
       {
         if (!isdigit(in_file->d_name[i]))
         {
@@ -869,18 +918,18 @@ int ni_rsrc_get_local_device_list(char   ni_devices[][NI_MAX_DEVICE_NAME_LEN],
  *******************************************************************************/
 ni_device_pool_t* ni_rsrc_get_device_pool(void)
 {
-  int shm_fd;
+  int shm_fd = 0;
   ni_device_queue_t* p_device_queue = NULL;
   ni_lock_handle_t lock;
   ni_device_pool_t* p_device_pool = NULL;
 
 #ifdef _ANDROID
-  char workDir[] = "/dev/shm_netint";
-  if (0 != access(workDir, 0))
+  if (0 != access(LOCK_DIR, 0))
   {
-      if (0 != mkdir(workDir, 777))
+      if (0 != mkdir(LOCK_DIR, 777))
       {
-          ni_log(NI_LOG_ERROR, "Error create /dev/shm_netint folder...");
+          ni_log(NI_LOG_ERROR, "ERROR: Could not create the %s directory",
+                 LOCK_DIR);
           return NULL;
       }
   }
@@ -974,11 +1023,15 @@ END:
 
     lockf(lock, F_ULOCK, 0);
 
+    if (NULL == p_device_pool)
+    {
+      close(lock);
+    }
 #ifndef _ANDROID
-  close(shm_fd);
+    close(shm_fd);
 #endif
 
-  return p_device_pool;
+    return p_device_pool;
 }
 
 #ifndef _ANDROID
@@ -1000,32 +1053,30 @@ static void handle_sigbus(int sig)
 
 static void rm_shm_files()
 {
-    // remove /dev/shm/*
-    // Q058279 verifies that these dont exist:
-    //'SHM_CODERS','LCK_CODERS','RETRY_LCK_DECODERS','RETRY_LCK_SCALERS','RETRY_LCK_ENCODERS','RETRY_LCK_AI'
-    //Need To Check(NTC):are there others as well
-    int temp_ret = system("rm -f /dev/shm/SHM_CODERS");
+    // remove shm files
+    // Q058279 verifies that these dont exist
+    int temp_ret = system("rm -f " LOCK_DIR "/NI_SHM_CODERS");
     (void)temp_ret;
-    temp_ret = system("rm -f /dev/shm/LCK_CODERS");
+    temp_ret = system("rm -f " LOCK_DIR "/NI_LCK_CODERS");
     (void)temp_ret;
-    temp_ret = system("rm -f /dev/shm/RETRY_LCK_DECODERS");
+    temp_ret = system("rm -f " LOCK_DIR "/NI_RETRY_LCK_DECODERS");
     (void)temp_ret;
-    temp_ret = system("rm -f /dev/shm/RETRY_LCK_SCALERS");
+    temp_ret = system("rm -f " LOCK_DIR "/NI_RETRY_LCK_SCALERS");
     (void)temp_ret;
-    temp_ret = system("rm -f /dev/shm/RETRY_LCK_ENCODERS");
+    temp_ret = system("rm -f " LOCK_DIR "/NI_RETRY_LCK_ENCODERS");
     (void)temp_ret;
-    temp_ret = system("rm -f /dev/shm/RETRY_LCK_AI");
+    temp_ret = system("rm -f " LOCK_DIR "/NI_RETRY_LCK_AI");
     (void)temp_ret;
-    temp_ret = system("rm -f /dev/shm/lck_*");
+    temp_ret = system("rm -f " LOCK_DIR "/NI_lck_*");
     (void)temp_ret;
-    temp_ret = system("rm -f /dev/shm/shm_*");
+    temp_ret = system("rm -f " LOCK_DIR "/NI_shm_*");
     (void)temp_ret;
 }
 
 /*!******************************************************************************
  *  \brief   This function sets up a SIGBUS handler, opens the the file and
  *           does a test. If the read results in SIGBUS the handler
- *           cleans up the /dev/shm/
+ *           cleans up the LOCK_DIR
  *
  *  \return
  *           file descriptor on success
@@ -1036,6 +1087,7 @@ static int shm_open_and_test()
 {
     struct sigaction new_act, old_act;
     bool pool_locked = false;
+    int cleanup = 0;
     // save the old handler
     sigaction(SIGINT, NULL, &old_act);
 
@@ -1067,18 +1119,36 @@ static int shm_open_and_test()
 
     ni_device_queue_t *p_device_queue = NULL;
     p_device_queue = p_device_pool->p_device_queue;
+
     // test the file and sig handle
-    if (0 == sigsetjmp(shm_open_test_buf, 0))
+    if (0 == (cleanup = sigsetjmp(shm_open_test_buf, 0)))
     {
         //volatile to escape optimization, without this there were some hangs 
         //when reading the following field later
-        volatile int count = p_device_queue->xcoder_cnt[NI_DEVICE_TYPE_DECODER];
+        volatile int count = 0;
+        count = p_device_queue->xcoder_cnt[NI_DEVICE_TYPE_DECODER];
+        cleanup |= count == 0 ? 1 : 0;
+        ni_log(NI_LOG_DEBUG, "DEBUG: Decoder cnt = %d/*\n", count);
+
+        count = p_device_queue->xcoder_cnt[NI_DEVICE_TYPE_ENCODER];
+        cleanup |= count == 0 ? 1 : 0;
+        ni_log(NI_LOG_DEBUG, "DEBUG: Encoder cnt = %d/*\n", count);
+
+        count = p_device_queue->xcoder_cnt[NI_DEVICE_TYPE_SCALER];
+        cleanup |= count == 0 ? 1 : 0;
+        ni_log(NI_LOG_DEBUG, "DEBUG: Scaler cnt = %d/*\n", count);
+
+        count = p_device_queue->xcoder_cnt[NI_DEVICE_TYPE_AI];
+        cleanup |= count == 0 ? 1 : 0;
+        ni_log(NI_LOG_DEBUG, "DEBUG: AI cnt = %d/*\n", count);
+        
+        count = p_device_queue->xcoders[NI_DEVICE_TYPE_AI][NI_MAX_DEVICE_CNT-1];
         (void)count;
-    } else
+    } 
+    if (1 == cleanup)
     {
-        ni_log(NI_LOG_ERROR,
-               "ERROR: Caught a SIGBUS. Removing files in "
-               "/dev/shm/*\n");
+        ni_log(NI_LOG_ERROR, "ERROR: Caught a SIGBUS or invalid device count! Removing files in %s/*\n",
+               LOCK_DIR);
         lockf(p_device_pool->lock, F_ULOCK, 0);
         pool_locked = false;
         close(shm_fd);
@@ -1137,17 +1207,18 @@ int ni_rsrc_init(int should_match_rev, int timeout_seconds)
   ni_device_handle_t dev_handle = NI_INVALID_DEVICE_HANDLE;
   ni_device_capability_t device_capabilites;
   ni_retcode_t rc;
+  uint32_t xcoder_guid[NI_DEVICE_TYPE_XCODER_MAX] = {0};
 
   /*! return if init has already been done */
 #ifdef _ANDROID
   ret = ni_rsrc_android_init();
 
-  char workDir[] = "/dev/shm_netint";
-  if (0 != access(workDir, 0))
+  if (0 != access(LOCK_DIR, 0))
   {
-      if (0 != mkdir(workDir, 777))
+      if (0 != mkdir(LOCK_DIR, 777))
       {
-          perror("Error create /dev/shm_netint folder...");
+          ni_log(NI_LOG_ERROR, "ERROR: Could not create the %s directory",
+                 LOCK_DIR);
           return 1;
       }
   }
@@ -1233,9 +1304,9 @@ read_dev_files:
 
     /*! pick only those files with name nvmeX where X consists of 1-n digits */
     size_t lenstr = strlen(in_file->d_name);
-    if (!strncmp(in_file->d_name, "nvme", strlen("nvme")))
+    if (!strncmp(in_file->d_name, DEV_NAME_PREFIX, strlen(DEV_NAME_PREFIX)))
     {
-      for (i = strlen("nvme"); i < lenstr; i++)
+      for (i = strlen(DEV_NAME_PREFIX); i < lenstr; i++)
       {
         if (!isdigit(in_file->d_name[i]))
         {
@@ -1253,7 +1324,7 @@ read_dev_files:
   if (num_dev == 0)
   {
     ni_log(NI_LOG_INFO, "NVMe Devices not ready, wait ..\n");
-    if (stop_process)
+    if (g_xcoder_stop_process)
     {
       ni_log(NI_LOG_ERROR, "Requested to stop ..\n");
       return 1;
@@ -1322,7 +1393,7 @@ read_dev_files:
   if (0 == xcoder_device_cnt)
   {
     ni_log(NI_LOG_INFO, "NVMe Devices supporting XCoder not ready, wait ..\n");
-    if (stop_process)
+    if (g_xcoder_stop_process)
     {
       ni_log(NI_LOG_ERROR, "Requested to stop ..\n");
       return 1;
@@ -1403,7 +1474,7 @@ read_dev_files:
   {
     ni_log(NI_LOG_ERROR, "ERROR %s() ftruncate() shm_fd: %s\n", __func__,
            strerror(NI_ERRNO));
-    //TODO: Return without closing the shared memory file descriptor flose(shm_fd)!!!
+    close(shm_fd);
     return 1;
   }
 #endif
@@ -1414,7 +1485,7 @@ read_dev_files:
   {
       ni_log(NI_LOG_ERROR, "ERROR: %s() mmap() ni_device_queue_t: %s\n", __func__,
              strerror(NI_ERRNO));
-    //TODO: Return without closing the shared memory file descriptor flose(shm_fd)!!!
+    close(shm_fd);
     return 1;
   }
 
@@ -1429,7 +1500,7 @@ read_dev_files:
   {
     ni_log(NI_LOG_ERROR, "ERROR %s() open() CODERS_LCK_NAME: %s\n", __func__,
            strerror(NI_ERRNO));
-    //TODO: Return without umappint the shared memory munmap(p_device_queue)!!!
+    munmap(p_device_queue, sizeof(ni_device_queue_t));
     return 1;
   }
 
@@ -1443,7 +1514,7 @@ read_dev_files:
       {
           ni_log(NI_LOG_ERROR, "ERROR %s() open() XCODERS_RETRY_LCK_NAME[%d]: "
                  "%s\n", __func__, k, strerror(NI_ERRNO));
-          //TODO: Return without umappint the shared memory munmap(p_device_queue)!!!
+          munmap(p_device_queue, sizeof(ni_device_queue_t));
           return 1;
       }
 
@@ -1509,9 +1580,12 @@ read_dev_files:
 
           device_info.hw_id = device_capabilites.xcoder_devices[j].hw_id;
           device_info.fw_ver_compat_warning = fw_ver_compat_warning;
+          memcpy(device_info.serial_number, device_capabilites.serial_number,
+                 sizeof(device_info.serial_number));
+          memcpy(device_info.model_number, device_capabilites.model_number,
+                 sizeof(device_info.model_number));
           memcpy(device_info.fw_rev, device_capabilites.fw_rev,
                  sizeof(device_info.fw_rev));
-
           memcpy(device_info.fw_branch_name, device_capabilites.fw_branch_name,
                  sizeof(device_info.fw_branch_name) - 1);
           memcpy(device_info.fw_commit_time, device_capabilites.fw_commit_time,
@@ -1575,14 +1649,14 @@ read_dev_files:
               {
                   /*! add the h/w device_info entry */
                   p_device_info->module_id =
-                      g_xcoder_guid[device_info.device_type]++;
+                      xcoder_guid[device_info.device_type]++;
                   p_device_queue->xcoder_cnt[device_info.device_type] =
-                      g_xcoder_guid[device_info.device_type];
+                      xcoder_guid[device_info.device_type];
                   p_device_queue->xcoders[device_info.device_type]
                                          [p_device_info->module_id] =
                       p_device_info->module_id;
                   ni_rsrc_get_one_device_info(&device_info);
-            }
+              }
           }
 
         } /*! for each device_info module */
@@ -1602,7 +1676,7 @@ read_dev_files:
 
   for (k = 0; k < NI_DEVICE_TYPE_XCODER_MAX; k++)
   {
-      p_device_queue->xcoder_cnt[k] = g_xcoder_guid[k];
+      p_device_queue->xcoder_cnt[k] = xcoder_guid[k];
   }
   return 0;
 }
@@ -1625,7 +1699,7 @@ read_dev_files:
 ni_device_context_t* ni_rsrc_get_device_context(ni_device_type_t device_type, int guid)
 {
     /*! get names of shared mem and lock by GUID */
-  int shm_fd;
+  int shm_fd = 0;
   int lock;
   char shm_name[32] = { 0 };
   char lck_name[32] = { 0 };
@@ -1749,7 +1823,7 @@ void ni_rsrc_free_device_context(ni_device_context_t *p_device_context)
 #ifdef _WIN32
     UnmapViewOfFile(p_device_context->p_device_info);
     ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
     close(p_device_context->lock);
     munmap((void *)p_device_context->p_device_info, sizeof(ni_device_info_t));
 #endif
@@ -1802,7 +1876,7 @@ ni_retcode_t ni_rsrc_list_devices(ni_device_type_t device_type,
     retval = NI_RETCODE_FAILURE;
     LRETURN;
   }
-#elif __linux__
+#elif __linux__ || __APPLE__
   lockf(p_device_pool->lock, F_LOCK, 0);
 #endif
 
@@ -1831,7 +1905,7 @@ ni_retcode_t ni_rsrc_list_devices(ni_device_type_t device_type,
 
       memcpy(&p_device_info[i], p_device_context->p_device_info, sizeof(ni_device_info_t));
       ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
       lockf(p_device_context->lock, F_LOCK, 0);
       memcpy(&p_device_info[i], p_device_context->p_device_info, sizeof(ni_device_info_t));
       lockf(p_device_context->lock, F_ULOCK, 0);
@@ -1853,7 +1927,7 @@ END:
     {
 #ifdef _WIN32
       ReleaseMutex(p_device_pool->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
       lockf(p_device_pool->lock, F_ULOCK, 0);
 #endif
     }
@@ -1904,6 +1978,148 @@ END:
     return retval;
 }
 
+/*!******************************************************************************
+*  \brief        Grabs information for every initialized and uninitialized
+*                device.
+
+*   \param       list_uninitialized Flag to determine if uninitialized devices
+*                                   should be grabbed.
+*
+*   \return
+*                NI_RETCODE_SUCCESS
+*                NI_RETCODE_INVALID_PARAM
+*                NI_RETCODE_FAILURE
+*
+*   Note: Caller is responsible for allocating memory for "p_device".
+*******************************************************************************/
+LIB_API ni_retcode_t ni_rsrc_list_all_devices2(ni_device_t* p_device, bool list_uninitialized)
+{
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+    if (!p_device)
+    {
+        retval = NI_RETCODE_INVALID_PARAM;
+        return retval;
+    }
+
+    /* Grab initialized devices. */
+
+    ni_log_level_t log_level = ni_log_get_level();
+
+    if (list_uninitialized)
+    {
+        ni_log_set_level(NI_LOG_NONE);
+    }
+
+    ni_rsrc_list_all_devices(p_device);
+
+    if (!list_uninitialized)
+    {
+        return retval;
+    }
+
+    ni_log_set_level(log_level);
+
+    /* Store device names of initialized devices. */
+
+    ni_device_info_t *p_dev_info;
+    char initialized_dev_names[NI_MAX_DEVICE_CNT][NI_MAX_DEVICE_NAME_LEN] = {0};
+
+    for (int dev_index = 0;
+         dev_index < p_device->xcoder_cnt[NI_DEVICE_TYPE_DECODER]; dev_index++)
+    {
+        p_dev_info = &p_device->xcoders[NI_DEVICE_TYPE_DECODER][dev_index];
+        strcpy(initialized_dev_names[dev_index], p_dev_info->dev_name);
+    }
+
+    /* Retrieve uninitialized devices. */
+
+    char dev_names[NI_MAX_DEVICE_CNT][NI_MAX_DEVICE_NAME_LEN] = {0};
+    int dev_count = ni_rsrc_get_local_device_list(dev_names, NI_MAX_DEVICE_CNT);
+
+    uint32_t tmp_io_size;
+    ni_device_capability_t capability;
+    ni_device_handle_t fd;
+    ni_device_info_t dev_info;
+
+    for (int dev_index = 0; dev_index < dev_count; dev_index++)
+    {
+        if (is_str_in_str_array(dev_names[dev_index],
+                                initialized_dev_names, NI_MAX_DEVICE_CNT))
+        {
+            continue;
+        }
+
+        memset(&dev_info, 0, sizeof(ni_device_info_t));
+
+        strcpy(dev_info.dev_name, dev_names[dev_index]);
+
+        retval = ni_find_blk_name(dev_info.dev_name, dev_info.blk_name,
+                                  sizeof(dev_info.blk_name));
+        if (NI_RETCODE_SUCCESS != retval)
+        {
+            ni_log(NI_LOG_ERROR, "Failed to find block device ID for %s\n",
+                   dev_info.dev_name);
+            return retval;
+        }
+
+        fd = ni_device_open(dev_info.blk_name, &tmp_io_size);
+        if (NI_INVALID_DEVICE_HANDLE == fd)
+        {
+            ni_log(NI_LOG_ERROR, "Failed to open device: %s\n",
+                   dev_info.dev_name);
+            return NI_RETCODE_FAILURE;
+        }
+
+        retval = ni_device_capability_query(fd, &capability);
+        if (NI_RETCODE_SUCCESS != retval)
+        {
+            ni_device_close(fd);
+            ni_log(NI_LOG_ERROR, "Failed to query device capability: %s\n",
+                   dev_info.dev_name);
+            return retval;
+        }
+
+        for (int dev_type = 0; dev_type < NI_DEVICE_TYPE_XCODER_MAX; dev_type++)
+        {
+            p_device->xcoder_cnt[dev_type]++;
+
+            p_dev_info = &p_device->xcoders[dev_type][dev_index];
+            memcpy(p_dev_info->serial_number, capability.serial_number,
+                   sizeof(capability.serial_number));
+            memcpy(p_dev_info->model_number, capability.model_number,
+                   sizeof(capability.model_number));
+            memcpy(p_dev_info->fw_rev, capability.fw_rev,
+                   sizeof(capability.fw_rev));
+            if (ni_is_fw_compatible(capability.fw_rev) == 2)
+            {
+                p_dev_info->fw_ver_compat_warning = 1;
+            }
+            memcpy(p_dev_info->fw_branch_name, capability.fw_branch_name,
+                   sizeof(capability.fw_branch_name));
+            memcpy(p_dev_info->fw_commit_time, capability.fw_commit_time,
+                   sizeof(capability.fw_commit_time));
+            memcpy(p_dev_info->fw_commit_hash, capability.fw_commit_hash,
+                   sizeof(capability.fw_commit_hash));
+            memcpy(p_dev_info->fw_build_time, capability.fw_build_time,
+                   sizeof(capability.fw_build_time));
+            memcpy(p_dev_info->fw_build_id, capability.fw_build_id,
+                   sizeof(capability.fw_build_id));
+            memcpy(p_dev_info->dev_name, dev_info.dev_name,
+                   sizeof(dev_info.dev_name));
+            memcpy(p_dev_info->blk_name, dev_info.blk_name,
+                   sizeof(dev_info.blk_name));
+            p_dev_info->device_type = (ni_device_type_t)dev_type;
+            p_dev_info->module_id = -1; /* special value to indicate device is
+                                           not initialized */
+        }
+
+        ni_device_close(fd);
+    }
+
+    return retval;
+}
+
+
 void ni_rsrc_print_device_info(const ni_device_info_t *p_device_info)
 {
     int i;
@@ -1924,14 +2140,14 @@ void ni_rsrc_print_device_info(const ni_device_info_t *p_device_info)
         {
             ni_log(NI_LOG_INFO, "  Capabilities:\n");
             ni_log(NI_LOG_INFO,
-                   "    Operations: Crop (ni_crop), Scale (ni_scale), Pad "
-                   "(ni_pad), Overlay (ni_overlay)\n");
+                   "    Operations: Crop (ni_quadra_crop), Scale (ni_quadra_scale), Pad "
+                   "(ni_quadra_pad), Overlay (ni_quadra_overlay)\n");
         } else if (NI_DEVICE_TYPE_AI == p_device_info->device_type)
         {
             ni_log(NI_LOG_INFO, "  Capabilities:\n");
             ni_log(
                 NI_LOG_INFO,
-                "    Operations: ROI (ni_roi), Background Replace (ni_bg)\n");
+                "    Operations: ROI (ni_quadra_roi), Background Replace (ni_quadra_bg)\n");
         } else if (NI_DEVICE_TYPE_DECODER == p_device_info->device_type ||
                    NI_DEVICE_TYPE_ENCODER == p_device_info->device_type)
         {
@@ -1986,66 +2202,36 @@ void ni_rsrc_print_device_info(const ni_device_info_t *p_device_info)
 *******************************************************************************/
 LIB_API void ni_rsrc_print_all_devices_capability(void)
 {
-    int32_t i, j, k;
-    ni_device_t *p_xcoders = NULL;
+    ni_device_t device = {0};
 
-    p_xcoders = (ni_device_t *)malloc(sizeof(ni_device_t));
-
-    if (NULL != p_xcoders)
+    if (NI_RETCODE_SUCCESS != ni_rsrc_list_all_devices(&device))
     {
-        if (NI_RETCODE_SUCCESS == ni_rsrc_list_all_devices(p_xcoders))
-        {
-            ni_device_info_t *p_device_info = NULL;
-
-            for (i = 0; i < p_xcoders->xcoder_cnt[0]; i++)
-            {
-                p_device_info = &(p_xcoders->xcoders[0][i]);
-                ni_log(NI_LOG_INFO, "Device #%d:\n", i);
-                ni_log(NI_LOG_INFO, "  F/W rev: %.*s\n",
-                       (int)sizeof(p_device_info->fw_rev),
-                       p_device_info->fw_rev);
-                ni_log(NI_LOG_INFO, "  F/W & S/W compatibility: %s\n",
-                       p_device_info->fw_ver_compat_warning ?
-                           "no, possible missing features" :
-                           "yes");
-                ni_log(NI_LOG_INFO, "  F/W branch: %s\n",
-                       p_device_info->fw_branch_name);
-                ni_log(NI_LOG_INFO, "  F/W commit time: %s\n",
-                       p_device_info->fw_commit_time);
-                ni_log(NI_LOG_INFO, "  F/W commit hash: %s\n",
-                       p_device_info->fw_commit_hash);
-                ni_log(NI_LOG_INFO, "  F/W build time: %s\n",
-                       p_device_info->fw_build_time);
-                ni_log(NI_LOG_INFO, "  F/W build id: %s\n",
-                       p_device_info->fw_build_id);
-                ni_log(NI_LOG_INFO, "  DeviceID: %s\n",
-                       p_device_info->dev_name);
-                ni_log(NI_LOG_INFO, "  BlockDeviceID: %s\n",
-                       p_device_info->blk_name);
-                ni_log(NI_LOG_INFO,
-                       "  PixelFormats: yuv420p, yuv420p10le, nv12, p010le, "
-                       "ni\n");
-
-                // print out all modules on the same card
-                for (j = 0; j < NI_DEVICE_TYPE_XCODER_MAX; j++)
-                {
-                    for (k = 0; k < p_xcoders->xcoder_cnt[j]; k++)
-                    {
-                        if (0 ==
-                            strcmp(p_device_info->dev_name,
-                                   p_xcoders->xcoders[j][k].dev_name))
-                        {
-                            ni_rsrc_print_device_info(
-                                &(p_xcoders->xcoders[j][k]));
-                        }
-                    }
-                }
-
-                ni_log(NI_LOG_INFO, "\n");
-            }
-        }
-        free(p_xcoders);
+        return;
     }
+
+    print_device(&device);
+}
+
+/*!*****************************************************************************
+*  \brief        Prints detailed capability information for all initialized
+*                devices and general information about uninitialized devices.
+
+*   \param       list_uninitialized Flag to determine if uninitialized devices
+*                                   should be grabbed.
+*
+*   \return      none
+*
+*******************************************************************************/
+LIB_API void ni_rsrc_print_all_devices_capability2(bool list_uninitialized)
+{
+    ni_device_t device = {0};
+
+    if (NI_RETCODE_SUCCESS != ni_rsrc_list_all_devices2(&device, list_uninitialized))
+    {
+        return;
+    }
+
+    print_device(&device);
 }
 
 /*!******************************************************************************
@@ -2125,7 +2311,7 @@ int ni_rsrc_get_available_device(int width, int height, int frame_rate,
 {
   int i, rc;
   int guid = -1;
-  int num_sw_instances = 0;
+  uint32_t num_sw_instances = 0;
   ni_device_pool_t *p_device_pool = NULL;
   ni_device_info_t *p_dev_info = NULL;
   ni_device_context_t *p_device_context = NULL;
@@ -2151,7 +2337,7 @@ int ni_rsrc_get_available_device(int width, int height, int frame_rate,
       ni_rsrc_free_device_pool(p_device_pool);
       return NI_RETCODE_FAILURE;
   }
-#elif __linux__
+#elif __linux__ || __APPLE__
   lockf(p_device_pool->lock, F_LOCK, 0);
 #endif
 
@@ -2202,14 +2388,25 @@ int ni_rsrc_get_available_device(int width, int height, int frame_rate,
         //ni_rsrc_free_device_pool(p_device_pool);
         //return -1;
     }
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_context->lock, F_LOCK, 0);
 #endif
     ni_rsrc_update_record(p_device_context, &p_session_context);
 
     p_dev_info = p_device_context->p_device_info;
 
-    if (i == 0 || p_dev_info->model_load < least_model_load ||
+    // here we select the best load
+    // for decoder/encoder: check the model_load
+    // for hwuploader: check directly hwupload count in query result
+    if (NI_DEVICE_TYPE_UPLOAD == device_type)
+    {
+        if (i == 0 || p_session_context.load_query.active_hwuploaders < num_sw_instances)
+        {
+            guid = tmp_id;
+            num_sw_instances = p_session_context.load_query.active_hwuploaders;
+            memcpy(&dev_info, p_dev_info, sizeof(ni_device_info_t));
+        }
+    } else if (i == 0 || p_dev_info->model_load < least_model_load ||
         (p_dev_info->model_load == least_model_load &&
          p_dev_info->active_num_inst < num_sw_instances))
     {
@@ -2222,13 +2419,13 @@ int ni_rsrc_get_available_device(int width, int height, int frame_rate,
 
 #ifdef _WIN32
     ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_context->lock, F_ULOCK, 0);
 #endif
     ni_rsrc_free_device_context(p_device_context);
   }
 
-  // TODO: how should scaler (and AI in the future) be handled here?
+  // scaler and AI load handling will be considered in the future
   if (guid >= 0)
   {
     // calculate the load this stream will generate based on its resolution and
@@ -2268,7 +2465,7 @@ int ni_rsrc_get_available_device(int width, int height, int frame_rate,
 
 #ifdef _WIN32
   ReleaseMutex(p_device_pool->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
   lockf(p_device_pool->lock, F_ULOCK, 0);
 #endif
 
@@ -2320,7 +2517,7 @@ int ni_rsrc_update_device_load(ni_device_context_t *p_device_context, int load,
              __func__, p_device_context->lock);
       return NI_RETCODE_FAILURE;
   }
-#elif __linux__
+#elif __linux__ || __APPLE__
   lockf(p_device_context->lock, F_LOCK, 0);
 #endif
 
@@ -2333,7 +2530,7 @@ int ni_rsrc_update_device_load(ni_device_context_t *p_device_context, int load,
 
 #ifdef _WIN32
   ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
   lockf(p_device_context->lock, F_ULOCK, 0);
 #endif
 
@@ -2425,7 +2622,7 @@ ni_device_context_t *ni_rsrc_allocate_auto
   int i, count, rc;
   int guid = -1;
   int load = 0;
-  int num_sw_instances = 0;
+  uint32_t num_sw_instances = 0;
   int least_model_load = 0;
   unsigned long job_mload = 0;
 
@@ -2439,7 +2636,7 @@ ni_device_context_t *ni_rsrc_allocate_auto
     {
         ni_log(NI_LOG_ERROR, "ERROR: %s() failed to obtain mutex: %p\n", __func__, p_device_pool->lock);
     }
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_pool->lock, F_LOCK, 0);
 #endif
 
@@ -2489,7 +2686,7 @@ ni_device_context_t *ni_rsrc_allocate_auto
           ni_log(NI_LOG_ERROR, "ERROR: %s() failed to obtain mutex: %p\n",
                  __func__, p_device_context->lock);
       }
-#elif __linux__
+#elif __linux__ || __APPLE__
       lockf(p_device_context->lock, F_LOCK, 0);
 #endif
       ni_rsrc_update_record(p_device_context, &p_session_context);
@@ -2541,7 +2738,7 @@ ni_device_context_t *ni_rsrc_allocate_auto
 
 #ifdef _WIN32
       ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
       lockf(p_device_context->lock, F_ULOCK, 0);
 #endif
       ni_rsrc_free_device_context(p_device_context);
@@ -2572,7 +2769,7 @@ ni_device_context_t *ni_rsrc_allocate_auto
               ni_log(NI_LOG_ERROR, "ERROR: %s() failed to obtain mutex: %p\n",
                      __func__, p_device_context->lock);
           }
-#elif __linux__
+#elif __linux__ || __APPLE__
           lockf(p_device_context->lock, F_LOCK, 0);
 #endif
           p_device_context->p_device_info->xcode_load_pixel += job_mload;
@@ -2580,7 +2777,7 @@ ni_device_context_t *ni_rsrc_allocate_auto
           //p_device_context->p_device_info->model_load = (int)((double)(p_device_context->p_device_info->xcode_load_pixel) * 100 / total_cap);
 #ifdef _WIN32
           ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
           if (msync((void *)p_device_context->p_device_info, sizeof(ni_device_info_t),
                     MS_SYNC | MS_INVALIDATE))
           {
@@ -2603,7 +2800,7 @@ ni_device_context_t *ni_rsrc_allocate_auto
   END:
 #ifdef _WIN32
     ReleaseMutex(p_device_pool->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_pool->lock, F_ULOCK, 0);
 #endif
     ni_rsrc_free_device_pool(p_device_pool);
@@ -2662,7 +2859,7 @@ ni_device_context_t *ni_rsrc_allocate_direct
         ni_log(NI_LOG_ERROR, "ERROR: %s() failed to obtain mutex: %p\n",
                __func__, p_device_context->lock);
     }
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_context->lock, F_LOCK, 0);
 #endif
 
@@ -2680,7 +2877,7 @@ ni_device_context_t *ni_rsrc_allocate_direct
           p_device_context->p_device_info->xcode_load_pixel += job_mload;
           // Remove as the value is getting from the FW
           //p_device_context->p_device_info->model_load = (int)((double)(p_device_context->p_device_info->xcode_load_pixel) * 100 / total_cap);
-#ifdef __linux__
+#if __linux__ || __APPLE__
         if (msync((void *)p_device_context->p_device_info, sizeof(ni_device_info_t),
                   MS_SYNC | MS_INVALIDATE))
         {
@@ -2693,7 +2890,7 @@ ni_device_context_t *ni_rsrc_allocate_direct
 
 #ifdef _WIN32
     ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_context->lock, F_ULOCK, 0);
 #endif
 
@@ -2714,7 +2911,7 @@ ni_device_context_t *ni_rsrc_allocate_direct
       ni_rsrc_move_device_to_end_of_pool(device_type, guid, p_device_pool);
 
       ReleaseMutex(p_device_pool->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
       lockf(p_device_pool->lock, F_LOCK, 0);
 
       ni_rsrc_move_device_to_end_of_pool(device_type, guid, p_device_pool);
@@ -2784,7 +2981,7 @@ void ni_rsrc_release_resource(ni_device_context_t *p_device_context,
       ni_log(NI_LOG_ERROR, "ERROR: %s() failed to obtain mutex: %p\n",
              __func__, p_device_context->lock);
   }
-#elif __linux__
+#elif __linux__ || __APPLE__
   lockf(p_device_context->lock, F_LOCK, 0);
 #endif
 
@@ -2798,7 +2995,7 @@ void ni_rsrc_release_resource(ni_device_context_t *p_device_context,
     p_device_context->p_device_info->xcode_load_pixel -= load;
     // Remove as the value is getting from the FW
     // p_device_context->p_device_info->model_load = (int)((double)(p_device_context->p_device_info->xcode_load_pixel) * 100 / total_cap);
-#ifdef __linux__
+#if __linux__ || __APPLE__
     if (msync((void *)p_device_context->p_device_info, sizeof(ni_device_info_t), MS_SYNC | MS_INVALIDATE))
     {
         ni_log(NI_LOG_ERROR, "ERROR %s() msync() p_device_context->"
@@ -2809,9 +3006,194 @@ void ni_rsrc_release_resource(ni_device_context_t *p_device_context,
 
 #ifdef _WIN32
   ReleaseMutex(p_device_context->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
   lockf(p_device_context->lock, F_ULOCK, 0);
 #endif
+}
+
+/*!*****************************************************************************
+*   \brief      check the NetInt h/w device in resource pool on the host.
+*
+*   \param[in]  guid  the global unique device index in resource pool
+*               device_type     NI_DEVICE_TYPE_DECODER or NI_DEVICE_TYPE_ENCODER
+*
+*   \return
+*               NI_RETCODE_SUCCESS
+*******************************************************************************/
+int ni_rsrc_check_hw_available(int guid, ni_device_type_t device_type)
+{
+    ni_device_pool_t *p_device_pool = NULL;
+    ni_device_context_t *p_device_ctx = NULL;
+    ni_session_context_t session_ctx = {0};
+    ni_xcoder_params_t api_param = {0};
+    uint32_t max_nvme_io_size = 0;
+    bool b_release_pool_mtx = false;
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+    int retry_cnt = 0;
+
+    if (guid < 0)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR invalid guid:%d\n", guid);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    if (!(NI_DEVICE_TYPE_DECODER == device_type ||
+          NI_DEVICE_TYPE_ENCODER == device_type))
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: Unknown device type:%d\n", device_type);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    ni_device_session_context_init(&session_ctx);
+    session_ctx.keep_alive_timeout = NI_DEFAULT_KEEP_ALIVE_TIMEOUT;
+    session_ctx.src_bit_depth = 8;
+    session_ctx.hw_id = guid;
+
+    if (NI_DEVICE_TYPE_DECODER == device_type)
+    {
+        if (ni_decoder_init_default_params(&api_param, 30, 1, NI_MIN_BITRATE,
+                                           XCODER_MIN_ENC_PIC_WIDTH,
+                                           XCODER_MIN_ENC_PIC_HEIGHT) < 0)
+        {
+            ni_log(NI_LOG_ERROR, "ERROR: set decoder default params error\n");
+            return NI_RETCODE_INVALID_PARAM;
+        }
+    } else
+    {
+        if (ni_encoder_init_default_params(
+                &api_param, 30, 1, NI_MIN_BITRATE, XCODER_MIN_ENC_PIC_WIDTH,
+                XCODER_MIN_ENC_PIC_HEIGHT, NI_CODEC_FORMAT_H264) < 0)
+        {
+            ni_log(NI_LOG_ERROR, "ERROR: set encoder default params error\n");
+            return NI_RETCODE_INVALID_PARAM;
+        }
+    }
+    session_ctx.p_session_config = &api_param;
+
+    p_device_pool = ni_rsrc_get_device_pool();
+    if (!p_device_pool)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: get device poll failed\n");
+        retval = NI_RETCODE_ERROR_GET_DEVICE_POOL;
+        LRETURN;
+    }
+
+#ifdef _WIN32
+    if (WAIT_ABANDONED ==
+        WaitForSingleObject(p_device_pool->lock,
+                            INFINITE))   // no time-out interval)
+    {
+        ni_log(NI_LOG_INFO,
+               "ERROR: ni_rsrc_list_devices() failed to obtain mutex: %p\n",
+               p_device_pool->lock);
+        retval = NI_RETCODE_FAILURE;
+        LRETURN;
+    }
+#elif __linux__
+    lockf(p_device_pool->lock, F_LOCK, 0);
+#endif
+    b_release_pool_mtx = true;
+
+    // get device context
+    p_device_ctx = ni_rsrc_get_device_context(device_type, guid);
+    if (p_device_ctx)
+    {
+        session_ctx.device_handle = ni_device_open(
+            p_device_ctx->p_device_info->blk_name, &max_nvme_io_size);
+        session_ctx.blk_io_handle = session_ctx.device_handle;
+        if (NI_INVALID_DEVICE_HANDLE == session_ctx.device_handle)
+        {
+            ni_log(NI_LOG_ERROR, "open device failed: %d\n", errno);
+            retval = NI_RETCODE_ERROR_INVALID_HANDLE;
+        } else
+        {
+#ifdef _WIN32
+            session_ctx.event_handle = ni_create_event();
+            if (NI_INVALID_EVENT_HANDLE == session_ctx.event_handle)
+            {
+                ni_log(NI_LOG_INFO, "Error create envent:%d\n", GetLastError());
+                retval = NI_RETCODE_FAILURE;
+                LRETURN;
+            }
+#endif
+            retval = ni_device_session_query(&session_ctx, device_type);
+            if (NI_RETCODE_SUCCESS != retval)
+            {
+                ni_log(NI_LOG_ERROR,
+                       "guid %d. %s, %s is not avaiable, type: %d, retval:%d\n",
+                       guid, p_device_ctx->p_device_info->dev_name,
+                       p_device_ctx->p_device_info->blk_name, device_type,
+                       retval);
+                retval = NI_RETCODE_FAILURE;
+            } else
+            {
+                while (1)
+                {
+                    retry_cnt++;
+                    retval = ni_device_session_open(&session_ctx, device_type);
+                    ni_device_session_close(&session_ctx, 0, device_type);
+                    if (retval == NI_RETCODE_SUCCESS)
+                    {
+                        ni_log(NI_LOG_INFO, "guid %d. %s %s is avaiable\n",
+                               guid, p_device_ctx->p_device_info->dev_name,
+                               p_device_ctx->p_device_info->blk_name);
+                        break;
+                    } else if (
+                        retry_cnt < 10 &&
+                        retval ==
+                            NI_RETCODE_ERROR_VPU_RECOVERY)   // max 2 seconds
+                    {
+                        ni_log(NI_LOG_INFO,
+                               "vpu recovery happened on guid %d. %s %s, retry "
+                               "cnt:%d\n",
+                               guid, p_device_ctx->p_device_info->dev_name,
+                               p_device_ctx->p_device_info->blk_name,
+                               retry_cnt);
+#ifndef _WIN32
+                        ni_usleep(200000);   // 200 ms
+#endif
+                        continue;
+                    } else
+                    {
+                        ni_log(NI_LOG_ERROR,
+                               "session open error guid %d. %s, %s, type: %d, "
+                               "retval:%d\n",
+                               guid, p_device_ctx->p_device_info->dev_name,
+                               p_device_ctx->p_device_info->blk_name,
+                               device_type, retval);
+                        retval = NI_RETCODE_FAILURE;
+                        break;
+                    }
+                }
+            }
+        }
+    } else
+    {
+        ni_log(NI_LOG_ERROR,
+               "Error get device resource: guid %d, device_ctx %p\n", guid,
+               p_device_ctx);
+        retval = NI_RETCODE_FAILURE;
+    }
+
+END:
+
+    if (b_release_pool_mtx)
+    {
+#ifdef _WIN32
+        ReleaseMutex(p_device_pool->lock);
+#elif __linux__
+        lockf(p_device_pool->lock, F_ULOCK, 0);
+#endif
+    }
+
+    ni_close_event(session_ctx.event_handle);
+    ni_device_close(session_ctx.device_handle);
+
+    ni_rsrc_free_device_context(p_device_ctx);
+
+    ni_rsrc_free_device_pool(p_device_pool);
+
+    return retval;
 }
 
 /*!*****************************************************************************
@@ -2842,13 +3224,12 @@ int ni_rsrc_remove_device(const char* dev)
       ni_log(NI_LOG_ERROR, "ERROR: %s() failed to obtain mutex: %p\n",
              __func__, p_device_pool->lock);
     }
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_pool->lock, F_LOCK, 0);
 #endif
 
     p_device_queue = p_device_pool->p_device_queue;
 
-    // TODO: this part of logic need review
     // assume all XCODER types are grouped
     count = p_device_queue->xcoder_cnt[NI_DEVICE_TYPE_DECODER];
     int guid;
@@ -2912,7 +3293,7 @@ int ni_rsrc_remove_device(const char* dev)
             }
         }
         rc = NI_RETCODE_SUCCESS;
-#elif __linux__
+#elif __linux__ || __APPLE__
 
 #ifndef _ANDROID
         for (k = 0; k < NI_DEVICE_TYPE_XCODER_MAX; k++)
@@ -2956,7 +3337,7 @@ int ni_rsrc_remove_device(const char* dev)
             p_device_queue->xcoders[k][count - 1] = -1;
             p_device_queue->xcoder_cnt[k]--;
         }
-#ifdef __linux__
+#if __linux__ || __APPLE__
         if (msync((void *)p_device_pool->p_device_queue,
                   sizeof(ni_device_queue_t), MS_SYNC | MS_INVALIDATE))
         {
@@ -2973,7 +3354,7 @@ int ni_rsrc_remove_device(const char* dev)
 
 #ifdef _WIN32
     ReleaseMutex(p_device_pool->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_pool->lock, F_ULOCK, 0);
 #endif
     ni_rsrc_free_device_pool(p_device_pool);
@@ -3019,7 +3400,7 @@ int ni_rsrc_add_device(const char* dev, int should_match_rev)
         ni_log(NI_LOG_ERROR, "ERROR: %s() failed to obtain mutex: %p\n",
                __func__, p_device_pool->lock);
     }
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_pool->lock, F_LOCK, 0);
 #endif
 
@@ -3163,7 +3544,7 @@ int ni_rsrc_add_device(const char* dev, int should_match_rev)
             ni_rsrc_free_device_context(p_device_context);
         }
       } // for each device_info module
-#ifdef __linux__
+#if __linux__ || __APPLE__
       if (msync((void *)p_device_pool->p_device_queue, sizeof(ni_device_queue_t),
                 MS_SYNC | MS_INVALIDATE))
       {
@@ -3191,7 +3572,7 @@ int ni_rsrc_add_device(const char* dev, int should_match_rev)
 
 #ifdef _WIN32
     ReleaseMutex(p_device_pool->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
     lockf(p_device_pool->lock, F_ULOCK, 0);
 #endif
 
@@ -3216,7 +3597,7 @@ void ni_rsrc_free_device_pool(ni_device_pool_t* p_device_pool)
     {
 #ifdef _WIN32
         CloseHandle(p_device_pool->lock);
-#elif __linux__
+#elif __linux__ || __APPLE__
         close(p_device_pool->lock);
 #endif
     }
@@ -3330,35 +3711,36 @@ int ni_rsrc_unlock(int device_type, ni_lock_handle_t lock)
   {
       return NI_RETCODE_FAILURE;
   }
-  else
+
+  int count = 0;
+  ni_lock_handle_t status = NI_INVALID_LOCK_HANDLE;
+  do
   {
-      int count = 0;
-      ni_lock_handle_t status = NI_INVALID_LOCK_HANDLE;
-      do
+      if (count >= 1)
       {
-          if (count >= 1)
-          {
-              ni_usleep(LOCK_WAIT);
-          }
+          ni_usleep(LOCK_WAIT);
+      }
 #ifdef _WIN32
-          if (ReleaseMutex(lock))
-          {
-              status = (ni_lock_handle_t)(0);
-          }
+      if (ReleaseMutex(lock))
+      {
+          status = (ni_lock_handle_t)(0);
+      }
 #else
-          status = lockf(lock, F_ULOCK, 0);
+      status = lockf(lock, F_ULOCK, 0);
 #endif
-          count++;
-          if (count > MAX_LOCK_RETRY)
-          {
-              ni_log(NI_LOG_ERROR, "Can not unlock the lock after 6s");
-              return NI_RETCODE_ERROR_UNLOCK_DEVICE;
-          }
-      } while (status != (ni_lock_handle_t)(0));
-  }
-#ifdef __linux__
+      count++;
+      if (count > MAX_LOCK_RETRY)
+      {
+          ni_log(NI_LOG_ERROR, "Can not unlock the lock after 6s");
+          return NI_RETCODE_ERROR_UNLOCK_DEVICE;
+      }
+  } while (status != (ni_lock_handle_t)(0));
+
+#ifdef _WIN32
+  CloseHandle(lock);
+#else
   close(lock);
-#endif   //__linux__ defined
+#endif //_WIN32 defined
   return NI_RETCODE_SUCCESS;
 }
 

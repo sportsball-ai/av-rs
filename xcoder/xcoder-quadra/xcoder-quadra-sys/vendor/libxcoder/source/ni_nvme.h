@@ -37,6 +37,18 @@ extern "C"
 
 #define NI_NVME_IDENTITY_CMD_DATA_SZ 4096
 
+typedef struct _ni_nvme_command
+{
+    uint32_t cdw2;
+    uint32_t cdw3;
+    uint32_t cdw10;
+    uint32_t cdw11;
+    uint32_t cdw12;
+    uint32_t cdw13;
+    uint32_t cdw14;
+    uint32_t cdw15;
+} ni_nvme_command_t;
+
 typedef struct _ni_nvme_id_power_state
 {
   uint16_t ui16MaxPower; /*! centiwatts */
@@ -208,8 +220,9 @@ typedef struct _ni_nvme_identity
   uint8_t fw_commit_hash[41];
   uint8_t fw_build_time[26];
   uint8_t fw_build_id[256];
-  uint8_t fw_repo_info_padding[3];
+  uint8_t fw_repo_info_padding[2];
 
+  uint8_t memory_cfg; // 0 == DR, 1 == SR
   // byte offset 469 (=468+1 due to alignment at hw0_max_video_width)
 
   // xcoder HW - version 2 (replaces/deprecates version 1)
@@ -383,6 +396,7 @@ typedef enum _nvme_config_xcoder_config_session_subtype
     nvme_config_xcoder_config_session_read = 0x0001,
     nvme_config_xcoder_config_session_write = 0x0002,
     nvme_config_xcoder_config_session_keep_alive_timeout = 0x0003,
+    nvme_config_xcoder_config_session_sw_version = 0x0004,
 } nvme_config_xcoder_config_session_subtype_t;
 
 typedef enum _nvme_config_xcoder_config_instance_subtype
@@ -397,7 +411,10 @@ typedef enum _nvme_config_xcoder_config_instance_subtype
     nvme_config_xcoder_config_set_network_binary = 0x0008,
     nvme_config_xcoder_config_set_enc_frame_params = 0x0009,
     nvme_config_xcoder_config_set_write_legth = 0x000c,
-    nvme_config_xcoder_config_alloc_frame = 0x000d,
+    nvme_config_xcoder_config_alloc_frame = 0x000d,  // scaler only
+    nvme_config_xcoder_config_set_sequence_change = 0x000d,   // encoder only
+    nvme_config_xcoder_instance_read_buf_size_busy_place_holder = 0x000e,   // admin type taken by busy query read
+    nvme_config_xcoder_instance_write_buf_size_busy_place_holder = 0x000f,  // admin type taken by busy query write
 } nvme_config_xcoder_config_instance_subtype_t;
 
 typedef struct _ni_nvme_write_complete_dw0_t
@@ -706,6 +723,8 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
                                                             nvme_config_xcoder_config_instance,nvme_config_xcoder_config_set_enc_frame_params)
 #define CONFIG_INSTANCE_SetPktSize_W(sid,instance)      HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
                                                             nvme_config_xcoder_config_instance,nvme_config_xcoder_config_set_write_legth)
+#define CONFIG_INSTANCE_SetSeqChange_W(sid,instance)      HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
+                                                            nvme_config_xcoder_config_instance,nvme_config_xcoder_config_set_sequence_change)
 #define CONFIG_INSTANCE_SetAiPara_W(sid, instance)                             \
     HIGH_OFFSET_IN_4K(sid, instance) +                                         \
         CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
@@ -732,6 +751,12 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
         CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
                          nvme_config_xcoder_config_session,                    \
                          nvme_config_xcoder_config_session_keep_alive_timeout)
+
+#define CONFIG_SESSION_SWVersion_W(sid)                                        \
+    HIGH_OFFSET_IN_4K(sid, 0) +                                                \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
+                         nvme_config_xcoder_config_session,                    \
+                         nvme_config_xcoder_config_session_sw_version)
 
 int32_t ni_nvme_send_read_cmd(ni_device_handle_t handle, ni_event_handle_t event_handle, void *p_data, uint32_t data_len, uint32_t lba);
 int32_t ni_nvme_send_write_cmd(ni_device_handle_t handle, ni_event_handle_t event_handle, void *p_data, uint32_t data_len, uint32_t lba);

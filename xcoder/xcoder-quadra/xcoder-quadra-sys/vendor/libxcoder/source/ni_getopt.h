@@ -28,14 +28,27 @@
 
 #pragma once
 
-#include <tchar.h>
-
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-extern int optind, opterr, optopt;
-extern TCHAR *optarg;
+#ifdef _WIN32
+#ifdef XCODER_DLL
+#ifdef LIB_EXPORTS
+#define LIB_API_GETOPT __declspec(dllexport)
+#else
+#define LIB_API_GETOPT __declspec(dllimport)
+#endif
+#else
+#define LIB_API_GETOPT
+#endif
+#elif __linux__ || __APPLE__
+#define LIB_API_GETOPT
+#endif
+
+extern LIB_API_GETOPT int optind, opterr, optopt;
+extern LIB_API_GETOPT char *optarg;
 
 /* Describe the long-named options requested by the application.
    The LONG_OPTIONS argument to getopt_long or getopt_long_only is a vector
@@ -70,13 +83,12 @@ struct option
 
 /* Names for the values of the 'has_arg' field of 'struct option'.  */
 
-#define no_argument 0
-#define required_argument 1
-#define optional_argument 2
+#define no_argument             0
+#define required_argument       1
+#define optional_argument       2
 
-int getopt(int argc, TCHAR *argv[], const TCHAR *optstring);
-int getopt_long(int argc, TCHAR *argv[], const TCHAR *optstring,
-                const struct option *longopts, int *longindex);
+extern LIB_API_GETOPT int getopt(int argc, char *argv[], const char *optstring);
+extern LIB_API_GETOPT int getopt_long(int argc, char* argv[], const char* optstring, const struct option *longopts, int *longindex);
 
 #ifdef __cplusplus
 }

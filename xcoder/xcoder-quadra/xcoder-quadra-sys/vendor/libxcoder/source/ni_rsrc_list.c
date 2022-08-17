@@ -31,7 +31,7 @@
  *
  ******************************************************************************/
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #include <unistd.h>
 #include <sys/types.h>
 #elif _WIN32 
@@ -55,18 +55,23 @@
 int32_t main(int argc, char *argv[])
 {
     int opt;
-    ni_log_level_t log_level;
+    bool list_uninitialized = false;
+    ni_log_level_t log_level = NI_LOG_INFO;
 
     // arg handling
-    while ((opt = getopt(argc, argv, "hvl:")) != -1)
+    while ((opt = getopt(argc, argv, "ahvl:")) != -1)
     {
         switch (opt)
         {
+            case 'a':
+                list_uninitialized = true;
+                break;
             case 'h':
                 // help message
                 printf("-------- ni_rsrc_list v%s --------\n"
-                       "Display information for detected Netint hardware.\n"
+                       "Display information for NETINT hardware.\n"
                        "\n"
+                       "-a  Print includes info for uninitialized cards.\n"
                        "-h  Display this help and exit.\n"
                        "-v  Print version info.\n"
                        "-l  Set loglevel of libxcoder API.\n"
@@ -75,10 +80,12 @@ int32_t main(int argc, char *argv[])
                        NI_XCODER_REVISION);
                 return 0;
             case 'v':
-                printf("Ver:  %s\n"
-                       "Date: %s\n"
-                       "ID:   %s\n",
-                       NI_XCODER_REVISION, NI_SW_RELEASE_TIME, NI_SW_RELEASE_ID);
+                printf("Release ver: %s\n"
+                       "API ver:     %s\n"
+                       "Date:        %s\n"
+                       "ID:          %s\n",
+                       NI_XCODER_REVISION, LIBXCODER_API_VERSION,
+                       NI_SW_RELEASE_TIME, NI_SW_RELEASE_ID);
                 return 0;
             case 'l':
                 log_level = arg_to_ni_log_level(optarg);
@@ -97,6 +104,6 @@ int32_t main(int argc, char *argv[])
         }
     }
 
-    ni_rsrc_print_all_devices_capability();
+    ni_rsrc_print_all_devices_capability2(list_uninitialized);
     return 0;
 }

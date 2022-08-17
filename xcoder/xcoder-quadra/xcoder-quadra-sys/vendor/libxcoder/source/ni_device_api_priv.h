@@ -40,6 +40,7 @@ extern "C"
 #endif
 
 #include "ni_defs.h"
+#include "ni_rsrc_api.h"
 
 typedef enum
 {
@@ -219,7 +220,7 @@ typedef struct _ni_metadata_enc_frame
   //uint32_t              reserved;
 } ni_metadata_enc_frame_t;
 
-typedef struct _ni_metadata_enc_bstream
+typedef struct _ni_metadata_enc_bstream_rev61
 {
     uint32_t      bs_frame_size;
     uint32_t      frame_type;
@@ -228,7 +229,22 @@ typedef struct _ni_metadata_enc_bstream
     uint32_t      avg_frame_qp;
     uint32_t      recycle_index;
     uint32_t av1_show_frame;
-    //uint32_t      reserved[1];
+} ni_metadata_enc_bstream_rev61_t; // Revision 61 or lower
+
+typedef struct _ni_metadata_enc_bstream
+{
+    uint32_t      metadata_size;
+    uint32_t      frame_type;
+    uint64_t      frame_tstamp;
+    uint32_t      frame_cycle;
+    uint32_t      avg_frame_qp;
+    uint32_t      recycle_index;
+    uint32_t      av1_show_frame;
+    //Added for Revision 61
+    uint32_t      ssimY;
+    uint32_t      ssimU;
+    uint32_t      ssimV;
+    uint32_t      reserved;
 } ni_metadata_enc_bstream_t;
 
 /*!****** encoder paramters *********************************************/
@@ -358,7 +374,7 @@ typedef struct _ni_t408_config_t
 
   uint32_t useLongTerm; /*!*< It enables long-term reference function. */
 
-  // newly added for T408_520
+  // newly added for T408
   uint32_t monochromeEnable;        /*!*< It enables monochrome encoding mode. */
   uint32_t strongIntraSmoothEnable; /*!*< It enables strong intra smoothing. */
 
@@ -502,8 +518,10 @@ typedef struct _ni_encoder_config_t
   // <--- not to be exposed to customers
   uint8_t ui8LowDelay;
   uint8_t ui8setLongTermCount; /* sets long-term reference frames count */
-  uint8_t ui8Reserved[3];      /**< reserved for future expansion **/
+  uint16_t ui16maxFrameSize;
+  uint8_t ui8enableSSIM;
   uint8_t ui8VuiRbsp[NI_MAX_VUI_SIZE]; /**< VUI raw byte sequence **/
+  uint8_t ui8fixedframerate;
 } ni_encoder_config_t;
 
 typedef struct _ni_uploader_config_t
@@ -515,6 +533,19 @@ typedef struct _ni_uploader_config_t
     uint8_t ui8Pool;
     uint8_t ui8rsvd[1];
 } ni_uploader_config_t;
+
+// struct describing resolution change.
+typedef struct _ni_resolution
+{
+    // width
+    int32_t width;
+
+    // height
+    int32_t height;
+
+    // bit depth factor
+    int32_t bit_depth_factor;
+} ni_resolution_t;
 
 #define NI_MINIMUM_CROPPED_LENGTH 48
 typedef enum {
@@ -552,8 +583,8 @@ typedef struct _ni_decoder_config_t
   uint8_t                     ui8HWFrame;
   uint8_t                     ui8UduSeiEnabled; // ui8OutputFormat;
   uint16_t                    ui16MaxSeiDataSize;
-  uint16_t fps_number;
-  uint16_t fps_denominator;
+  uint32_t fps_number;
+  uint32_t fps_denominator;
   uint8_t ui8MCMode;
   uint8_t ui8rsrv[3];
   uint32_t ui32MaxPktSize;
@@ -574,7 +605,8 @@ typedef struct _ni_network_buffer
 typedef struct _ni_scaler_config
 {
     uint8_t filterblit;
-    uint8_t ui8Reserved[3];
+    uint8_t numInputs;
+    uint8_t ui8Reserved[2];
     uint32_t ui32Reserved[3];
 } ni_scaler_config_t;
 
@@ -600,7 +632,10 @@ typedef enum
 #define NI_SESSION_CLOSE_RETRY_INTERVAL_US 500000
 
 /* This value must agree with the membin size in Quadra firmware */
-#define NI_HWDESC_MEMBIN_SIZE 0x30E000
+#define NI_HWDESC_UNIFIED_MEMBIN_SIZE 0x187000
+
+#define NI_QUADRA_MEMORY_CONFIG_DR   0
+#define NI_QUADRA_MEMORY_CONFIG_SR    1
 
 int ni_create_frame(ni_frame_t* p_frame, uint32_t read_length, uint64_t* frame_offset, bool is_hw_frame);
 
@@ -632,7 +667,6 @@ void ni_params_print(ni_xcoder_params_t *const p_encoder_params);
 
 int32_t ni_get_frame_index(uint32_t* value);
 void ni_populate_device_capability_struct(ni_device_capability_t* p_cap, void * p_data);
-void ni_populate_serial_number(ni_serial_num* p_serial_num, void * p_data);
 
 int ni_xcoder_session_query(ni_session_context_t *p_ctx,
                             ni_device_type_t device_type);
@@ -650,6 +684,7 @@ ni_retcode_t ni_encoder_session_close(ni_session_context_t *p_ctx, int eos_recie
 ni_retcode_t ni_encoder_session_flush(ni_session_context_t *p_ctx);
 int ni_encoder_session_write(ni_session_context_t *p_ctx, ni_frame_t *p_frame);
 int ni_encoder_session_read(ni_session_context_t *p_ctx, ni_packet_t *p_packet);
+ni_retcode_t ni_encoder_session_sequence_change(ni_session_context_t *p_ctx, ni_resolution_t *p_resoluion);
 //int ni_encoder_session_reconfig(ni_session_context_t *p_ctx, ni_session_config_t *p_config, ni_param_change_flags_t change_flags);
 
 ni_retcode_t ni_query_general_status(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_instance_mgr_general_status_t* p_gen_status);
@@ -666,6 +701,7 @@ ni_retcode_t ni_config_instance_set_encoder_params(ni_session_context_t* p_ctx);
 ni_retcode_t ni_config_instance_update_encoder_params(ni_session_context_t* p_ctx, ni_param_change_flags_t change_flags);
 ni_retcode_t ni_config_instance_set_encoder_frame_params(ni_session_context_t* p_ctx, ni_encoder_frame_params_t* p_params);
 ni_retcode_t ni_config_instance_set_write_len(ni_session_context_t* p_ctx, ni_device_type_t device_type, uint32_t len);
+ni_retcode_t ni_config_instance_set_sequence_change(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_resolution_t *p_resolution);
 void ni_encoder_set_vui(uint8_t* vui, ni_encoder_config_t *p_cfg);
 void *ni_session_keep_alive_thread(void *arguments);
 ni_retcode_t ni_send_session_keep_alive(uint32_t session_id, ni_device_handle_t device_handle, ni_event_handle_t event_handle, void *p_data);
@@ -816,6 +852,24 @@ ni_retcode_t ni_scaler_config_frame(ni_session_context_t *p_ctx,
                                     ni_frame_config_t *p_cfg);
 
 /*!******************************************************************************
+ *  \brief  config multi frames in the scaler
+ *
+ *  \param[in]  p_ctx               pointer to session context
+ *  \param[in]  p_cfg_in            pointer to input frame config array
+ *  \param[in]  numInCfgs           number of input frame configs in p_cfg_in array
+ *  \param[in]  p_cfg_out           pointer to output frame config
+ *
+ *  \return         NI_RETCODE_INVALID_PARAM
+ *                  NI_RETCODE_ERROR_INVALID_SESSION
+ *                  NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                  NI_RETCODE_ERROR_MEM_ALOC
+ *******************************************************************************/
+ni_retcode_t ni_scaler_multi_config_frame(ni_session_context_t *p_ctx,
+                                          ni_frame_config_t p_cfg_in[],
+                                          int numInCfgs,
+                                          ni_frame_config_t *p_cfg_out);
+
+/*!******************************************************************************
  *  \brief  Open a xcoder scaler instance
  *
  *  \param[in]  p_ctx   pointer to session context
@@ -864,6 +918,7 @@ ni_retcode_t ni_config_instance_set_uploader_params(ni_session_context_t *p_ctx,
  *                  NI_RETCODE_ERROR_INVALID_SESSION
  *                  NI_RETCODE_ERROR_MEM_ALOC
  *                  NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                  NI_RETCODE_FAILURE
  *******************************************************************************/
 ni_retcode_t ni_scaler_session_read_hwdesc(
   ni_session_context_t *p_ctx,
@@ -891,15 +946,30 @@ int ni_get_planar_from_pixfmt(int pix_fmt);
 /*!*****************************************************************************
  *  \brief  Get an address offset from a hw descriptor
  *
+ *  \param[in]  p_ctx     ni_session_context_t to be referenced
  *  \param[in]  hwdesc    Pointer to caller allocated niFrameSurface1_t
  *  \param[out] p_offset  Value of offset
  *
  *  \return On success    NI_RETCODE_SUCCESS
  *          On failure    NI_RETCODE_INVALID_PARAM
  ******************************************************************************/
-ni_retcode_t ni_get_memory_offset(const niFrameSurface1_t *hwdesc,
+ni_retcode_t ni_get_memory_offset(ni_session_context_t * p_ctx, const niFrameSurface1_t *hwdesc,
                                   uint32_t *p_offset);
+
 #endif
+
+/*!*****************************************************************************
+ *  \brief  Get DDR configuration of Quadra device
+ *
+ *  \param[in/out] p_ctx  pointer to a session context with valid file handle
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ *                        NI_RETCODE_ERROR_MEM_ALOC
+ *                        NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+ni_retcode_t ni_device_get_ddr_configuration(ni_session_context_t *p_ctx);
+
 
 #define NI_AI_HW_ALIGN_SIZE 64
 

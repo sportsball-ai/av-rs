@@ -28,12 +28,14 @@
 
 #pragma once
 
+#include <stdarg.h>
+
 #ifdef LIBXCODER_OBJS_BUILD
 #include "../build/xcoder_auto_headers.h"
 #endif
 
 #ifdef _WIN32
-  #ifdef LIB_DLL
+  #ifdef XCODER_DLL
     #ifdef LIB_EXPORTS
       #define LIB_API_LOG __declspec(dllexport)
     #else
@@ -42,7 +44,7 @@
   #else
     #define LIB_API_LOG
   #endif
-#elif __linux__
+#elif __linux__ || __APPLE__
   #define LIB_API_LOG
 #endif
 

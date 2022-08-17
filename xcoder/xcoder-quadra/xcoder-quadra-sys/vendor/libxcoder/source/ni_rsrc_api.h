@@ -58,22 +58,22 @@ typedef enum
 
 static const char *ni_codec_format_str[] = {"H.264", "H.265", "VP9", "JPEG",
                                             "AV1"};
-static const char *ni_dec_name_str[] = {"h264_ni_dec", "h265_ni_dec",
-                                        "vp9_ni_dec", "jpeg_ni_dec"};
-static const char *ni_enc_name_str[] = {"h264_ni_enc", "h265_ni_enc", "empty",
-                                        "jpeg_ni_enc", "av1_ni_enc"};
+static const char *ni_dec_name_str[] = {"h264_ni_quadra_dec", "h265_ni_quadra_dec",
+                                        "vp9_ni_quadra_dec", "jpeg_ni_quadra_dec"};
+static const char *ni_enc_name_str[] = {"h264_ni_quadra_enc", "h265_ni_quadra_enc", "empty",
+                                        "jpeg_ni_quadra_enc", "av1_ni_quadra_enc"};
 
 typedef enum
 {
-  EN_IDLE,
-  EN_ACTIVE
-}ni_sw_instance_status_t;
+    EN_IDLE,
+    EN_ACTIVE
+} ni_sw_instance_status_t;
 
-typedef enum 
+typedef enum
 {
-  EN_ALLOC_LEAST_LOAD,
-  EN_ALLOC_LEAST_INSTANCE
-}ni_alloc_rule_t;
+    EN_ALLOC_LEAST_LOAD,
+    EN_ALLOC_LEAST_INSTANCE
+} ni_alloc_rule_t;
 
 typedef struct _ni_device_queue
 {
@@ -127,10 +127,13 @@ typedef struct _ni_device_info
   uint8_t fw_build_time[26];
   uint8_t fw_build_id[256];
 
+  uint8_t serial_number[20];
+  uint8_t model_number[40];
+
   /*! general capability attributes */
   int max_fps_4k;                          /*! max fps for 4K */
   int                    max_instance_cnt; /*! max number of instances */
-  int                    active_num_inst; /*! active numver of instances */
+  uint32_t active_num_inst;                /*! active numver of instances */
   ni_device_type_t       device_type;     /*! decoder or encoder */
 
   /*! decoder/encoder/scaler/ai codec support capabilities */
@@ -140,6 +143,7 @@ typedef struct _ni_device_info
   ni_lock_handle_t lock;
 } ni_device_info_t;
 
+// This structure is very big (2.6MB). Recommend storing in heap
 typedef struct _ni_device 
 {
     int xcoder_cnt[NI_DEVICE_TYPE_XCODER_MAX];
@@ -152,15 +156,6 @@ typedef struct _ni_device_context
   ni_lock_handle_t    lock;
   ni_device_info_t * p_device_info;
 } ni_device_context_t;
-
-typedef struct _ni_card_info 
-{
-  char *name;
-  int   index;
-  bool  isActive;
-  const char *fwVer;
-  const char *hwVer;
-} ni_card_info_t;
 
 /*!******************************************************************************
  *  \brief   Initialize and create all resources required to work with NETINT NVMe
@@ -271,6 +266,23 @@ LIB_API ni_retcode_t ni_rsrc_list_devices(ni_device_type_t device_type,
 *******************************************************************************/
 LIB_API ni_retcode_t ni_rsrc_list_all_devices(ni_device_t* p_device);
 
+/*!******************************************************************************
+*  \brief        Grabs information for every initialized and uninitialized
+*                device.
+
+*   \param[out]  p_device  The device information returned.
+*   \param       list_uninitialized Flag to determine if uninitialized devices
+*                                   should be grabbed.
+*
+*   \return
+*                NI_RETCODE_SUCCESS
+*                NI_RETCODE_INVALID_PARAM
+*                NI_RETCODE_FAILURE
+*
+*   Note: Caller is responsible for allocating memory for "p_device".
+*******************************************************************************/
+LIB_API ni_retcode_t ni_rsrc_list_all_devices2(ni_device_t* p_device, bool list_uninitialized);
+
 /*!*****************************************************************************
 *  \brief        Print detailed capability information of all devices 
 *                on the system.
@@ -281,6 +293,18 @@ LIB_API ni_retcode_t ni_rsrc_list_all_devices(ni_device_t* p_device);
 *
 *******************************************************************************/
 LIB_API void ni_rsrc_print_all_devices_capability(void);
+
+/*!*****************************************************************************
+*  \brief        Prints detailed capability information for all initialized
+*                devices and general information about uninitialized devices.
+
+*   \param       list_uninitialized Flag to determine if uninitialized devices
+*                                   should be grabbed.
+*
+*   \return      none
+*
+*******************************************************************************/
+LIB_API void ni_rsrc_print_all_devices_capability2(bool list_uninitialized);
 
 /*!******************************************************************************
 *   \brief       Query a specific device with detailed information on the system
@@ -425,6 +449,17 @@ ni_device_context_t *ni_rsrc_allocate_simple_direct
 *******************************************************************************/
 LIB_API void ni_rsrc_release_resource(ni_device_context_t *p_ctxt,
                                       unsigned long load);
+
+/*!*****************************************************************************
+*   \brief      check the NetInt h/w device in resource pool on the host.
+*
+*   \param[in]  guid  the global unique device index in resource pool
+*               device_type     NI_DEVICE_TYPE_DECODER or NI_DEVICE_TYPE_ENCODER
+*
+*   \return
+*               NI_RETCODE_SUCCESS
+*******************************************************************************/
+LIB_API int ni_rsrc_check_hw_available(int guid, ni_device_type_t device_type);
 
 /*!*****************************************************************************
 *   \brief      Remove an NetInt h/w device from resource pool on the host.

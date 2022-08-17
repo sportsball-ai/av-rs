@@ -28,9 +28,11 @@
 *
 *******************************************************************************/
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #define _GNU_SOURCE //O_DIRECT is Linux-specific.  One must define _GNU_SOURCE to obtain its definitions
+#if __linux__
 #include <linux/types.h>
+#endif
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -59,6 +61,7 @@
 #include "ni_util.h"
 #include "ni_rsrc_api.h"
 #include "ni_rsrc_priv.h"
+#include "ni_lat_meas.h"
 #ifndef _WIN32
 #include "ni_p2p_ioctl.h"
 #endif
@@ -73,7 +76,7 @@ const char *const g_xcoder_log_names[NI_XCODER_LOG_NAMES_ARRAY_LEN] = {
     NI_XCODER_LOG_NAME_DEBUG,
     NI_XCODER_LOG_NAME_FULL,
     0};
-#ifdef __linux__
+#if __linux__ || __APPLE__
 static struct stat g_nvme_stat = { 0 };
 #endif
 
@@ -92,12 +95,14 @@ ni_session_context_t *ni_device_session_context_alloc_init(void)
     if (!p_ctx)
     {
         ni_log(NI_LOG_ERROR,
-               "ERROR: Failed to allocate memory for session context\n");
+               "ERROR: %s() Failed to allocate memory for session context\n",
+               __func__);
     } else
     {
         if (ni_device_session_context_init(p_ctx) != NI_RETCODE_SUCCESS)
         {
-            ni_log(NI_LOG_ERROR, "ERROR: Failed to init session context\n");
+            ni_log(NI_LOG_ERROR, "ERROR: %s() Failed to init session context\n",
+                   __func__);
             ni_device_session_context_free(p_ctx);
             return NULL;
         }
@@ -117,6 +122,12 @@ void ni_device_session_context_free(ni_session_context_t *p_ctx)
     if (p_ctx)
     {
         ni_device_session_context_clear(p_ctx);
+#ifdef MEASURE_LATENCY
+        if (p_ctx->frame_time_q)
+        {
+            ni_lat_meas_q_destroy(p_ctx->frame_time_q);
+        }
+#endif
         // cppcheck-suppress uselessAssignmentPtrArg
         ni_aligned_free(p_ctx);
     }
@@ -162,6 +173,7 @@ ni_retcode_t ni_device_session_context_init(ni_session_context_t *p_ctx)
     p_ctx->xcoder_state = NI_XCODER_IDLE_STATE;
     p_ctx->keep_alive_thread = (ni_pthread_t){0};
     p_ctx->keep_alive_timeout = NI_DEFAULT_KEEP_ALIVE_TIMEOUT;
+    p_ctx->decoder_low_delay = 0;
 #ifdef MY_SAVE
     p_ctx->debug_write_ptr = NULL;
     p_ctx->debug_write_index_ptr = NULL;
@@ -169,7 +181,7 @@ ni_retcode_t ni_device_session_context_init(ni_session_context_t *p_ctx)
 #endif
 
 #ifdef MEASURE_LATENCY
-    p_ctx->frame_time_q = ni_lat_meas_q_create(2000);
+    p_ctx->frame_time_q = (void *)ni_lat_meas_q_create(2000);
     p_ctx->prev_read_frame_time = 0;
 #endif
     return NI_RETCODE_SUCCESS;
@@ -197,7 +209,6 @@ ni_event_handle_t ni_create_event()
 {
 #ifdef _WIN32
     ni_event_handle_t event_handle = NI_INVALID_EVENT_HANDLE;
-    DWORD retval;
 
     // Input-0 determines whether the returned handle can be inherited by the child process.If lpEventAttributes is NULL, this handle cannot be inherited.
     // Input-1 specifies whether the event object is created to be restored manually or automatically.If set to FALSE, when a thread waits for an event signal, the system automatically restores the event state to a non-signaled state.
@@ -206,8 +217,8 @@ ni_event_handle_t ni_create_event()
     event_handle = CreateEvent(NULL, FALSE, FALSE, NULL);
     if (event_handle == NULL)
     {
-        retval = NI_ERRNO;
-        ni_log(NI_LOG_ERROR, "ERROR %d: create event failed\n", retval);
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() create event failed\n",
+               NI_ERRNO, __func__);
         return NI_INVALID_EVENT_HANDLE;
     }
   return event_handle;
@@ -333,14 +344,23 @@ ni_device_handle_t ni_device_open(const char * p_dev, uint32_t * p_max_io_size_o
 
     if (*p_max_io_size_out == NI_INVALID_IO_SIZE)
     {
-        *p_max_io_size_out = ni_get_kernel_max_io_size(p_dev);
+	#if __linux__
+            *p_max_io_size_out = ni_get_kernel_max_io_size(p_dev);
+	#elif __APPLE__
+            *p_max_io_size_out = MAX_IO_TRANSFER_SIZE;
+	#endif
     }
 
     ni_log(NI_LOG_DEBUG, "%s: opening regular-io enabled %s\n", __func__,
            p_dev);
     //O_SYNC is added to ensure that data is written to the card when the pread/pwrite function returns
-    //O_DIRECT is added to ensure that data can be sent directly to the card instead of to cache memory
-    fd = open(p_dev, O_RDWR | O_SYNC | O_DIRECT);
+    #if __linux__ 
+        //O_DIRECT is added to ensure that data can be sent directly to the card instead of to cache memory
+        fd = open(p_dev, O_RDWR | O_SYNC | O_DIRECT);
+    #elif __APPLE__
+	//O_DIRECT isn't available, so instead we use F_NOCACHE below
+        fd = open(p_dev, O_RDWR | O_SYNC);
+    #endif
 
     if (fd < 0)
     {
@@ -349,6 +369,19 @@ ni_device_handle_t ni_device_open(const char * p_dev, uint32_t * p_max_io_size_o
         fd = NI_INVALID_DEVICE_HANDLE;
         LRETURN;
     }
+
+    #if __APPLE__
+    //F_NOCACHE is set to ensure that data can be sent directly to the card instead of to cache memory
+    retval = fcntl(fd, F_NOCACHE, 1);
+    if (retval < 0)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: fnctl() failed on %s\n", p_dev);
+        ni_log(NI_LOG_ERROR, "ERROR: ni_device_open() failed!\n");
+        close(fd);
+        fd = NI_INVALID_DEVICE_HANDLE;
+        LRETURN;
+    }
+    #endif
 
     retval = fstat(fd, &g_nvme_stat);
     if (retval < 0)
@@ -477,7 +510,8 @@ ni_retcode_t ni_device_capability_query(ni_device_handle_t device_handle, ni_dev
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE),
                         NI_NVME_IDENTITY_CMD_DATA_SZ))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): Cannot allocate buffer.\n", __func__);
+      ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer.\n",
+             NI_ERRNO, __func__);
       retval = NI_RETCODE_ERROR_MEM_ALOC;
       LRETURN;
   }
@@ -537,7 +571,7 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
   int least_model_load = 0;
   int least_instance = 0;
   int guid = -1;
-  int num_sw_instances = 0;
+  uint32_t num_sw_instances = 0;
   int user_handles = false;
   ni_lock_handle_t lock = NI_INVALID_LOCK_HANDLE;
   ni_device_handle_t handle = NI_INVALID_DEVICE_HANDLE;
@@ -558,7 +592,9 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
 
   if (NI_INVALID_SESSION_ID != p_ctx->session_id)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: trying to overwrite existing session\n");
+      ni_log(NI_LOG_ERROR, "ERROR: trying to overwrite existing session, "
+             "device_type %d, session id %d\n",
+             device_type, p_ctx->session_id);
       retval = NI_RETCODE_INVALID_PARAM;
       LRETURN;
   }
@@ -581,6 +617,13 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
   p_ctx->ltr_frame_ref_invalid = -1;
   p_ctx->framerate.framerate_num = 0;
   p_ctx->framerate.framerate_denom = 0;
+  p_ctx->vui.colorDescPresent = 0;
+  p_ctx->vui.colorPrimaries = 0;
+  p_ctx->vui.colorTrc = 0;
+  p_ctx->vui.colorSpace = 0;
+  p_ctx->vui.aspectRatioWidth = 0;
+  p_ctx->vui.aspectRatioHeight = 0;
+  p_ctx->vui.videoFullRange = 0;
 
   p_ctx->keep_alive_thread_args = NULL;
 
@@ -645,6 +688,7 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
       if (((handle = ni_device_open(rsrc_ctx->p_device_info->blk_name, &dummy_io_size)) == NI_INVALID_DEVICE_HANDLE) ||
           ((handle1 = ni_device_open(rsrc_ctx->p_device_info->blk_name, &p_ctx->max_nvme_io_size)) == NI_INVALID_DEVICE_HANDLE))
       {
+          ni_rsrc_free_device_context(rsrc_ctx);
           retval = NI_RETCODE_ERROR_OPEN_DEVICE;
           LRETURN;
       } else
@@ -705,6 +749,7 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
           if (NI_INVALID_DEVICE_HANDLE == p_session_context.device_handle)
           {
               ni_log(NI_LOG_ERROR, "Error open device");
+              ni_rsrc_free_device_context(p_device_context);
               continue;
           }
 
@@ -721,6 +766,7 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
                            device_type_str[query_type],
                            p_device_context->p_device_info->dev_name,
                            p_device_context->p_device_info->hw_id);
+            ni_rsrc_free_device_context(p_device_context);
             continue;
         }
         ni_rsrc_update_record(p_device_context, &p_session_context);
@@ -814,6 +860,27 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
          "Finish open the session dev:%s blk:%s guid:%d handle:%p handle1:%p\n",
          p_ctx->dev_xcoder_name, p_ctx->blk_xcoder_name, p_ctx->hw_id,
          p_ctx->device_handle, p_ctx->blk_io_handle);
+
+  // get FW API version
+  p_device_context = ni_rsrc_get_device_context(device_type, p_ctx->hw_id);
+  if (p_device_context == NULL)
+  {
+      ni_log(NI_LOG_ERROR,
+             "ERROR: %s() ni_rsrc_get_device_context() failed\n",
+             __func__);
+      retval = NI_RETCODE_ERROR_OPEN_DEVICE;
+      LRETURN;
+  }
+  memcpy(p_ctx->fw_rev , p_device_context->p_device_info->fw_rev, 8);
+
+  retval = ni_device_get_ddr_configuration(p_ctx);
+  if (retval != NI_RETCODE_SUCCESS)
+  {
+      ni_log(NI_LOG_ERROR,
+             "ERROR: %s() cannot retrieve DDR configuration\n",
+             __func__);
+      LRETURN;
+  }
 
   switch (device_type)
   {
@@ -939,7 +1006,8 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
         }
       }
       retval = NI_RETCODE_INVALID_PARAM;
-      ni_log(NI_LOG_ERROR, "Unrecognized device type: %d", device_type);
+      ni_log(NI_LOG_ERROR, "ERROR: %s() Unrecognized device type: %d",
+             __func__, device_type);
       LRETURN;
     }
   }
@@ -969,6 +1037,7 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
       retval = NI_RETCODE_ERROR_MEM_ALOC;
       LRETURN;
   }
+  memset(p_ctx->keep_alive_thread_args->p_buffer, 0, NI_DATA_BUFFER_LEN);
 
   if (0 !=
       ni_pthread_create(&p_ctx->keep_alive_thread, NULL,
@@ -995,6 +1064,8 @@ ni_retcode_t ni_device_session_open(ni_session_context_t *p_ctx,
   }
 
 END:
+
+    ni_rsrc_free_device_context(p_device_context);
 
     if (p_device_pool)
     {
@@ -1097,8 +1168,8 @@ ni_retcode_t ni_device_session_close(ni_session_context_t *p_ctx,
         default:
         {
             retval = NI_RETCODE_INVALID_PARAM;
-            ni_log(NI_LOG_ERROR, "ERROR: Unrecognized device type: %d\n",
-                   device_type);
+            ni_log(NI_LOG_ERROR, "ERROR: %s() Unrecognized device type: %d",
+                   __func__, device_type);
             break;
         }
     }
@@ -1172,7 +1243,8 @@ ni_retcode_t ni_device_session_flush(ni_session_context_t* p_ctx, ni_device_type
     default:
     {
       retval = NI_RETCODE_INVALID_PARAM;
-      ni_log(NI_LOG_ERROR, "ERROR: Unrecognized device type: %d", device_type);
+      ni_log(NI_LOG_ERROR, "ERROR: %s() Unrecognized device type: %d",
+             __func__, device_type);
       break;
     }
   }
@@ -1364,7 +1436,7 @@ int ni_device_session_write(ni_session_context_t *p_ctx, ni_session_data_io_t *p
   #ifdef _WIN32
       (p_ctx->keep_alive_thread.handle &&
   #else
-      (p_ctx->keep_alive_thread && 
+      (p_ctx->keep_alive_thread &&
   #endif
        p_ctx->keep_alive_thread_args->close_thread))
   {
@@ -1395,7 +1467,8 @@ int ni_device_session_write(ni_session_context_t *p_ctx, ni_session_data_io_t *p
     default:
     {
       retval = NI_RETCODE_INVALID_PARAM;
-      ni_log(NI_LOG_ERROR, "ERROR: Unrecognized device type: %d", device_type);
+      ni_log(NI_LOG_ERROR, "ERROR: %s() Unrecognized device type: %d",
+             __func__, device_type);
       break;
     }
   }
@@ -1466,7 +1539,7 @@ int ni_device_session_read(ni_session_context_t *p_ctx, ni_session_data_io_t *p_
   #ifdef _WIN32
       (p_ctx->keep_alive_thread.handle &&
   #else
-      (p_ctx->keep_alive_thread && 
+      (p_ctx->keep_alive_thread &&
   #endif
        p_ctx->keep_alive_thread_args->close_thread))
   {
@@ -1553,7 +1626,8 @@ int ni_device_session_read(ni_session_context_t *p_ctx, ni_session_data_io_t *p_
     default:
     {
       retval = NI_RETCODE_INVALID_PARAM;
-      ni_log(NI_LOG_ERROR, "ERROR: Unrecognized device type: %d", device_type);
+      ni_log(NI_LOG_ERROR, "ERROR: %s() Unrecognized device type: %d",
+             __func__, device_type);
       break;
     }
   }
@@ -1598,7 +1672,8 @@ ni_retcode_t ni_device_session_query(ni_session_context_t* p_ctx, ni_device_type
   } else
   {
       retval = NI_RETCODE_INVALID_PARAM;
-      ni_log(NI_LOG_ERROR, "ERROR: Unrecognized device type: %d", device_type);
+      ni_log(NI_LOG_ERROR, "ERROR: %s() Unrecognized device type: %d",
+             __func__, device_type);
   }
 
   return retval;
@@ -1643,8 +1718,9 @@ ni_retcode_t ni_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
      || (video_width>NI_MAX_RESOLUTION_WIDTH) || (video_width<=0)
      || (video_height>NI_MAX_RESOLUTION_HEIGHT) || (video_height<=0))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null, return\n",
-             __func__);
+      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null or not supported, "
+             "factor %d, video_width %d, video_height %d\n",
+             __func__, factor, video_width, video_height);
       return NI_RETCODE_INVALID_PARAM;
   }
 
@@ -1733,7 +1809,8 @@ ni_retcode_t ni_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
   {
       if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
       {
-          ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate p_frame buffer.\n");
+          ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate p_frame buffer.\n",
+                 NI_ERRNO, __func__);
           retval = NI_RETCODE_ERROR_MEM_ALOC;
           LRETURN;
       }
@@ -1765,10 +1842,10 @@ ni_retcode_t ni_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
     p_frame->data_len[3] = 0;//unused by hwdesc
   }
 
-  p_frame->p_data[0] = (uint8_t*)p_frame->p_buffer;
-  p_frame->p_data[1] = (uint8_t*)p_frame->p_data[0] + p_frame->data_len[0];
-  p_frame->p_data[2] = (uint8_t*)p_frame->p_data[1] + p_frame->data_len[1];
-  p_frame->p_data[3] = (uint8_t*)p_frame->p_data[2] + p_frame->data_len[2]; //hwdescriptor
+  p_frame->p_data[0] = p_frame->p_buffer;
+  p_frame->p_data[1] = p_frame->p_data[0] + p_frame->data_len[0];
+  p_frame->p_data[2] = p_frame->p_data[1] + p_frame->data_len[1];
+  p_frame->p_data[3] = p_frame->p_data[2] + p_frame->data_len[2]; //hwdescriptor
 
   // init p_data[3] to 0 so that ni_frame_buffer_free frees only valid DMA buf
   // fd in hw frame read from fw
@@ -1784,6 +1861,192 @@ ni_retcode_t ni_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
   ni_log(NI_LOG_DEBUG, "%s: success: p_frame->buffer_size=%u\n", __func__,
          p_frame->buffer_size);
 
+END:
+
+    if (NI_RETCODE_SUCCESS != retval)
+    {
+        ni_aligned_free(p_buffer);
+    }
+
+    return retval;
+}
+
+/*!*****************************************************************************
+ *  \brief  Allocate preliminary memory for the frame buffer based on provided
+ *          parameters.
+ *
+ *  \param[in] p_frame       Pointer to a caller allocated
+ *                           ni_frame_t struct
+ *  \param[in] video_width   Width of the video frame
+ *  \param[in] video_height  Height of the video frame
+ *  \param[in] alignment     Allignment requirement
+ *  \param[in] pixel_format  Format for input
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+ni_retcode_t ni_frame_buffer_alloc_dl(ni_frame_t *p_frame, int video_width,
+                                          int video_height, int pixel_format)
+{
+    void *p_buffer = NULL;
+    int retval = NI_RETCODE_SUCCESS;
+    int width_aligned = video_width;
+    int height_aligned = video_height;
+    int buffer_size;
+    int luma_size;
+    int chroma_b_size;
+    int chroma_r_size;
+
+    if ((!p_frame) || (video_width > NI_MAX_RESOLUTION_WIDTH) ||
+        (video_width <= 0) || (video_height > NI_MAX_RESOLUTION_HEIGHT) ||
+        (video_height <= 0))
+    {
+        ni_log(NI_LOG_ERROR,
+               "ERROR: %s passed parameters are null or not supported, "
+               "video_width %d, video_height %d\n",
+               __func__, video_width, video_height);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    switch (pixel_format)
+    {
+        case NI_PIX_FMT_YUV420P:
+            width_aligned = NI_VPU_ALIGN128(video_width);
+            height_aligned = NI_VPU_CEIL(video_height, 2);
+
+            luma_size = width_aligned * height_aligned;
+            chroma_b_size =
+                NI_VPU_ALIGN128(video_width / 2) * height_aligned / 2;
+            chroma_r_size = chroma_b_size;
+            break;
+        case NI_PIX_FMT_YUV420P10LE:
+            width_aligned = NI_VPU_ALIGN128(video_width * 2) / 2;
+            height_aligned = NI_VPU_CEIL(video_height, 2);
+
+            luma_size = width_aligned * height_aligned * 2;
+            chroma_b_size = NI_VPU_ALIGN128(video_width) * height_aligned / 2;
+            chroma_r_size = chroma_b_size;
+            break;
+        case NI_PIX_FMT_NV12:
+            width_aligned = NI_VPU_ALIGN128(video_width);
+            height_aligned = NI_VPU_CEIL(video_height, 2);
+
+            luma_size = width_aligned * height_aligned;
+            chroma_b_size = width_aligned * height_aligned / 2;
+            chroma_r_size = 0;
+            break;
+        case NI_PIX_FMT_P010LE:
+            width_aligned = NI_VPU_ALIGN128(video_width * 2) / 2;
+            height_aligned = NI_VPU_CEIL(video_height, 2);
+
+            luma_size = width_aligned * height_aligned * 2;
+            chroma_b_size = NI_VPU_ALIGN128(video_width) * height_aligned;
+            chroma_r_size = 0;
+            break;
+        case NI_PIX_FMT_NV16:
+            width_aligned = video_width;
+            height_aligned = video_height;
+
+            luma_size = video_width * video_height;
+            chroma_b_size = luma_size;
+            chroma_r_size = 0;
+            break;
+        case NI_PIX_FMT_YUYV422:
+        case NI_PIX_FMT_UYVY422:
+            width_aligned = NI_VPU_ALIGN16(video_width);
+            height_aligned = video_height;
+
+            luma_size = width_aligned * height_aligned * 2;
+            chroma_b_size = 0;
+            chroma_r_size = 0;
+            break;
+        case NI_PIX_FMT_RGBA:
+        case NI_PIX_FMT_BGRA:
+        case NI_PIX_FMT_ARGB:
+        case NI_PIX_FMT_ABGR:
+        case NI_PIX_FMT_BGR0:
+            width_aligned = NI_VPU_ALIGN16(video_width);
+            height_aligned = video_height;
+
+            luma_size = width_aligned * height_aligned * 4;
+            chroma_b_size = 0;
+            chroma_r_size = 0;
+            break;
+        case NI_PIX_FMT_BGRP:
+            width_aligned = video_width;
+            height_aligned = video_height;
+
+            luma_size = NI_VPU_ALIGN32(width_aligned * height_aligned);
+            chroma_b_size = luma_size;
+            chroma_r_size = luma_size;
+            break;
+        default:
+            ni_log(NI_LOG_ERROR, "Unknown pixel format %d\n", pixel_format);
+            return NI_RETCODE_INVALID_PARAM;
+    }
+
+    /* Allocate local memory to hold a software ni_frame */
+    buffer_size = luma_size + chroma_b_size + chroma_r_size;
+
+    /* Round up to nearest 4K block */
+    buffer_size = NI_VPU_ALIGN4096(buffer_size);
+
+    ni_log(NI_LOG_DEBUG, "%s: Rlen %d Glen %d Blen %d buffer_size %d\n",
+           __func__, luma_size, chroma_b_size, chroma_r_size, buffer_size);
+
+    /* If the frame has changed, reallocate it */
+    if ((p_frame->buffer_size != buffer_size) && (p_frame->buffer_size > 0))
+    {
+        ni_log(NI_LOG_DEBUG,
+               "%s: free current p_frame, p_frame->buffer_size=%u\n", __func__,
+               p_frame->buffer_size);
+        ni_frame_buffer_free(p_frame);
+    }
+
+    /* Check if need to reallocate */
+    if (p_frame->buffer_size != buffer_size)
+    {
+        ni_log(NI_LOG_DEBUG, "%s: Allocate new p_frame buffer\n", __func__);
+        if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
+        {
+            ni_log(NI_LOG_ERROR,
+                   "ERROR %d: %s() Cannot allocate p_frame buffer.\n", NI_ERRNO,
+                   __func__);
+            retval = NI_RETCODE_ERROR_MEM_ALOC;
+            LRETURN;
+        }
+    } else
+    {
+        ni_log(NI_LOG_DEBUG, "%s: reuse p_frame buffer\n", __func__);
+    }
+
+    // init once after allocation
+    // memset(p_buffer, 0, buffer_size);
+
+    p_frame->buffer_size = buffer_size;
+    p_frame->p_buffer = p_buffer;
+
+    p_frame->data_len[0] = luma_size;
+    p_frame->data_len[1] = chroma_b_size;
+    p_frame->data_len[2] = chroma_r_size;
+    p_frame->data_len[3] = 0;
+
+    p_frame->p_data[0] = (uint8_t *)p_frame->p_buffer;
+    p_frame->p_data[1] = (uint8_t *)p_frame->p_data[0] + p_frame->data_len[0];
+    p_frame->p_data[2] = (uint8_t *)p_frame->p_data[1] + p_frame->data_len[1];
+    p_frame->p_data[3] = (uint8_t *)p_frame->p_data[2] + p_frame->data_len[2];
+
+    // init p_data[3] to 0 so that ni_frame_buffer_free frees only valid DMA buf
+    // fd in hw frame read from fw
+    p_frame->video_width = width_aligned;
+    p_frame->video_height = height_aligned;
+
+    // ni_log(NI_LOG_DEBUG, "ni_frame_buffer_alloc: p_buffer %p p_data [%p %p %p %p] data_len [%d %d %d %d] video_width %d video_height %d\n", p_frame->p_buffer, p_frame->p_data[0], p_frame->p_data[1], p_frame->p_data[2], p_frame->p_data[3], p_frame->data_len[0], p_frame->data_len[1], p_frame->data_len[2], p_frame->data_len[3], p_frame->video_width, p_frame->video_height);
+    ni_log(NI_LOG_DEBUG, "%s: success: p_frame->buffer_size=%u\n", __func__,
+           p_frame->buffer_size);
 END:
 
     if (NI_RETCODE_SUCCESS != retval)
@@ -1833,8 +2096,9 @@ ni_retcode_t ni_decoder_frame_buffer_alloc(ni_buf_pool_t *p_pool,
      || (video_width > NI_MAX_RESOLUTION_WIDTH) || (video_width <= 0)
       || (video_height > NI_MAX_RESOLUTION_HEIGHT) || (video_height <= 0))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null, return\n",
-             __func__);
+      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null or not supported, "
+             "factor %d, video_width %d, video_height %d\n",
+             __func__, factor, video_width, video_height);
       return NI_RETCODE_INVALID_PARAM;
   }
 
@@ -1912,16 +2176,17 @@ ni_retcode_t ni_decoder_frame_buffer_alloc(ni_buf_pool_t *p_pool,
   }
   else
   {
-    p_frame->dec_buf = p_frame->p_buffer = NULL;
+    p_frame->dec_buf = NULL;
+    p_frame->p_buffer = NULL;
     ni_log(NI_LOG_DEBUG, "%s: NOT alloc mem buffer\n", __func__);
   }
 
   if (p_frame->p_buffer)
   {
-    p_frame->p_data[0] = (uint8_t*)p_frame->p_buffer;
-    p_frame->p_data[1] = (uint8_t*)p_frame->p_data[0] + luma_size;
-    p_frame->p_data[2] = (uint8_t*)p_frame->p_data[1] + chroma_b_size;
-    p_frame->p_data[3] = (uint8_t*)p_frame->p_data[2] + chroma_r_size;
+    p_frame->p_data[0] = p_frame->p_buffer;
+    p_frame->p_data[1] = p_frame->p_data[0] + luma_size;
+    p_frame->p_data[2] = p_frame->p_data[1] + chroma_b_size;
+    p_frame->p_data[3] = p_frame->p_data[2] + chroma_r_size;
   }
   else
   {
@@ -1956,7 +2221,8 @@ END:
   *  \param[in] video_height  Height of the video frame
   *  \param[in] linesize      Picture line size
   *  \param[in] alignment     Allignment requirement
-  *  \param[in] extra_len     Extra data size (incl. meta data)
+  *  \param[in] extra_len     Extra data size (incl. meta data). < 0 means not 
+  *                           to allocate any buffer (zero-copy from existing)
   *  \param[in] alignment_2pass_wa set alignment to work with 2pass encode
   *
   *  \return On success
@@ -1974,12 +2240,13 @@ ni_retcode_t ni_encoder_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
   int height_aligned;
   int retval = NI_RETCODE_SUCCESS;
 
-  if ((!p_frame)  || (!linesize)|| (linesize[0]<=0) || (linesize[0]>NI_MAX_RESOLUTION_LINESIZE)
+  if ((!p_frame) || (!linesize) || (linesize[0]<=0) || (linesize[0]>NI_MAX_RESOLUTION_LINESIZE)
      || (video_width>NI_MAX_RESOLUTION_WIDTH) || (video_width<=0)
      || (video_height>NI_MAX_RESOLUTION_HEIGHT) || (video_height<=0))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null, return\n",
-             __func__);
+      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null or not supported, "
+             "p_frame %p, linesize %p, video_width %d, video_height %d\n",
+             __func__, p_frame, linesize, video_width, video_height);
       return NI_RETCODE_INVALID_PARAM;
   }
 
@@ -2027,45 +2294,52 @@ ni_retcode_t ni_encoder_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
     chroma_b_size = luma_size / 4;
     chroma_r_size = luma_size / 4;
   }
-  int buffer_size = luma_size + chroma_b_size + chroma_r_size + extra_len;
-
-  buffer_size = ((buffer_size + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT + NI_MEM_PAGE_ALIGNMENT;
-
-  //Check if Need to free
-  if ((p_frame->buffer_size != buffer_size) && (p_frame->buffer_size > 0))
+  if(extra_len >= 0)
   {
-      ni_log(NI_LOG_DEBUG,
-             "%s: free current p_frame, "
-             "p_frame->buffer_size=%u\n",
-             __func__, p_frame->buffer_size);
-      ni_frame_buffer_free(p_frame);
-  }
+      int buffer_size = luma_size + chroma_b_size + chroma_r_size + extra_len;
 
-  //Check if need to realocate
-  if (p_frame->buffer_size != buffer_size)
-  {
-      if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
+      buffer_size = ((buffer_size + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT + NI_MEM_PAGE_ALIGNMENT;
+
+      //Check if Need to free
+      if ((p_frame->buffer_size != buffer_size) && (p_frame->buffer_size > 0))
       {
-          ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate p_frame buffer.\n");
-          retval = NI_RETCODE_ERROR_MEM_ALOC;
-          LRETURN;
+          ni_log(NI_LOG_DEBUG,
+                 "%s: free current p_frame, "
+                 "p_frame->buffer_size=%u\n",
+                 __func__, p_frame->buffer_size);
+          ni_frame_buffer_free(p_frame);
       }
 
-    // init once after allocation
-    memset(p_buffer, 0, buffer_size);
-    p_frame->buffer_size = buffer_size;
-    p_frame->p_buffer = p_buffer;
+      //Check if need to realocate
+      if (p_frame->buffer_size != buffer_size)
+      {
+          if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
+          {
+              ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate p_frame buffer.\n",
+                     NI_ERRNO, __func__);
+              retval = NI_RETCODE_ERROR_MEM_ALOC;
+              LRETURN;
+          }
 
-    ni_log(NI_LOG_DEBUG, "%s: allocated new p_frame buffer\n", __func__);
+          // init once after allocation
+          memset(p_buffer, 0, buffer_size);
+          p_frame->buffer_size = buffer_size;
+          p_frame->p_buffer = p_buffer;
+
+          ni_log(NI_LOG_DEBUG, "%s: allocated new p_frame buffer\n", __func__);
+      }
+      else
+      {
+          ni_log(NI_LOG_DEBUG, "%s: reuse p_frame buffer\n", __func__);
+      }
+      p_frame->p_data[0] = (uint8_t*)p_frame->p_buffer;
+      p_frame->p_data[1] = (uint8_t*)p_frame->p_data[0] + luma_size;
+      p_frame->p_data[2] = (uint8_t*)p_frame->p_data[1] + chroma_b_size;
   }
   else
   {
-      ni_log(NI_LOG_DEBUG, "%s: reuse p_frame buffer\n", __func__);
+      p_frame->buffer_size = 0; //no ownership
   }
-
-  p_frame->p_data[0] = (uint8_t*)p_frame->p_buffer;
-  p_frame->p_data[1] = (uint8_t*)p_frame->p_data[0] + luma_size;
-  p_frame->p_data[2] = (uint8_t*)p_frame->p_data[1] + chroma_b_size;
 
   p_frame->data_len[0] = luma_size;
   p_frame->data_len[1] = chroma_b_size;
@@ -2091,6 +2365,94 @@ END:
 }
 
 /*!*****************************************************************************
+ *  \brief  allocate device destination frame from scaler hwframe pool
+ *
+ *  \param  
+ *
+ *  \return 0 if successful, < 0 otherwise
+ ******************************************************************************/
+ni_retcode_t ni_scaler_dest_frame_alloc(ni_session_context_t *p_ctx,
+                                        ni_scaler_input_params_t scaler_params,
+                                        niFrameSurface1_t *p_surface)
+{
+    int ret = 0;
+    if (scaler_params.op != NI_SCALER_OPCODE_OVERLAY)
+    {
+        ret = ni_device_alloc_frame(
+            p_ctx, scaler_params.output_width, scaler_params.output_height,
+            scaler_params.output_format, NI_SCALER_FLAG_IO,
+            scaler_params.out_rec_width, scaler_params.out_rec_height,
+            scaler_params.out_rec_x, scaler_params.out_rec_y,
+            scaler_params.rgba_color, -1, NI_DEVICE_TYPE_SCALER);
+    } else
+    {
+        // in vf_overlay_ni.c: flags = (s->alpha_format ? NI_SCALER_FLAG_PA : 0) | NI_SCALER_FLAG_IO;
+        ret = ni_device_alloc_frame(
+            p_ctx, scaler_params.output_width, scaler_params.output_height,
+            scaler_params.output_format, NI_SCALER_FLAG_IO,
+            scaler_params.out_rec_width, scaler_params.out_rec_height,
+            scaler_params.out_rec_x, scaler_params.out_rec_y,
+            p_surface->ui32nodeAddress, p_surface->ui16FrameIdx,
+            NI_DEVICE_TYPE_SCALER);
+    }
+    return ret;
+}
+
+/*!*****************************************************************************
+ *  \brief  allocate device input frame by hw descriptor. This call won't actually allocate
+            a frame but sends the incoming hardware frame index to the scaler manager
+ *
+ *  \param  
+ *
+ *  \return 0 if successful, < 0 otherwise
+ ******************************************************************************/
+ni_retcode_t ni_scaler_input_frame_alloc(ni_session_context_t *p_ctx,
+                                         ni_scaler_input_params_t scaler_params,
+                                         niFrameSurface1_t *p_src_surface)
+{
+    int ret = 0;
+
+    ret = ni_device_alloc_frame(
+        p_ctx, scaler_params.input_width, scaler_params.input_height,
+        scaler_params.input_format, 0, scaler_params.in_rec_width,
+        scaler_params.in_rec_height, scaler_params.in_rec_x,
+        scaler_params.in_rec_y, p_src_surface->ui32nodeAddress,
+        p_src_surface->ui16FrameIdx, NI_DEVICE_TYPE_SCALER);
+    return ret;
+}
+
+/*!*****************************************************************************
+ *  \brief  init output pool of scaler frames
+ *
+ *  \param  
+ *
+ *  \return 0 if successful, < 0 otherwise
+ ******************************************************************************/
+ni_retcode_t ni_scaler_frame_pool_alloc(ni_session_context_t *p_ctx,
+                                        ni_scaler_input_params_t scaler_params)
+{
+    int pool_size = 1;   // set to 1 for this demo
+
+    int rc = 0;
+    int options = NI_SCALER_FLAG_IO | NI_SCALER_FLAG_PC;
+    if (p_ctx->isP2P)
+        options |= NI_SCALER_FLAG_P2;
+
+    /* Allocate a pool of frames by the scaler */
+    rc = ni_device_alloc_frame(p_ctx, scaler_params.output_width,
+                               scaler_params.output_height,
+                               scaler_params.output_format, options,
+                               0,           // rec width
+                               0,           // rec height
+                               0,           // rec X pos
+                               0,           // rec Y pos
+                               pool_size,   // rgba color/pool size
+                               0,           // frame index
+                               NI_DEVICE_TYPE_SCALER);
+    return rc;
+}
+
+/*!*****************************************************************************
 *  \brief  Allocate memory for the frame buffer based on provided parameters
 *          taking into account pic line size and extra data.
 *          Applicable to nv12 AVFrame only. Cb/Cr size matches that of Y.
@@ -2100,7 +2462,8 @@ END:
 *  \param[in] video_width   Width of the video frame
 *  \param[in] video_height  Height of the video frame
 *  \param[in] linesize      Picture line size
-*  \param[in] extra_len     Extra data size (incl. meta data)
+*  \param[in] extra_len     Extra data size (incl. meta data). < 0 means not
+*                           to allocate any buffer (zero-copy from existing)
 *  \param[in] alignment_2pass_wa set alignment to work with 2pass encode
 *
 *  \return On success
@@ -2121,8 +2484,9 @@ ni_retcode_t ni_frame_buffer_alloc_nv(ni_frame_t *p_frame, int video_width,
     || (video_width>NI_MAX_RESOLUTION_WIDTH) || (video_width <= 0)
     || (video_height>NI_MAX_RESOLUTION_HEIGHT) || (video_height <= 0))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null, return\n",
-             __func__);
+      ni_log(NI_LOG_ERROR, "ERROR: %s passed parameters are null or not supported, "
+             "p_frame %p, linesize %p, video_width %d, video_height %d\n",
+             __func__, p_frame, linesize, video_width, video_height);
       return NI_RETCODE_INVALID_PARAM;
   }
 
@@ -2146,45 +2510,51 @@ ni_retcode_t ni_frame_buffer_alloc_nv(ni_frame_t *p_frame, int video_width,
       // for 2-pass encode output mismatch WA, need to extend (and pad) CbCr plane height, because 1st pass assume input 32 align
       chroma_br_size = linesize[0] * ((((height_aligned + 31) / 32) * 32) / 2);
   }
-
-  int buffer_size = luma_size + chroma_br_size + extra_len;
-
-  buffer_size = ((buffer_size + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT + NI_MEM_PAGE_ALIGNMENT;
-
-  //Check if Need to free
-  if ((p_frame->buffer_size != buffer_size) && (p_frame->buffer_size > 0))
+  if (extra_len >= 0)
   {
-      ni_log(NI_LOG_DEBUG, "%s: free current p_frame->buffer_size=%u\n",
-             __func__, p_frame->buffer_size);
-      ni_frame_buffer_free(p_frame);
-  }
-
-  //Check if need to realocate
-  if (p_frame->buffer_size != buffer_size)
-  {
-      if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
+      int buffer_size = luma_size + chroma_br_size + extra_len;
+      
+      buffer_size = ((buffer_size + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT + NI_MEM_PAGE_ALIGNMENT;
+      
+      //Check if Need to free
+      if ((p_frame->buffer_size != buffer_size) && (p_frame->buffer_size > 0))
       {
-          ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate p_frame buffer.\n");
-          retval = NI_RETCODE_ERROR_MEM_ALOC;
-          LRETURN;
+          ni_log(NI_LOG_DEBUG, "%s: free current p_frame->buffer_size=%u\n",
+                 __func__, p_frame->buffer_size);
+          ni_frame_buffer_free(p_frame);
       }
-
-    // init once after allocation
-    memset(p_buffer, 0, buffer_size);
-    p_frame->buffer_size = buffer_size;
-    p_frame->p_buffer = p_buffer;
-
-    ni_log(NI_LOG_DEBUG, "%s: allocated new p_frame buffer\n", __func__);
+      
+      //Check if need to realocate
+      if (p_frame->buffer_size != buffer_size)
+      {
+          if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
+          {
+              ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate p_frame buffer.\n",
+                     NI_ERRNO, __func__);
+              retval = NI_RETCODE_ERROR_MEM_ALOC;
+              LRETURN;
+          }
+      
+          // init once after allocation
+          memset(p_buffer, 0, buffer_size);
+          p_frame->buffer_size = buffer_size;
+          p_frame->p_buffer = p_buffer;
+          
+          ni_log(NI_LOG_DEBUG, "%s: allocated new p_frame buffer\n", __func__);
+      }
+      else
+      {
+          ni_log(NI_LOG_DEBUG, "%s: reuse p_frame buffer\n", __func__);
+      }
+      
+      p_frame->p_data[0] = (uint8_t*)p_frame->p_buffer;
+      p_frame->p_data[1] = (uint8_t*)p_frame->p_data[0] + luma_size;
+      p_frame->p_data[2] = (uint8_t*)p_frame->p_data[1] + chroma_br_size;
   }
   else
   {
-      ni_log(NI_LOG_DEBUG, "%s: reuse p_frame buffer\n", __func__);
+      p_frame->buffer_size = 0; //no ownership
   }
-
-  p_frame->p_data[0] = (uint8_t*)p_frame->p_buffer;
-  p_frame->p_data[1] = (uint8_t*)p_frame->p_data[0] + luma_size;
-  p_frame->p_data[2] = (uint8_t*)p_frame->p_data[1] + chroma_br_size;
-
   p_frame->data_len[0] = luma_size;
   p_frame->data_len[1] = chroma_br_size;
   p_frame->data_len[2] = 0;
@@ -2203,6 +2573,57 @@ END:
     }
 
     return retval;
+}
+
+/*!*****************************************************************************
+  *  \brief  This API is a wrapper for ni_encoder_frame_buffer_alloc(), used
+  *          for planar pixel formats, and ni_frame_buffer_alloc_nv(), used for
+  *          semi-planar pixel formats. This API is meant to combine the
+  *          functionality for both individual format APIs.
+  *          Allocate memory for the frame buffer for encoding based on given
+  *          parameters, taking into account pic line size and extra data.
+  *          Applicable to YUV420p(8 or 10 bit/pixel) or nv12 AVFrame.
+  *          Cb/Cr size matches that of Y.
+  *
+  *  \param[in] planar        true: if planar:
+  *                           pixel_format == (NI_PIX_FMT_YUV420P ||
+  *                               NI_PIX_FMT_YUV420P10LE ||NI_PIX_FMT_RGBA).
+  *                           false: semi-planar:
+  *                           pixel_format == (NI_PIX_FMT_NV12 ||
+  *                                NI_PIX_FMT_P010LE).
+  *  \param[in] p_frame       Pointer to a caller allocated ni_frame_t struct
+  *  \param[in] video_width   Width of the video frame
+  *  \param[in] video_height  Height of the video frame
+  *  \param[in] linesize      Picture line size
+  *  \param[in] alignment     Allignment requirement. Only used for planar format.
+  *  \param[in] extra_len     Extra data size (incl. meta data). < 0 means not 
+  *                           to allocate any buffer (zero-copy from existing)
+  *  \param[in] alignment_2pass_wa set alignment to work with 2pass encode
+  *
+  *  \return On success
+  *                          NI_RETCODE_SUCCESS
+  *          On failure
+  *                          NI_RETCODE_INVALID_PARAM
+  *                          NI_RETCODE_ERROR_MEM_ALOC
+  *****************************************************************************/
+ni_retcode_t ni_encoder_sw_frame_buffer_alloc(bool planar, ni_frame_t *p_frame,
+                                              int video_width, int video_height,
+                                              int linesize[], int alignment,
+                                              int extra_len,
+                                              bool alignment_2pass_wa)
+{
+    if (true == planar)
+    {
+        return ni_encoder_frame_buffer_alloc(p_frame, video_width, video_height,
+                                             linesize, alignment, extra_len,
+                                             alignment_2pass_wa);
+    }
+    else
+    {
+        return ni_frame_buffer_alloc_nv(p_frame, video_width, video_height,
+                                        linesize, extra_len,
+                                        alignment_2pass_wa);
+    }
 }
 
 /*!*****************************************************************************
@@ -2301,8 +2722,8 @@ ni_retcode_t ni_decoder_frame_buffer_free(ni_frame_t *p_frame)
       ni_log(NI_LOG_DEBUG, "%s(): NO mem buf returned !\n", __func__);
   }
 
-  p_frame->dec_buf = p_frame->p_buffer = NULL;
-
+  p_frame->dec_buf = NULL;
+  p_frame->p_buffer = NULL;
   p_frame->buffer_size = 0;
   for (i = 0; i < NI_MAX_NUM_DATA_POINTERS; i++)
   {
@@ -2354,7 +2775,7 @@ ni_retcode_t ni_packet_buffer_alloc(ni_packet_t* p_packet, int packet_size)
 
   int buffer_size = (((packet_size + metadata_size) / NI_MAX_PACKET_SZ) + 1) * NI_MAX_PACKET_SZ;
 
-  ni_log(NI_LOG_DEBUG, "%s: packet_size=%d\n", __func__,
+  ni_log(NI_LOG_TRACE, "%s: packet_size=%d\n", __func__,
          packet_size + metadata_size);
 
   if (!p_packet || !packet_size)
@@ -2392,8 +2813,8 @@ ni_retcode_t ni_packet_buffer_alloc(ni_packet_t* p_packet, int packet_size)
 
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s: Cannot allocate p_frame buffer.\n",
-             __func__);
+      ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate p_packet buffer.\n",
+             NI_ERRNO, __func__);
       ni_log(NI_LOG_TRACE, "%s: exit: p_packet->buffer_size=%u\n", __func__,
              p_packet->buffer_size);
       return NI_RETCODE_ERROR_MEM_ALOC;
@@ -2407,6 +2828,63 @@ ni_retcode_t ni_packet_buffer_alloc(ni_packet_t* p_packet, int packet_size)
          p_packet->buffer_size);
 
   return NI_RETCODE_SUCCESS;
+}
+
+/*!*****************************************************************************
+ *  \brief  Allocate packet buffer using a user provided pointer, the memory
+ *   is expected to have already been allocated.
+ *
+ *   For ideal performance memory should be 4k aligned. If it is not 4K aligned
+ *   then a temporary 4k aligned memory will be used to copy data to and from
+ *   when writing and reading. This will negatively impact performance.
+ *
+ *   This API will overwrite p_packet->buffer_size, p_packet->p_buffer and
+ *   p_packet->p_data fields in p_packet.
+ *
+ *   This API will not free any memory associated with p_packet->p_buffer and
+ *   p_packet->p_data fields in p_packet.
+ *   Common use case could be,
+ *       1. Allocate memory to pointer
+ *       2. Call ni_custom_packet_buffer_alloc() with allocated pointer.
+ *       3. Use p_packet as required.
+ *       4. Call ni_packet_buffer_free() to free up the memory.
+ *
+ *  \param[in] p_buffer      User provided pointer to be used for buffer
+ *  \param[in] p_packet      Pointer to a caller allocated
+ *                                               ni_packet_t struct
+ *  \param[in] buffer_size   Buffer size
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+ni_retcode_t ni_custom_packet_buffer_alloc(void *p_buffer,
+                                           ni_packet_t *p_packet,
+                                           int buffer_size)
+{
+    ni_log(NI_LOG_TRACE, "%s(): enter buffer_size=%d\n", __func__, buffer_size);
+
+    if (!p_buffer || !p_packet || !buffer_size)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: %s: null pointer parameters passed\n",
+               __func__);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+    if (((uintptr_t)p_buffer) % NI_MEM_PAGE_ALIGNMENT)
+    {
+        ni_log(NI_LOG_INFO, "Info: %s: Warning buffer not 4k aligned = %p!. Will do an extra copy\n",
+               __func__, p_buffer);
+    }
+
+    p_packet->buffer_size = buffer_size;
+    p_packet->p_buffer = p_buffer;
+    p_packet->p_data = p_packet->p_buffer;
+
+    ni_log(NI_LOG_TRACE, "%s: exit: \n", __func__);
+
+    return NI_RETCODE_SUCCESS;
 }
 
 /*!*****************************************************************************
@@ -2553,18 +3031,20 @@ int ni_packet_copy(void* p_destination, const void* const p_source, int cur_size
 
   p_dst += prev_size;
 
-  memcpy(p_dst, p_src, total_size);
+  memcpy(p_dst, p_src, cur_size);
 
   if (padding_size)
   {
-    p_dst += total_size;
+    p_dst += cur_size;
     memset(p_dst, 0, padding_size);
   }
 
-  *p_prev_size = 0;
+  ni_log(NI_LOG_TRACE,
+         "%s(): exit, cur_size=%d, copy_size=%d, "
+         "prev_size=%d, padding_size=%d\n", __func__, cur_size,
+         copy_size, *p_prev_size, padding_size);
 
-  ni_log(NI_LOG_TRACE, "%s(): exit, cur_size=%d, copy_size=%d, prev_size=%d\n",
-         __func__, cur_size, copy_size, *p_prev_size);
+  *p_prev_size = 0;
 
   return copy_size;
 }
@@ -2824,7 +3304,7 @@ ni_retcode_t ni_encoder_init_default_params(ni_xcoder_params_t *p_param,
       p_enc->custom_gop_params.pic_param[i].pic_type = PIC_TYPE_I;
       p_enc->custom_gop_params.pic_param[i].poc_offset = 0;
       p_enc->custom_gop_params.pic_param[i].pic_qp = 0;
-      p_enc->custom_gop_params.pic_param[i].num_ref_pic_L0 = 0; // syed todo: check this initial value, added for T408 5
+      p_enc->custom_gop_params.pic_param[i].num_ref_pic_L0 = 0;
       p_enc->custom_gop_params.pic_param[i].ref_poc_L0 = 0;
       p_enc->custom_gop_params.pic_param[i].ref_poc_L1 = 0;
       p_enc->custom_gop_params.pic_param[i].temporal_id = 0;
@@ -2911,6 +3391,7 @@ ni_retcode_t ni_encoder_init_default_params(ni_xcoder_params_t *p_param,
   p_enc->ltrNextInterval = 1;
   p_enc->multicoreJointMode = 0;
   p_enc->qlevel = -1;
+  p_enc->maxFrameSize = 0;
   p_enc->chromaQpOffset = 0;
   p_enc->tolCtbRcInter = (float)0.1;
   p_enc->tolCtbRcIntra = (float)0.1;
@@ -2921,9 +3402,20 @@ ni_retcode_t ni_encoder_init_default_params(ni_xcoder_params_t *p_param,
   p_enc->aspectRatioWidth = 0;
   p_enc->aspectRatioHeight = 1;
   p_enc->keep_alive_timeout = NI_DEFAULT_KEEP_ALIVE_TIMEOUT;
+  p_enc->enable_ssim = 0;
 
   if (codec_format == NI_CODEC_FORMAT_AV1)
   {
+      if (p_param->source_width < NI_PARAM_AV1_MIN_WIDTH)
+      {
+          retval = NI_RETCODE_PARAM_ERROR_WIDTH_TOO_SMALL;
+          LRETURN;
+      }
+      if (p_param->source_height < NI_PARAM_AV1_MIN_HEIGHT)
+      {
+          retval = NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_SMALL;
+          LRETURN;
+      }
       if (p_param->source_width > NI_PARAM_AV1_MAX_WIDTH)
       {
           retval = NI_RETCODE_PARAM_ERROR_WIDTH_TOO_BIG;
@@ -2940,14 +3432,29 @@ ni_retcode_t ni_encoder_init_default_params(ni_xcoder_params_t *p_param,
           retval = NI_RETCODE_PARAM_ERROR_AREA_TOO_BIG;
           LRETURN;
       }
+      // AV1 8x8 alignment HW limitation is now worked around by FW cropping input resolution
       if (p_param->source_width % NI_PARAM_AV1_ALIGN_WIDTH_HEIGHT)
       {
-          retval = NI_RETCODE_PARAM_ERROR_PIC_WIDTH;
-          LRETURN;
+          ni_log(NI_LOG_ERROR, "AV1 Picture Width not aligned to %d - picture will be cropped\n",
+                 NI_PARAM_AV1_ALIGN_WIDTH_HEIGHT);
       }
       if (p_param->source_height % NI_PARAM_AV1_ALIGN_WIDTH_HEIGHT)
       {
-          retval = NI_RETCODE_PARAM_ERROR_PIC_HEIGHT;
+          ni_log(NI_LOG_ERROR,  "AV1 Picture Height not aligned to %d - picture will be cropped\n",
+                 NI_PARAM_AV1_ALIGN_WIDTH_HEIGHT);
+      }
+  }
+
+  if (codec_format == NI_CODEC_FORMAT_JPEG)
+  {
+      if (p_param->source_width < NI_PARAM_JPEG_MIN_WIDTH)
+      {
+          retval = NI_RETCODE_PARAM_ERROR_WIDTH_TOO_SMALL;
+          LRETURN;
+      }
+      if (p_param->source_height < NI_PARAM_JPEG_MIN_HEIGHT)
+      {
+          retval = NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_SMALL;
           LRETURN;
       }
   }
@@ -3051,6 +3558,7 @@ ni_retcode_t ni_decoder_init_default_params(ni_xcoder_params_t *p_param,
 
   }
   p_dec->keep_alive_timeout = NI_DEFAULT_KEEP_ALIVE_TIMEOUT;
+  p_dec->decoder_low_delay = 0;
 
   //-------init unused param start----------
 
@@ -3199,7 +3707,7 @@ ni_retcode_t ni_decoder_params_set_value(ni_xcoder_params_t *p_params,
   const char delim[2] = ",";
   const char xdelim[2] = "x";
   char *chunk;//for parsing out multi param input
-  int i,j,k;
+  int i, j, k;
 
   ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);
 
@@ -3212,7 +3720,7 @@ ni_retcode_t ni_decoder_params_set_value(ni_xcoder_params_t *p_params,
 
   if (!name)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): Null pointer parameters passed\n",
+      ni_log(NI_LOG_ERROR, "ERROR: %s(): Null name pointer parameters passed\n",
              __func__);
       return NI_RETCODE_PARAM_INVALID_NAME;
   }
@@ -3490,6 +3998,18 @@ ni_retcode_t ni_decoder_params_set_value(ni_xcoder_params_t *p_params,
   }
   OPT(NI_DEC_PARAM_SCALE_0)
   {
+    chunk = value;
+    i = 0; // 'x' character counter
+    while (*chunk++) {
+      if (*chunk == xdelim[0]) {
+        i++;
+      }
+    }
+    if (i != 1) {
+      return NI_RETCODE_PARAM_INVALID_VALUE;
+    }
+    chunk = NULL;
+
     chunk = strtok(value, xdelim);
     for (i = 0; i < 2; i++)
     {
@@ -3518,6 +4038,18 @@ ni_retcode_t ni_decoder_params_set_value(ni_xcoder_params_t *p_params,
   }
   OPT(NI_DEC_PARAM_SCALE_1)
   {
+    chunk = value;
+    i = 0; // 'x' character counter
+    while (*chunk++) {
+      if (*chunk == xdelim[0]) {
+        i++;
+      }
+    }
+    if (i != 1) {
+      return NI_RETCODE_PARAM_INVALID_VALUE;
+    }
+    chunk = NULL;
+
     chunk = strtok(value, xdelim);
     for (i = 0; i < 2; i++)
     {
@@ -3546,6 +4078,18 @@ ni_retcode_t ni_decoder_params_set_value(ni_xcoder_params_t *p_params,
   }
   OPT(NI_DEC_PARAM_SCALE_2)
   {
+    chunk = value;
+    i = 0; // 'x' character counter
+    while (*chunk++) {
+      if (*chunk == xdelim[0]) {
+        i++;
+      }
+    }
+    if (i != 1) {
+      return NI_RETCODE_PARAM_INVALID_VALUE;
+    }
+    chunk = NULL;
+
     chunk = strtok(value, xdelim);
     for (i = 0; i < 2; i++)
     {
@@ -3596,6 +4140,15 @@ ni_retcode_t ni_decoder_params_set_value(ni_xcoder_params_t *p_params,
           return NI_RETCODE_PARAM_ERROR_OOR;
       }
       p_dec->keep_alive_timeout = atoi(value);
+  }
+  OPT(NI_DEC_PARAM_LOW_DELAY)
+  {
+      if ((atoi(value) != 0) &&
+          (atoi(value) != 1))
+      {
+          return NI_RETCODE_PARAM_ERROR_OOR;
+      }
+      p_dec->decoder_low_delay = atoi(value);
   }
   else
   {
@@ -3653,7 +4206,7 @@ ni_retcode_t ni_encoder_params_set_value(ni_xcoder_params_t *p_params,
 
   if ( !name )
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): Null pointer parameters passed\n",
+      ni_log(NI_LOG_ERROR, "ERROR: %s(): Null name pointer parameters passed\n",
              __func__);
       return NI_RETCODE_PARAM_INVALID_NAME;
   }
@@ -3978,10 +4531,20 @@ ni_retcode_t ni_encoder_params_set_value(ni_xcoder_params_t *p_params,
   }
   OPT( NI_ENC_PARAM_ENABLE_PIC_SKIP )
   {
-    // Disabled for GCA release. Will be enabled once QDFW-1785/1958 is resolved
-    //p_enc->rc.enable_pic_skip = atoi(value);
-    p_enc->rc.enable_pic_skip = 0;
-    ni_log(NI_LOG_ERROR, "%s: picSkip option has been temporarily disabled\n", __func__);
+    if (0 != atoi(value) && 1 != atoi(value))
+    {
+        return NI_RETCODE_PARAM_ERROR_OOR;
+    }
+    // Currenly pic skip is supported for low delay gops only - pic skip issues tracked by QDFW-1785/1958
+    p_enc->rc.enable_pic_skip = atoi(value);
+  }
+  OPT(NI_ENC_PARAM_MAX_FRAME_SIZE_LOW_DELAY)
+  {
+      if (atoi(value) < NI_MIN_FRAME_SIZE)
+      {
+          return NI_RETCODE_PARAM_ERROR_OOR;
+      }
+      p_enc->maxFrameSize = (atoi(value) > NI_MAX_FRAME_SIZE) ? NI_MAX_FRAME_SIZE : atoi(value);
   }
   OPT ( NI_ENC_PARAM_FORCED_HEADER_ENABLE )
   {
@@ -4412,6 +4975,22 @@ ni_retcode_t ni_encoder_params_set_value(ni_xcoder_params_t *p_params,
       }
       p_enc->keep_alive_timeout = atoi(value);
   }
+  OPT(NI_ENC_PARAM_ENABLE_VFR)
+  {
+      if (atoi(value) != 0 && atoi(value) != 1)
+      {
+          return NI_RETCODE_PARAM_ERROR_OOR;
+      }
+      p_params->enable_vfr = atoi(value);
+  }
+  OPT(NI_ENC_ENABLE_SSIM)
+  {
+      if ((atoi(value) != 0) && (atoi(value) != 1))
+      {
+          return NI_RETCODE_PARAM_ERROR_OOR;
+      }
+      p_enc->enable_ssim = atoi(value);
+  }
   else { return NI_RETCODE_PARAM_INVALID_NAME; }
 
 #undef OPT
@@ -4462,9 +5041,16 @@ ni_retcode_t ni_encoder_gop_params_set_value(ni_xcoder_params_t *p_params,
 
   ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);
 
-  if ( (!p_params) || (!name) )
+  if (!p_params)
   {
       ni_log(NI_LOG_ERROR, "ERROR: %s(): Null pointer parameters passed\n",
+             __func__);
+      return NI_RETCODE_INVALID_PARAM;
+  }
+
+  if ( !name )
+  {
+      ni_log(NI_LOG_ERROR, "ERROR: %s(): Null name pointer parameters passed\n",
              __func__);
       return NI_RETCODE_PARAM_INVALID_NAME;
   }
@@ -5304,7 +5890,8 @@ int ni_device_session_read_hwdesc(ni_session_context_t *p_ctx, ni_session_data_i
     ni_retcode_t retval = NI_RETCODE_SUCCESS;
     if ((!p_ctx) || (!p_data))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null, return\n",
+               __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
@@ -5314,7 +5901,7 @@ int ni_device_session_read_hwdesc(ni_session_context_t *p_ctx, ni_session_data_i
   #ifdef _WIN32
       (p_ctx->keep_alive_thread.handle &&
   #else
-      (p_ctx->keep_alive_thread && 
+      (p_ctx->keep_alive_thread &&
   #endif
        p_ctx->keep_alive_thread_args->close_thread))
   {
@@ -5412,7 +5999,8 @@ int ni_device_session_read_hwdesc(ni_session_context_t *p_ctx, ni_session_data_i
   default:
   {
     retval = NI_RETCODE_INVALID_PARAM;
-    ni_log(NI_LOG_ERROR, "ERROR: Unrecognized device type: %d", device_type);
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unrecognized device type: %d",
+           __func__, device_type);
     break;
   }
   }
@@ -5445,7 +6033,8 @@ int ni_device_session_hwdl(ni_session_context_t* p_ctx, ni_session_data_io_t *p_
   ni_retcode_t retval = NI_RETCODE_SUCCESS;
   if ((!hwdesc) || (!p_data))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null, return\n");
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+             __func__);
       return NI_RETCODE_INVALID_PARAM;
   }
   ni_pthread_mutex_lock(p_ctx->xcoder_mutex);
@@ -5489,7 +6078,8 @@ int ni_device_session_hwup(ni_session_context_t* p_ctx, ni_session_data_io_t *p_
   ni_retcode_t retval = NI_RETCODE_SUCCESS;
   if ((!hwdesc) || (!p_src_data))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null, return\n");
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+             __func__);
       return NI_RETCODE_INVALID_PARAM;
   }
   ni_pthread_mutex_lock(p_ctx->xcoder_mutex);
@@ -5528,7 +6118,8 @@ ni_retcode_t ni_frame_buffer_alloc_hwenc(ni_frame_t* p_frame, int video_width,
 
   if (!p_frame)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null, return\n");
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+             __func__);
       return NI_RETCODE_INVALID_PARAM;
   }
 
@@ -5554,7 +6145,8 @@ ni_retcode_t ni_frame_buffer_alloc_hwenc(ni_frame_t* p_frame, int video_width,
   {
       if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
       {
-          ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate p_frame buffer.\n");
+          ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate p_frame buffer.\n",
+                 NI_ERRNO, __func__);
           retval = NI_RETCODE_ERROR_MEM_ALOC;
           LRETURN;
       }
@@ -5571,7 +6163,7 @@ ni_retcode_t ni_frame_buffer_alloc_hwenc(ni_frame_t* p_frame, int video_width,
       ni_log(NI_LOG_DEBUG, "%s: reuse p_frame buffer\n", __func__);
   }
 
-  p_frame->p_data[3] = (uint8_t*)p_frame->p_buffer;
+  p_frame->p_data[3] = p_frame->p_buffer;
   p_frame->p_data[0] = NULL;
   p_frame->p_data[1] = NULL;
   p_frame->p_data[2] = NULL;
@@ -5647,16 +6239,17 @@ int ni_device_session_init_framepool(ni_session_context_t *p_ctx,
                                      uint32_t pool_size, uint32_t pool)
 {
   ni_retcode_t retval = NI_RETCODE_SUCCESS;
+  if (!p_ctx)
+  {
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+             __func__);
+      return NI_RETCODE_INVALID_PARAM;
+  }
   if (pool_size == 0 || pool_size > NI_MAX_UPLOAD_INSTANCE_FRAMEPOOL)
   {
       ni_log(NI_LOG_ERROR, "ERROR: Invalid poolsize == 0 or > 100\n");
       return NI_RETCODE_INVALID_PARAM;
-  }
-  if (!p_ctx)
-  {
-      ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null, return\n");
-      return NI_RETCODE_INVALID_PARAM;
-  }
+  }  
   if (pool != 0 && pool != 1)
   {
       ni_log(NI_LOG_ERROR, "ERROR: bad pool number %u\n", pool);
@@ -5724,7 +6317,7 @@ ni_retcode_t ni_scaler_set_params(ni_session_context_t *p_ctx,
  *  \param[in]  rectangle_y         vertical position of clipping rectangle
  *  \param[in]  rgba_color          RGBA fill colour (for padding only)
  *  \param[in]  rgba_color          RGBA fill colour (for padding only)
- *  \param[in]  frame_index         input hwdesc index 
+ *  \param[in]  frame_index         input hwdesc index
  *  \param[in]  device_type         only NI_DEVICE_TYPE_SCALER
  *              and NI_DEVICE_TYPE_AI (only needs p_ctx and frame_index)
  *
@@ -5791,7 +6384,6 @@ ni_retcode_t ni_device_alloc_frame(ni_session_context_t* p_ctx,
  *
  *  \param[in]  p_ctx       pointer to session context
  *  \param[in]  p_cfg       pointer to frame configuration
- *              and NI_DEVICE_TYPE_AI (only needs p_ctx and frame_index)
  *
  *  \return         NI_RETCODE_INVALID_PARAM
  *                  NI_RETCODE_ERROR_INVALID_SESSION
@@ -5817,6 +6409,54 @@ ni_retcode_t ni_device_config_frame(ni_session_context_t *p_ctx,
     {
         case NI_DEVICE_TYPE_SCALER:
             retval = ni_scaler_config_frame(p_ctx, p_cfg);
+            break;
+
+        default:
+            ni_log(NI_LOG_ERROR, "Bad device type %d\n", p_ctx->device_type);
+            retval = NI_RETCODE_INVALID_PARAM;
+            break;
+    }
+
+    p_ctx->xcoder_state &= ~NI_XCODER_GENERAL_STATE;
+    ni_pthread_mutex_unlock(p_ctx->xcoder_mutex);
+
+    return retval;
+}
+
+/*!*****************************************************************************
+ *  \brief  Configure the 2D engine to work based on provided parameters
+ *
+ *  \param[in]  p_ctx       pointer to session context
+ *  \param[in]  p_cfg_in    pointer to input frame configuration
+ *  \param[in]  numInCfgs   number of input frame configurations
+ *  \param[in]  p_cfg_out   pointer to output frame configuration
+ *
+ *  \return         NI_RETCODE_INVALID_PARAM
+ *                  NI_RETCODE_ERROR_INVALID_SESSION
+ *                  NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                  NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+ni_retcode_t ni_device_multi_config_frame(ni_session_context_t *p_ctx,
+                                          ni_frame_config_t p_cfg_in[],
+                                          int numInCfgs,
+                                          ni_frame_config_t *p_cfg_out)
+{
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+
+    if (!p_ctx || !p_cfg_in)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null, return\n",
+               __func__);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    ni_pthread_mutex_lock(p_ctx->xcoder_mutex);
+    p_ctx->xcoder_state |= NI_XCODER_GENERAL_STATE;
+
+    switch (p_ctx->device_type)
+    {
+        case NI_DEVICE_TYPE_SCALER:
+            retval = ni_scaler_multi_config_frame(p_ctx, p_cfg_in, numInCfgs, p_cfg_out);
             break;
 
         default:
@@ -5950,7 +6590,9 @@ ni_retcode_t ni_frame_buffer_alloc_pixfmt(ni_frame_t *p_frame, int pixel_format,
   void *p_buffer = NULL;
   int retval = NI_RETCODE_SUCCESS;
   int height_aligned;
-  int luma_size, chroma_b_size, chroma_r_size;
+  int luma_size = 0;
+  int chroma_b_size = 0;
+  int chroma_r_size = 0;
 
   if (!p_frame)
   {
@@ -5964,37 +6606,49 @@ ni_retcode_t ni_frame_buffer_alloc_pixfmt(ni_frame_t *p_frame, int pixel_format,
     case NI_PIX_FMT_YUV420P10LE:
     case NI_PIX_FMT_NV12:
     case NI_PIX_FMT_P010LE:
-      if ((video_width < 0) || (video_width > NI_MAX_RESOLUTION_WIDTH))
-      {
-        ni_log(NI_LOG_ERROR, "Video resolution width %d out of range\n",video_width);
-        return NI_RETCODE_INVALID_PARAM;
-      }
+    case NI_PIX_FMT_NV16:
+    case NI_PIX_FMT_YUYV422:
+    case NI_PIX_FMT_UYVY422:
+        if ((video_width < 0) || (video_width > NI_MAX_RESOLUTION_WIDTH))
+        {
+            ni_log(NI_LOG_ERROR, "Video resolution width %d out of range\n",
+                   video_width);
+            return NI_RETCODE_INVALID_PARAM;
+        }
 
-      if ((video_height < 0) || (video_height > NI_MAX_RESOLUTION_HEIGHT))
-      {
-        ni_log(NI_LOG_ERROR, "Video resolution height %d out of range\n",video_width);
-        return NI_RETCODE_INVALID_PARAM;
-      }
-      break;
+        if ((video_height < 0) || (video_height > NI_MAX_RESOLUTION_HEIGHT))
+        {
+            ni_log(NI_LOG_ERROR, "Video resolution height %d out of range\n",
+                   video_width);
+            return NI_RETCODE_INVALID_PARAM;
+        }
+        break;
 
     case NI_PIX_FMT_RGBA:
-      /*
-       * For 2D engine using RGBA, the minimum width is 32. There is no
-       * height restriction. The 2D engine supports a height/width of up to
-       * 32K but but we will limit the max height and width to 8K.
-       */
-      if ((video_width < 32) && (video_width > NI_MAX_RESOLUTION_WIDTH))
-      {
-        ni_log(NI_LOG_ERROR, "Video resolution width %d out of range\n",video_width);
-        return NI_RETCODE_INVALID_PARAM;
-      }
+    case NI_PIX_FMT_BGRA:
+    case NI_PIX_FMT_ARGB:
+    case NI_PIX_FMT_ABGR:
+    case NI_PIX_FMT_BGR0:
+    case NI_PIX_FMT_BGRP:
+        /*
+         * For 2D engine using RGBA, the minimum width is 32. There is no
+         * height restriction. The 2D engine supports a height/width of up to
+         * 32K but but we will limit the max height and width to 8K.
+        */
+        if ((video_width < 32) && (video_width > NI_MAX_RESOLUTION_WIDTH))
+        {
+            ni_log(NI_LOG_ERROR, "Video resolution width %d out of range\n",
+                   video_width);
+            return NI_RETCODE_INVALID_PARAM;
+        }
 
-      if ((video_height <= 0) || (video_height > NI_MAX_RESOLUTION_HEIGHT))
-      {
-        ni_log(NI_LOG_ERROR, "Video resolution height %d out of range\n",video_height);
-        return NI_RETCODE_INVALID_PARAM;
-      }
-      break;
+        if ((video_height <= 0) || (video_height > NI_MAX_RESOLUTION_HEIGHT))
+        {
+            ni_log(NI_LOG_ERROR, "Video resolution height %d out of range\n",
+                   video_height);
+            return NI_RETCODE_INVALID_PARAM;
+        }
+        break;
 
     default:
       ni_log(NI_LOG_ERROR, "Unknown pixel format %d\n",pixel_format);
@@ -6033,13 +6687,17 @@ ni_retcode_t ni_frame_buffer_alloc_pixfmt(ni_frame_t *p_frame, int pixel_format,
         chroma_b_size = luma_size / 4;
         chroma_r_size = luma_size / 4;
       }
-
-      buffer_size = luma_size + chroma_b_size + chroma_r_size + extra_len;
       break;
 
     case NI_PIX_FMT_RGBA:
-      buffer_size = video_width * video_height * 4 + extra_len;
-      break;
+    case NI_PIX_FMT_BGRA:
+    case NI_PIX_FMT_ARGB:
+    case NI_PIX_FMT_ABGR:
+    case NI_PIX_FMT_BGR0:
+        luma_size = linesize[0] * video_height;
+        chroma_b_size = 0;
+        chroma_r_size = 0;
+        break;
 
     case NI_PIX_FMT_NV12:
     case NI_PIX_FMT_P010LE:
@@ -6048,15 +6706,40 @@ ni_retcode_t ni_frame_buffer_alloc_pixfmt(ni_frame_t *p_frame, int pixel_format,
         luma_size = linesize[0] * height_aligned;
         chroma_b_size = linesize[1] * height_aligned / 2;
         chroma_r_size = 0;
-
-        buffer_size = luma_size + chroma_b_size + chroma_r_size + extra_len;
         break;
       }
-      /*fall through*/
+    case NI_PIX_FMT_NV16:
+        if (QUADRA)
+        {
+            luma_size = linesize[0] * video_height;
+            chroma_b_size = linesize[1] * video_height;
+            chroma_r_size = 0;
+            break;
+        }
+    case NI_PIX_FMT_YUYV422:
+    case NI_PIX_FMT_UYVY422:
+        if (QUADRA)
+        {
+            luma_size = linesize[0] * video_height;
+            chroma_b_size = 0;
+            chroma_r_size = 0;
+            break;
+        }
+    case NI_PIX_FMT_BGRP:
+        if (QUADRA)
+        {
+            luma_size = NI_VPU_ALIGN32(linesize[0] * video_height);
+            chroma_b_size = NI_VPU_ALIGN32(linesize[1] * video_height);
+            chroma_r_size = NI_VPU_ALIGN32(linesize[2] * video_height);
+            break;
+        }
+        /*fall through*/
     default:
       ni_log(NI_LOG_ERROR, "Error: unsupported pixel format %d\n",pixel_format);
       return NI_RETCODE_INVALID_PARAM;
   }
+
+  buffer_size = luma_size + chroma_b_size + chroma_r_size + extra_len;
 
   /* Allocate a buffer size that is page aligned for the host */
   buffer_size = NI_VPU_CEIL(buffer_size,NI_MEM_PAGE_ALIGNMENT) + NI_MEM_PAGE_ALIGNMENT;
@@ -6092,9 +6775,9 @@ ni_retcode_t ni_frame_buffer_alloc_pixfmt(ni_frame_t *p_frame, int pixel_format,
   {
     case NI_PIX_FMT_YUV420P:
     case NI_PIX_FMT_YUV420P10LE:
-      p_frame->p_data[0] = (uint8_t*) p_frame->p_buffer;
-      p_frame->p_data[1] = (uint8_t*) p_frame->p_data[0] + luma_size;
-      p_frame->p_data[2] = (uint8_t*) p_frame->p_data[1] + chroma_b_size;
+      p_frame->p_data[0] = p_frame->p_buffer;
+      p_frame->p_data[1] = p_frame->p_data[0] + luma_size;
+      p_frame->p_data[2] = p_frame->p_data[1] + chroma_b_size;
       p_frame->p_data[3] = NULL;
 
       p_frame->data_len[0] = luma_size;
@@ -6105,35 +6788,85 @@ ni_retcode_t ni_frame_buffer_alloc_pixfmt(ni_frame_t *p_frame, int pixel_format,
       break;
 
     case NI_PIX_FMT_RGBA:
-      p_frame->p_data[0] = (uint8_t*) p_frame->p_buffer;
-      p_frame->p_data[1] = NULL;
-      p_frame->p_data[2] = NULL;
-      p_frame->p_data[3] = NULL;
-
-      p_frame->data_len[0] = video_height * video_width * 4;
-      p_frame->data_len[1] = 0;
-      p_frame->data_len[2] = 0;
-      p_frame->data_len[3] = 0;
-      break;
-
-    case NI_PIX_FMT_NV12:
-    case NI_PIX_FMT_P010LE:
-      if (QUADRA)
-      {
-        p_frame->p_data[0] = (uint8_t*)p_frame->p_buffer;
-        p_frame->p_data[1] = (uint8_t*)p_frame->p_data[0] + luma_size;
+    case NI_PIX_FMT_BGRA:
+    case NI_PIX_FMT_ARGB:
+    case NI_PIX_FMT_ABGR:
+    case NI_PIX_FMT_BGR0:
+        p_frame->p_data[0] = (uint8_t *)p_frame->p_buffer;
+        p_frame->p_data[1] = NULL;
         p_frame->p_data[2] = NULL;
         p_frame->p_data[3] = NULL;
 
         p_frame->data_len[0] = luma_size;
-        p_frame->data_len[1] = chroma_b_size;
+        p_frame->data_len[1] = 0;
         p_frame->data_len[2] = 0;
         p_frame->data_len[3] = 0;
-
-        video_width = NI_VPU_ALIGN128(video_width);
+        video_width = NI_VPU_ALIGN16(video_width);
         break;
-      }
-      /* fall through */
+
+    case NI_PIX_FMT_NV12:
+    case NI_PIX_FMT_P010LE:
+        if (QUADRA)
+        {
+            p_frame->p_data[0] = (uint8_t *)p_frame->p_buffer;
+            p_frame->p_data[1] = (uint8_t *)p_frame->p_data[0] + luma_size;
+            p_frame->p_data[2] = NULL;
+            p_frame->p_data[3] = NULL;
+
+            p_frame->data_len[0] = luma_size;
+            p_frame->data_len[1] = chroma_b_size;
+            p_frame->data_len[2] = 0;
+            p_frame->data_len[3] = 0;
+
+            video_width = NI_VPU_ALIGN128(video_width);
+            break;
+        }
+    case NI_PIX_FMT_NV16:
+        if (QUADRA)
+        {
+            p_frame->p_data[0] = (uint8_t *)p_frame->p_buffer;
+            p_frame->p_data[1] = (uint8_t *)p_frame->p_data[0] + luma_size;
+            p_frame->p_data[2] = NULL;
+            p_frame->p_data[3] = NULL;
+
+            p_frame->data_len[0] = luma_size;
+            p_frame->data_len[1] = chroma_b_size;
+            p_frame->data_len[2] = 0;
+            p_frame->data_len[3] = 0;
+            break;
+        }
+
+    case NI_PIX_FMT_YUYV422:
+    case NI_PIX_FMT_UYVY422:
+        if (QUADRA)
+        {
+            p_frame->p_data[0] = (uint8_t *)p_frame->p_buffer;
+            p_frame->p_data[1] = NULL;
+            p_frame->p_data[2] = NULL;
+            p_frame->p_data[3] = NULL;
+
+            p_frame->data_len[0] = luma_size;
+            p_frame->data_len[1] = 0;
+            p_frame->data_len[2] = 0;
+            p_frame->data_len[3] = 0;
+            video_width = NI_VPU_ALIGN16(video_width);
+            break;
+        }
+    case NI_PIX_FMT_BGRP:
+        if (QUADRA)
+        {
+            p_frame->p_data[0] = (uint8_t *)p_frame->p_buffer;
+            p_frame->p_data[1] = (uint8_t *)p_frame->p_data[0] + luma_size;
+            p_frame->p_data[2] = (uint8_t *)p_frame->p_data[1] + chroma_b_size;
+            p_frame->p_data[3] = NULL;
+
+            p_frame->data_len[0] = luma_size;
+            p_frame->data_len[1] = chroma_b_size;
+            p_frame->data_len[2] = chroma_r_size;
+            p_frame->data_len[3] = 0;
+            break;
+        }
+        /* fall through */
     default:
       ni_log(NI_LOG_ERROR, "Error: unsupported pixel format %d\n",pixel_format);
       retval = NI_RETCODE_INVALID_PARAM;
@@ -6306,7 +7039,7 @@ ni_retcode_t ni_ai_frame_buffer_alloc(ni_frame_t *p_frame,
         ni_log(NI_LOG_DEBUG, "%s(): reuse p_frame buffer\n", __func__);
     }
 
-    p_frame->p_data[0] = (uint8_t *)p_frame->p_buffer;
+    p_frame->p_data[0] = p_frame->p_buffer;
     p_frame->p_data[1] = NULL;
     p_frame->p_data[2] = NULL;
     p_frame->p_data[3] = NULL;
@@ -6381,8 +7114,8 @@ ni_retcode_t ni_ai_packet_buffer_alloc(ni_packet_t *p_packet,
 
     if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: %s(): Cannot allocate p_frame buffer.\n",
-               __func__);
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate p_packet buffer.\n",
+               NI_ERRNO, __func__);
         retval = NI_RETCODE_ERROR_MEM_ALOC;
         LRETURN;
     }
@@ -6433,6 +7166,55 @@ ni_retcode_t ni_reconfig_bitrate(ni_session_context_t *p_ctx, int32_t bitrate)
     }
 
     p_ctx->target_bitrate = bitrate;
+
+    p_ctx->xcoder_state &= ~NI_XCODER_GENERAL_STATE;
+    ni_pthread_mutex_unlock(p_ctx->xcoder_mutex);
+
+    return NI_RETCODE_SUCCESS;
+}
+
+/*!*****************************************************************************
+ *  \brief  Reconfigure VUI HRD dynamically during encoding.
+ *
+ *  \param[in] p_ctx      Pointer to caller allocated ni_session_context_t
+ *  \param[in] bitrate    Target bitrate to set
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ ******************************************************************************/
+ni_retcode_t ni_reconfig_vui(ni_session_context_t *p_ctx, ni_vui_hrd_t *vui)
+{
+    if (!p_ctx || vui->colorDescPresent < 0 || vui->colorDescPresent > 1)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid colorDescPresent passed in %d\n",
+               __func__, vui->colorDescPresent);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    if ((vui->aspectRatioWidth > NI_MAX_ASPECTRATIO) || (vui->aspectRatioHeight > NI_MAX_ASPECTRATIO))
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid aspect ratio passed in (%dx%d)\n",
+               __func__, vui->aspectRatioWidth, vui->aspectRatioHeight);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    if (vui->videoFullRange < 0 || vui->videoFullRange > 1)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid videoFullRange passed in %d\n",
+               __func__, vui->videoFullRange);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    ni_pthread_mutex_lock(p_ctx->xcoder_mutex);
+    p_ctx->xcoder_state |= NI_XCODER_GENERAL_STATE;
+
+    p_ctx->vui.colorDescPresent = vui->colorDescPresent;
+    p_ctx->vui.colorPrimaries = vui->colorPrimaries;
+    p_ctx->vui.colorTrc = vui->colorTrc;
+    p_ctx->vui.colorSpace = vui->colorSpace;
+    p_ctx->vui.aspectRatioWidth = vui->aspectRatioWidth;
+    p_ctx->vui.aspectRatioHeight = vui->aspectRatioHeight;
+    p_ctx->vui.videoFullRange = vui->videoFullRange;
 
     p_ctx->xcoder_state &= ~NI_XCODER_GENERAL_STATE;
     ni_pthread_mutex_unlock(p_ctx->xcoder_mutex);
@@ -6647,7 +7429,8 @@ int ni_device_session_acquire(ni_session_context_t *p_ctx, ni_frame_t *p_frame)
 
     if (p_ctx == NULL || p_frame == NULL || p_frame->p_data[3] == NULL)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+               __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
@@ -6667,7 +7450,7 @@ int ni_device_session_acquire(ni_session_context_t *p_ctx, ni_frame_t *p_frame)
         return retval;
     }
 
-    retval = ni_get_memory_offset(&hwdesc, &offset);
+    retval = ni_get_memory_offset(p_ctx, &hwdesc, &offset);
     if (retval != NI_RETCODE_SUCCESS)
     {
         ni_log(NI_LOG_ERROR, "ERROR: bad buffer id\n");
@@ -6895,12 +7678,47 @@ ni_retcode_t ni_hwframe_p2p_buffer_recycle(ni_frame_t *p_frame)
 
     if (p_surface == NULL)
     {
-        ni_log(NI_LOG_ERROR, "%s: Invalid frame\n", __func__);
+        ni_log(NI_LOG_ERROR, "%s: Invalid surface data\n", __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
     rc = ni_hwframe_buffer_recycle(p_surface, p_surface->device_handle);
     return rc;
+}
+
+ni_retcode_t ni_scaler_p2p_frame_acquire(ni_session_context_t *p_ctx,
+                                         niFrameSurface1_t *p_surface,
+                                         int data_len)
+{
+    unsigned int offset;
+    int ret;
+
+    ret = ni_get_memory_offset(p_ctx, p_surface, &offset);
+    if (ret != 0)
+    {
+        ni_log(NI_LOG_ERROR, "Error: bad buffer id\n");
+        return NI_RETCODE_FAILURE;
+    }
+    p_surface->ui32nodeAddress = 0;
+
+    struct netint_iocmd_export_dmabuf uexp;
+    uexp.fd = -1;
+    uexp.flags = 0;
+    uexp.offset = offset;
+    uexp.length = data_len;
+    uexp.domain = p_ctx->domain;
+    uexp.bus = p_ctx->bus;
+    uexp.dev = p_ctx->dev;
+    uexp.fn = p_ctx->fn;
+    uexp.bar = 4;
+    ret = ioctl(p_ctx->netint_fd, NETINT_IOCTL_EXPORT_DMABUF, &uexp);
+    if (ret < 0)
+    {
+        ni_log(NI_LOG_ERROR, "failed to export dmabuf: %s\n", strerror(errno));
+        return NI_RETCODE_FAILURE;
+    }
+    p_surface->dma_buf_fd = uexp.fd;
+    return ret;
 }
 #endif
 
@@ -7089,22 +7907,20 @@ int ni_encoder_session_read_stream_header(ni_session_context_t *p_ctx,
     {
         rx_size = ni_device_session_read(p_ctx, p_data, NI_DEVICE_TYPE_ENCODER);
 
-        if (rx_size > NI_FW_ENC_BITSTREAM_META_DATA_SIZE)
+        if (rx_size > (int)p_ctx->meta_size)
         {
             /* stream header has been read, return size */
-            bytes_read += (rx_size - NI_FW_ENC_BITSTREAM_META_DATA_SIZE);
+            bytes_read += (rx_size - (int)p_ctx->meta_size);
 
             p_ctx->pkt_num = 1;
             ni_log(NI_LOG_DEBUG, "Got encoded stream header\n");
             done = 1;
-        }
-        else if (rx_size != 0)
+        } else if (rx_size != 0)
         {
             ni_log(NI_LOG_ERROR, "Error: received rx_size = %d\n", rx_size);
             bytes_read = -1;
             done = 1;
-        }
-        else
+        } else
         {
             ni_log(NI_LOG_DEBUG, "No data, keep reading..\n");
             continue;
@@ -7113,3 +7929,98 @@ int ni_encoder_session_read_stream_header(ni_session_context_t *p_ctx,
 
     return bytes_read;
 }
+
+/*!*****************************************************************************
+ *  \brief  Get the DMA buffer file descriptor from the P2P frame
+ *
+ *  \param[in]  p_frame     pointer to a P2P frame
+ *
+ *  \return     On success
+ *                          DMA buffer file descriptor
+ *              On failure
+ *                          NI_RETCODE_INVALID_PARAM
+*******************************************************************************/
+int32_t ni_get_dma_buf_file_descriptor(const ni_frame_t* p_frame)
+{
+    const niFrameSurface1_t *p_surface;
+
+    if (p_frame == NULL)
+    {
+        ni_log(NI_LOG_ERROR, "%s: NULL frame\n", __func__);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    p_surface = (niFrameSurface1_t *)p_frame->p_data[3];
+
+    if (p_surface == NULL)
+    {
+        ni_log(NI_LOG_ERROR, "%s: Invalid hw frame\n", __func__);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    return p_surface->dma_buf_fd;
+}
+
+/*!*****************************************************************************
+ *  \brief  Send sequence change information to device
+ *
+ *  \param[in] p_ctx        Pointer to a caller allocated
+ *                          ni_session_context_t struct
+ *  \param[in] width        input width
+ *  \param[in] height       input height
+ *  \param[in] bit_depth_factor    1 for 8-bit YUV, 2 for 10-bit YUV
+ *  \param[in] device_type  device type (must be encoder)
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_INVALID_SESSION
+ ******************************************************************************/
+ni_retcode_t ni_device_session_sequence_change(ni_session_context_t *p_ctx,
+                                            int width, int height, int bit_depth_factor, ni_device_type_t device_type)
+{
+    ni_resolution_t resolution;
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+
+    // requires API version >= 54
+    if (p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX] < (uint8_t)'5' ||
+        (p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX] < (uint8_t)'4' &&
+            p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX] == (uint8_t)'5'))
+    {
+        ni_log(NI_LOG_ERROR, "Error: %s function not supported in FW API version %c%c\n", __func__,
+            (char)p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+            (char)p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX]);
+        return NI_RETCODE_ERROR_INVALID_SESSION;
+    }
+
+    /* This function should be called only if sequence change is detected */
+    if (p_ctx->session_run_state != SESSION_RUN_STATE_SEQ_CHANGE_DRAINING)
+    {
+        ni_log(NI_LOG_ERROR, "Error: stream header has already been read\n");
+        return NI_RETCODE_ERROR_INVALID_SESSION;
+    }
+
+    resolution.width = width;
+    resolution.height = height;
+    resolution.bit_depth_factor = bit_depth_factor;
+
+    switch (device_type)
+    {
+        case NI_DEVICE_TYPE_ENCODER:
+        {
+            // config sequence change
+            retval = ni_encoder_session_sequence_change(p_ctx, &resolution);
+            break;
+        }
+        default:
+        {
+            retval = NI_RETCODE_INVALID_PARAM;
+            ni_log(NI_LOG_ERROR, "ERROR: Config sequence change not supported for device type: %d", device_type);
+            return retval;
+        }
+    }
+    return retval;
+}
+

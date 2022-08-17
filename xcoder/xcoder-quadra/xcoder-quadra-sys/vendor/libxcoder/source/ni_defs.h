@@ -32,11 +32,14 @@
 #include <windows.h>
 #include <process.h>
 #include <malloc.h>
-#elif __linux__
+#elif __linux__ || __APPLE__
+#if __linux__
 #include <linux/types.h>
+#endif
 #include <sys/time.h>
 #include <pthread.h>
 #include <errno.h>
+#include <semaphore.h>
 #endif
 
 #include <assert.h>
@@ -56,14 +59,43 @@ extern "C"
 {
 #endif
 
-// NI_XCODER_REVISION[0:2] = SW version
-// NI_XCODER_REVISION[3]   = API semantic major version
-// NI_XCODER_REVISION[4]   = API semantic minor version
+#if !defined(NI_WARN_AS_ERROR) && !defined(__clang__) && defined(__GNUC__)
+    #define NI_DEPRECATED __attribute__((deprecated))
+    #define NI_DEPRECATED_MACRO                                                \
+        _Pragma("GCC warning \"A Netint macro on this line is deprecated\"")
+    #define NI_DEPRECATE_MACRO(X)
+#elif !defined(NI_WARN_AS_ERROR) && !defined(__clang__) && defined(_MSC_VER)
+    #define NI_DEPRECATED __declspec(deprecated)
+    #define NI_DEPRECATED_MACRO
+    #define NI_DEPRECATE_MACRO(X) __pragma(deprecated(X))
+#else
+    #define NI_DEPRECATED
+    #define NI_DEPRECATED_MACRO
+    #define NI_DEPRECATE_MACRO(X)
+#endif
+
+// NI_XCODER_REVISION can be read to determine release package version and FW to
+// SW compatibility. Recommend using ni_get_*_ver() functions in ni_util.h to
+// read correct version numbers if updating libxcoder but not linked apps.
+// NI_XCODER_REVISION[0:2] = SW release version
+// NI_XCODER_REVISION[3]   = compatible FW API semantic major version
+// NI_XCODER_REVISION[4]   = compatible FW API semantic minor version
 // NI_XCODER_REVISION[5:7] = optional
 // reference: https://netint.atlassian.net/l/c/woqFMHES
-#define NI_XCODER_REVISION "30052rc2"
+#define NI_XCODER_REVISION "40064rcB"
 #define NI_XCODER_REVISION_API_MAJOR_VER_IDX 3
 #define NI_XCODER_REVISION_API_MINOR_VER_IDX 4
+
+// LIBXCODER_API_VERSION can be read to determine libxcoder to linked apps/APIs
+// compatibility. Recommend using ni_get_*_ver() functions in ni_util.h to
+// read correct version numbers if updating libxcoder but not linked apps.
+// reference: https://netint.atlassian.net/l/c/fVEGmYEZ
+#define MACRO_TO_STR(s) #s
+#define MACROS_TO_VER_STR(a, b) MACRO_TO_STR(a.b)
+#define LIBXCODER_API_VERSION_MAJOR 2   // Libxcoder API semantic major version
+#define LIBXCODER_API_VERSION_MINOR 4   // Libxcoder API semantic minor version
+#define LIBXCODER_API_VERSION MACROS_TO_VER_STR(LIBXCODER_API_VERSION_MAJOR, \
+                                                LIBXCODER_API_VERSION_MINOR)
 
 #define NI_LITTLE_ENDIAN_PLATFORM 0  /*!!< platform is little endian */
 #define NI_BIG_ENDIAN_PLATFORM    1  /*!!< platform is big endian */
@@ -100,7 +132,7 @@ typedef HANDLE ni_lock_handle_t;
 #define NI_INVALID_DEVICE_HANDLE (INVALID_HANDLE_VALUE)
 #define NI_INVALID_EVENT_HANDLE (NULL)
 #define NI_INVALID_LOCK_HANDLE (NULL)
-#ifdef LIB_DLL
+#ifdef XCODER_DLL
 #ifdef LIB_EXPORTS
 #define LIB_API __declspec(dllexport)
 #else
@@ -142,6 +174,23 @@ typedef int32_t ni_lock_handle_t;
      MIN_NVME_DEV_NAME_LEN + 10)
 #define DEFAULT_IO_TRANSFER_SIZE 520192
 #define MAX_IO_TRANSFER_SIZE 3133440
+
+#elif __APPLE__
+typedef pthread_t ni_pthread_t;
+typedef pthread_mutex_t ni_pthread_mutex_t;
+typedef pthread_cond_t ni_pthread_cond_t;
+typedef pthread_attr_t ni_pthread_attr_t;
+typedef pthread_condattr_t ni_pthread_condattr_t;
+typedef pthread_mutexattr_t ni_pthread_mutexattr_t;
+typedef sigset_t ni_sigset_t;
+typedef int32_t  ni_device_handle_t;
+typedef int32_t  ni_event_handle_t;
+typedef int32_t  ni_lock_handle_t;
+#define NI_INVALID_DEVICE_HANDLE (-1)
+#define NI_INVALID_EVENT_HANDLE  (-1)
+#define NI_INVALID_LOCK_HANDLE   (-1)
+#define LIB_API
+#define MAX_IO_TRANSFER_SIZE            3133440
 #endif /* _WIN32 */
 
 // number of system last error
@@ -175,11 +224,26 @@ typedef int32_t ni_lock_handle_t;
 
 #define NI_MEM_PAGE_ALIGNMENT 0x1000
 
-#define NI_MAX_HWDESC_FRAME_INDEX 2681
-
+#define NI_MAX_DR_HWDESC_FRAME_INDEX 5363
   // If P2P area changes in firmware these constants must be updated
-#define NI_MIN_HWDESC_P2P_BUF_ID 2682
-#define NI_MAX_HWDESC_P2P_BUF_ID 2828
+#define NI_MIN_HWDESC_P2P_BUF_ID 5364
+#define NI_MAX_HWDESC_P2P_BUF_ID 5525
+
+#define NI_MAX_SR_HWDESC_FRAME_INDEX 2457
+  // If P2P area changes in firmware these constants must be updated
+#define NI_MIN_SR_HWDESC_P2P_BUF_ID 2458
+#define NI_MAX_SR_HWDESC_P2P_BUF_ID 2619
+
+  //Feed this ni_session_context_t->ddr_config
+#define NI_GET_MIN_HWDESC_P2P_BUF_ID(x)  (x==1?NI_MIN_SR_HWDESC_P2P_BUF_ID:NI_MIN_HWDESC_P2P_BUF_ID)
+#define NI_GET_MAX_HWDESC_P2P_BUF_ID(x)  (x==1?NI_MAX_SR_HWDESC_P2P_BUF_ID:NI_MAX_HWDESC_P2P_BUF_ID)
+
+//use NI_MAX_DR_HWDESC_FRAME_INDEX or NI_GET_MAX_HWDESC_FRAME_INDEX
+NI_DEPRECATE_MACRO(NI_MAX_HWDESC_FRAME_INDEX) 
+#define NI_MAX_HWDESC_FRAME_INDEX NI_DEPRECATED_MACRO NI_MAX_DR_HWDESC_FRAME_INDEX
+
+//input param is DDR config of target device
+#define NI_GET_MAX_HWDESC_FRAME_INDEX(x) (x==1?NI_MAX_SR_HWDESC_FRAME_INDEX:NI_MAX_DR_HWDESC_FRAME_INDEX)
 
 #define NI_MAX_UPLOAD_INSTANCE_FRAMEPOOL 100
 
@@ -196,6 +260,9 @@ typedef int32_t ni_lock_handle_t;
 
 // invalid sei type
 #define NI_INVALID_SEI_TYPE (-1)
+
+// max count of custom sei per packet
+#define NI_MAX_CUSTOM_SEI_CNT 10
 
 //bytes size of meta data sent together with YUV: from f/w decoder to app
 #define NI_FW_META_DATA_SZ  104 //metadataDecFrame on dec FW (including hwdesc x3)
@@ -352,6 +419,7 @@ inline int is_supported_xcoder(int x)
           -60, /*!!< invalid lookahead depth */
       NI_RETCODE_PARAM_ERROR_FILLER = -61,
       NI_RETCODE_PARAM_ERROR_PICSKIP = -62,
+      NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION = -63,
 
       NI_RETCODE_PARAM_WARN =
           0x100, /*!!<Just a warning to print, safe to continue */
@@ -393,39 +461,14 @@ inline int is_supported_xcoder(int x)
       nvme_cmd_xcoder_read = 0x84
   } ni_nvme_opcode_t;
 
-  typedef struct _ni_nvme_command_t
-  {
-      uint32_t cdw2;
-      uint32_t cdw3;
-      uint32_t cdw10;
-      uint32_t cdw11;
-      uint32_t cdw12;
-      uint32_t cdw13;
-      uint32_t cdw14;
-      uint32_t cdw15;
-
-  } ni_nvme_command_t;
-
 typedef enum _ni_scaler_opcode
 {
   NI_SCALER_OPCODE_SCALE   = 0,
   NI_SCALER_OPCODE_CROP    = 1,
   NI_SCALER_OPCODE_PAD     = 2,
-  NI_SCALER_OPCODE_OVERLAY = 3
+  NI_SCALER_OPCODE_OVERLAY = 3,
+  NI_SCALER_OPCODE_STACK   = 4
 } ni_scaler_opcode_t;
-
-typedef struct _ni_lat_meas_q_entry_t
-{
-    uint64_t abs_timenano;
-    int64_t ts_time;
-} ni_lat_meas_q_entry_t;
-
-typedef struct _ni_lat_meas_q_t
-{
-    int front, rear, size;
-    unsigned capacity;
-    ni_lat_meas_q_entry_t *array;
-} ni_lat_meas_q_t;
 
 #ifdef __cplusplus
 }

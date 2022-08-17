@@ -26,7 +26,7 @@
 *
 *******************************************************************************/
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/ioctl.h>
@@ -756,7 +756,6 @@ ni_queue_node_t *ni_buffer_pool_expand(ni_queue_buffer_pool_t *pool)
 
     for (i = 0; i < 200; i++)
     {
-        //TODO: What happens is ni_buffer_pool_allocate_buffer fails and returns a NULL pointer?
         if (NULL == ni_buffer_pool_allocate_buffer(pool))
         {
             ni_log(NI_LOG_FATAL,
@@ -937,6 +936,9 @@ ni_retcode_t ni_find_blk_name(const char *p_dev, char *p_out_buf, int out_buf_le
     ni_log(NI_LOG_DEBUG,
            "Automatic namespaceID discovery not supported in Windows. Using "
            "guess.\n");
+    snprintf(p_out_buf, out_buf_len, "%s", p_dev);
+    return NI_RETCODE_SUCCESS;
+#elif __APPLE__
     snprintf(p_out_buf, out_buf_len, "%s", p_dev);
     return NI_RETCODE_SUCCESS;
 #else
@@ -1301,30 +1303,28 @@ ni_retcode_t ni_queue_push(ni_queue_buffer_pool_t *p_buffer_pool,
     {
         p_queue->p_first = p_queue->p_last = temp;
         p_queue->p_first->p_prev = NULL;
+        p_queue->count++;
     } else
     {
         p_queue->p_last->p_next = temp;
         temp->p_prev = p_queue->p_last;
         p_queue->p_last = temp;
-    }
+        p_queue->count++;
 
-    p_queue->count++;
-
-    //ni_log(NI_LOG_TRACE, "%s exit: p_first=%"PRId64", p_last=%"PRId64", count=%d\n", __func__, p_queue->p_first, p_queue->p_last, p_queue->count);
-
-    if (p_queue->count > XCODER_MAX_NUM_QUEUE_ENTRIES)
-    {
-        ni_log(NI_LOG_DEBUG,
-               "%s: queue overflow, remove oldest entry, count=%u\n", __func__,
-               p_queue->count);
-        abort();
-        //Remove oldest one
-        temp = p_queue->p_first->p_next;
-        // free(p_queue->p_first);
-        ni_buffer_pool_return_buffer(p_queue->p_first, p_buffer_pool);
-        p_queue->p_first = temp;
-        p_queue->p_first->p_prev = NULL;
-        p_queue->count--;
+        // Assume the oldest one is useless when reaching this situation.
+        if (p_queue->count > XCODER_MAX_NUM_QUEUE_ENTRIES)
+        {
+            ni_log(NI_LOG_DEBUG,
+                   "%s: queue overflow, remove oldest entry, count=%u\n",
+                   __func__, p_queue->count);
+            //Remove oldest one
+            temp = p_queue->p_first->p_next;
+            // free(p_queue->p_first);
+            ni_buffer_pool_return_buffer(p_queue->p_first, p_buffer_pool);
+            p_queue->p_first = temp;
+            p_queue->p_first->p_prev = NULL;
+            p_queue->count--;
+        }
     }
 
 END:
@@ -2039,182 +2039,6 @@ LIB_API int ni_remove_emulation_prevent_bytes(uint8_t *buf, int size)
     return remove_bytes;
 }
 
-#ifdef MEASURE_LATENCY
-/*!******************************************************************************
- *  \brief  Create a latency measurement queue object of a given capacity
- *
- *  \param  capacity maximum size of queue
- *
- *  \return ni_lat_meas_q_t latency measurement queue structure
- *
- *******************************************************************************/
-ni_lat_meas_q_t *ni_lat_meas_q_create(unsigned capacity)
-{
-    ni_lat_meas_q_t *queue = (ni_lat_meas_q_t *)malloc(sizeof(ni_lat_meas_q_t));
-    if (!queue)
-    {
-        ni_log(NI_LOG_ERROR, "ERROR %d: Failed to allocate memory for "
-               "lat_meas-queue queue", NI_ERRNO);
-        return NULL;
-    }
-    queue->capacity = capacity;
-    queue->front = queue->size = 0;
-    queue->rear = capacity - 1;
-    queue->array = (ni_lat_meas_q_entry_t *)malloc(
-        queue->capacity * sizeof(ni_lat_meas_q_entry_t));
-    if (!queue->array)
-    {
-        ni_log(NI_LOG_ERROR, "ERROR %d: Failed to allocate memory for "
-               "lat_meas_queue queue->array", NI_ERRNO);
-        free(queue);
-        return NULL;
-    }
-    return queue;
-}
-
-/*!******************************************************************************
- *  \brief  Push an item onto the queue
- *
- *  \param  queue pointer to latency queue
- *  \param  item ni_lat_meas_q_entry_t item to push onto the queue
- *
- *  \return void 1 if success, NULL if failed
- *
- *******************************************************************************/
-void *ni_lat_meas_q_enqueue(ni_lat_meas_q_t *queue, ni_lat_meas_q_entry_t item)
-{
-    if (queue->size == queue->capacity)
-    {
-        return NULL;
-    }
-    queue->rear = (queue->rear + 1) % queue->capacity;
-    queue->array[queue->rear] = item;
-    queue->size = queue->size + 1;
-    return (void *)1;
-}
-
-/*!******************************************************************************
- *  \brief  Pop an item from the queue
- *
- *  \param  queue pointer to latency queue
- *
- *  \return void pointer to popped item
- *
- *******************************************************************************/
-void *ni_lat_meas_q_dequeue(ni_lat_meas_q_t *queue)
-{
-    ni_lat_meas_q_entry_t *dequeue_item;
-    if (queue->size == 0)
-    {
-        return NULL;
-    }
-    dequeue_item = &queue->array[queue->front];
-    queue->front = (queue->front + 1) % queue->capacity;
-    queue->size = queue->size - 1;
-    return dequeue_item;
-}
-
-/*!******************************************************************************
- *  \brief  Get a pointer to rear of queue
- *
- *  \param  queue pointer to latency queue
- *
- *  \return void pointer to rear of queue
- *
- *******************************************************************************/
-void *ni_lat_meas_q_rear(ni_lat_meas_q_t *queue)
-{
-    return queue->size == 0 ? NULL : &queue->array[queue->rear];
-}
-
-/*!******************************************************************************
- *  \brief  Get a pointer to front of queue
- *
- *  \param  queue pointer to latency queue
- *
- *  \return void pointer to front of queue
- *
- *******************************************************************************/
-void *ni_lat_meas_q_front(ni_lat_meas_q_t *queue)
-{
-    return queue->size == 0 ? NULL : &queue->array[queue->front];
-}
-
-/*!******************************************************************************
- *  \brief  Add a new entry to latency queue
- *
- *  \param  dec_frame_time_q pointer to latency queue
- *  \param  abs_time frame start time for latency comparison
- *  \param  ts_time reference frame timestamp time
- *
- *  \return void 1 if success, NULL if failed
- *
- *******************************************************************************/
-void *ni_lat_meas_q_add_entry(ni_lat_meas_q_t *dec_frame_time_q,
-                              uint64_t abs_time, int64_t ts_time)
-{
-    // ni_log(NI_LOG_DEBUG, "ni_lat_meas_q_add_entry abs_time=%lu ts_time="
-    //        "%ld\n", abs_time, ts_time);
-    ni_lat_meas_q_entry_t entry = {.abs_timenano = abs_time,
-                                   .ts_time = ts_time};
-    return ni_lat_meas_q_enqueue(dec_frame_time_q, entry);
-}
-
-/*!******************************************************************************
- *  \brief  Check latency of a frame referenced by its timestamp
- *
- *  \param  dec_frame_time_q pointer to latency queue
- *  \param  abs_time frame end time for latency comparison
- *  \param  ts_time reference frame timestamp time
- *
- *  \return uint64_t value of latency if suceeded, -1 if failed
- *
- *******************************************************************************/
-uint64_t ni_lat_meas_q_check_latency(ni_lat_meas_q_t *dec_frame_time_q,
-                                     uint64_t abs_time, int64_t ts_time)
-{
-    // ni_log(NI_LOG_DEBUG, "ni_lat_meas_q_check_latency abs_time=%lu ts_time="
-    //        "%ld\n", abs_time, ts_time);
-    uint32_t dequeue_count = 0;
-    ni_lat_meas_q_entry_t *entry = ni_lat_meas_q_front(dec_frame_time_q);
-
-    if (entry == NULL)
-    {
-        return -1;
-    }
-
-    if (entry->ts_time == ts_time)
-    {
-        ni_lat_meas_q_dequeue(dec_frame_time_q);
-        dequeue_count++;
-    } else
-    {   // queue miss, perhaps frame was not decoded properly or TS was offset
-        while (entry->ts_time < ts_time)
-        {
-            entry = ni_lat_meas_q_dequeue(dec_frame_time_q);
-            dequeue_count++;
-            if (entry == NULL)
-            {
-                return -1;
-            }
-        }
-    }
-    ni_log(NI_LOG_DEBUG, "DQ_CNT:%u,QD:%d", dequeue_count,
-           dec_frame_time_q->size);
-
-    if (entry == NULL)
-    {   // queue overrun
-        return -1;
-    } else if (entry->ts_time > ts_time)
-    {   // queue miss, perhaps frame was not enqueued properly or TS was offset
-        return -1;
-    } else if (entry->ts_time == ts_time)
-    {   // queue item is perfectly matched, calculate latency
-        return (abs_time - entry->abs_timenano);
-    }
-}
-#endif
-
 /******************************************************************************
  *
  * Ai utils apis
@@ -2433,9 +2257,6 @@ static void ni_ai_type_get_range(int32_t type, double *max_range,
             from = 0.0;
             to = (double)((1UL << bits) - 1);
         }
-    } else
-    {
-        //  TODO: Add float
     }
     if (NULL != max_range)
     {
@@ -3143,4 +2964,57 @@ void ni_copy_hw_descriptors(uint8_t *p_dst[NI_MAX_NUM_DATA_POINTERS],
                    "%d/%d\n",
                    src_desc->ui16FrameIdx, src_desc->device_handle,
                    dest_desc->ui16FrameIdx, dest_desc->device_handle);
+}
+
+/*!*****************************************************************************
+ *  \brief  Get libxcoder API version
+ *
+ *  \return char pointer to libxcoder API version
+ ******************************************************************************/
+LIB_API char* ni_get_libxcoder_api_ver(void)
+{
+    static char* libxcoder_api_ver = LIBXCODER_API_VERSION;
+    return libxcoder_api_ver;
+}
+
+/*!*****************************************************************************
+ *  \brief  Get FW API version libxcoder is compatible with
+ *
+ *  \return char pointer to FW API version libxcoder is compatible with
+ ******************************************************************************/
+LIB_API char* ni_get_compat_fw_api_ver(void)
+{
+    static char compat_fw_api_ver_str[4] = "";
+    // init static array one byte at a time to avoid compiler error C2099
+    if (!compat_fw_api_ver_str[0])
+    {
+        compat_fw_api_ver_str[0] = \
+            NI_XCODER_REVISION[NI_XCODER_REVISION_API_MAJOR_VER_IDX];
+        compat_fw_api_ver_str[1] = '.';
+        compat_fw_api_ver_str[2] = \
+            NI_XCODER_REVISION[NI_XCODER_REVISION_API_MINOR_VER_IDX];
+        compat_fw_api_ver_str[3] = 0;
+    }
+    return &compat_fw_api_ver_str[0];
+}
+
+/*!*****************************************************************************
+ *  \brief  Get libxcoder SW release version
+ *
+ *  \return char pointer to libxcoder SW release version
+ ******************************************************************************/
+LIB_API char* ni_get_libxcoder_release_ver(void)
+{
+    static char release_ver_str[6] = "";
+    // init static array one byte at a time to avoid compiler error C2099
+    if (!release_ver_str[0])
+    {
+        release_ver_str[0] = NI_XCODER_REVISION[0];
+        release_ver_str[1] = '.';
+        release_ver_str[2] = NI_XCODER_REVISION[1];
+        release_ver_str[3] = '.';
+        release_ver_str[4] = NI_XCODER_REVISION[2];
+        release_ver_str[5] = 0;
+    }
+    return &release_ver_str[0];
 }

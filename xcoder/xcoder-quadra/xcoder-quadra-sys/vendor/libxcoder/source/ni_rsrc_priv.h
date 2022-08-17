@@ -35,29 +35,25 @@ extern "C" {
 #include "ni_device_api.h"
 
 #ifdef _ANDROID
-#define LOCK_DIR "/dev/shm_netint"
-#define CODERS_LCK_NAME "/dev/shm_netint/LCK_CODERS"
-static const char *XCODERS_RETRY_LCK_NAME[] = {
-    "/dev/shm_netint/RETRY_LCK_DECODERS", "/dev/shm_netint/RETRY_LCK_ENCODERS",
-    "/dev/shm_netint/RETRY_LCK_SCALERS", "/dev/shm_netint/RETRY_LCK_AI"};
+#define LOCK_DIR 		"/dev/shm_netint"
+#elif __APPLE__
+#define LOCK_DIR        "/tmp"
 #else
 #define LOCK_DIR        "/dev/shm"
-#define CODERS_LCK_NAME "/dev/shm/LCK_CODERS"
-static const char *XCODERS_RETRY_LCK_NAME[] = {
-    "/dev/shm/RETRY_LCK_DECODERS", "/dev/shm/RETRY_LCK_ENCODERS",
-    "/dev/shm/RETRY_LCK_SCALERS", "/dev/shm/RETRY_LCK_AI"};
 #endif
 
-#define CODERS_SHM_NAME "SHM_CODERS"
+#define CODERS_LCK_NAME LOCK_DIR "/NI_LCK_CODERS"
+
+static const char *XCODERS_RETRY_LCK_NAME[] = {
+    LOCK_DIR "/NI_RETRY_LCK_DECODERS", LOCK_DIR "/NI_RETRY_LCK_ENCODERS",
+    LOCK_DIR "/NI_RETRY_LCK_SCALERS", LOCK_DIR "/NI_RETRY_LCK_AI"};
+
+#define CODERS_SHM_NAME "NI_SHM_CODERS"
 
 #define MAX_LOCK_RETRY  6000
 #define LOCK_WAIT       10000  // wait in us
 
-#ifdef _MSC_VER
-extern uint32_t stop_process;
-#else
-extern LIB_API uint32_t stop_process;
-#endif
+extern LIB_API uint32_t g_xcoder_stop_process;
 
 void ni_rsrc_get_lock_name(ni_device_type_t device_type, int32_t guid, char* p_name, size_t max_name_len);
 void ni_rsrc_get_shm_name(ni_device_type_t device_type, int32_t guid, char* p_name, size_t max_name_len);

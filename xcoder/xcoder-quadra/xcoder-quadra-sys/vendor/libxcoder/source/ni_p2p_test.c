@@ -484,7 +484,7 @@ int encoder_receive_data(ni_session_context_t *p_enc_ctx,
     int rc = 0;
     int end_flag = 0;
     int rx_size = 0;
-    int meta_size = NI_FW_ENC_BITSTREAM_META_DATA_SIZE;
+    int meta_size = p_enc_ctx->meta_size;
     ni_packet_t *p_out_pkt = &(p_out_data->data.packet);
     static int received_stream_header = 0;
 
@@ -533,10 +533,9 @@ int encoder_receive_data(ni_session_context_t *p_enc_ctx,
             *total_bytes_received += (rx_size - meta_size);
             number_of_packets++;
             received_stream_header = 1;
-        }
-        else if (rc != 0)
+        } else if (rc != 0)
         {
-            fprintf(stderr, "Error: reading header %d\n",rc);
+            fprintf(stderr, "Error: reading header %d\n", rc);
             return -1;
         }
 
@@ -547,8 +546,8 @@ int encoder_receive_data(ni_session_context_t *p_enc_ctx,
             {
                 timeDiff = 1;
             }
-            printf("[R] Got:%d   Packets= %u fps=%u  Total bytes %llu\n", rx_size,
-                   number_of_packets, number_of_packets / timeDiff,
+            printf("[R] Got:%d   Packets= %u fps=%u  Total bytes %llu\n",
+                   rx_size, number_of_packets, number_of_packets / timeDiff,
                    *total_bytes_received);
         }
 
@@ -556,8 +555,7 @@ int encoder_receive_data(ni_session_context_t *p_enc_ctx,
         if (p_out_pkt->end_of_stream)
         {
             return 1;
-        }
-        else if (rc == 0)
+        } else if (rc == 0)
         {
             return 2;
         }
@@ -741,7 +739,7 @@ int uploader_open_session(ni_session_context_t *p_upl_ctx, int *iXcoderGUID,
 void print_usage(void)
 {
     printf("Video encoder/P2P application directly using Netint "
-           "Libxcoder API v%s\n"
+           "Libxcoder release v%s\n"
            "Usage: xcoderp2p [options]\n"
            "\n"
            "options:\n"
@@ -818,11 +816,12 @@ void parse_arguments(int argc, char *argv[], char *input_filename,
                 print_usage();
                 exit(0);
             case 'v':
-                printf("Ver:  %s\n"
-                       "Date: %s\n"
-                       "ID:   %s\n",
-                       NI_XCODER_REVISION, NI_SW_RELEASE_TIME,
-                       NI_SW_RELEASE_ID);
+                printf("Release ver: %s\n"
+                       "API ver:     %s\n"
+                       "Date:        %s\n"
+                       "ID:          %s\n",
+                       NI_XCODER_REVISION, LIBXCODER_API_VERSION,
+                       NI_SW_RELEASE_TIME, NI_SW_RELEASE_ID);
                 exit(0);
             case 'l':
                 log_level = arg_to_ni_log_level(optarg);

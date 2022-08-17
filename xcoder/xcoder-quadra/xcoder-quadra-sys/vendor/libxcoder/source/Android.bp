@@ -3,6 +3,7 @@
 cc_library_shared {
 	name: "libxcoder",
     srcs: [
+        "ni_lat_meas.c",
         "ni_log.c",
         "ni_nvme.c",
         "ni_device_api_priv.c",
@@ -43,7 +44,6 @@ cc_library_shared {
 		"-Wno-macro-redefined",
     ] + [
         "-D_ANDROID",
-        "-DXCODER_IO_RW_ENABLED",
         "-D_FILE_OFFSET_BITS=64",
     ],
 
@@ -105,7 +105,6 @@ cc_binary {
         "-Wno-unused-variable",
     ] + [
         "-D_ANDROID",
-        "-DXCODER_IO_RW_ENABLED",
 		"-pie",
 		"-fPIE",
     ],
@@ -150,7 +149,6 @@ cc_binary {
         "-Wno-sometimes-uninitialized",
     ] + [
         "-D_ANDROID",
-        "-DXCODER_IO_RW_ENABLED",
         "-D_FILE_OFFSET_BITS=64",
     ],
 
@@ -163,6 +161,49 @@ cc_binary {
     ],
 
     name: "ni_rsrc_mon",
+
+    clang: true,
+
+}
+
+//###############################################################################
+
+cc_binary {
+	proprietary: true,
+    srcs: ["ni_rsrc_list.c"],
+
+    local_include_dirs: [""],
+
+    cflags: [
+        "-Werror",
+        "-Wno-missing-field-initializers",
+        "-Wno-missing-braces",
+        "-Wno-sign-compare",
+        "-Wno-return-type",
+        "-Wno-pointer-arith",
+        "-Wno-pointer-sign",
+        "-Wno-enum-conversion",
+        "-Wno-unused-parameter",
+        "-Wno-pointer-bool-conversion",
+        "-Wno-tautological-pointer-compare",
+        "-Wno-parentheses",
+        "-Wno-tautological-compare",
+        "-Wno-absolute-value",
+        "-Wno-sometimes-uninitialized",
+    ] + [
+        "-D_ANDROID",
+        "-D_FILE_OFFSET_BITS=64",
+    ],
+
+    shared_libs: [
+        "libutils",
+        "libbinder",
+        "libcutils",
+        "liblog",
+        "libxcoder",
+    ],
+
+    name: "ni_rsrc_list",
 
     clang: true,
 

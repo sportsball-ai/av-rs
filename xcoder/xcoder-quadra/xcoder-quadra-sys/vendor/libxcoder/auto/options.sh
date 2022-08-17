@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # variables, parent script must set it:
 
@@ -57,6 +57,8 @@ Options:
   --with-latency-display          enable latency-display feature
   --without-latency-display       disable latency-display feature (default)
 
+  --prefix                  Set custom install location preix
+                            (default: /usr/local/)
   --libdir                  Set custom install location for libxcoder.so and pkgconfig files
                             (default: /usr/local/lib/)
   --bindir                  Set custom install location for binary utilities (ni_rsrc_mon, etc.)
@@ -112,6 +114,11 @@ function parse_user_option() {
             --without-tracelog-timestamps)  XCODER_TRACELOG_TIMESTAMPS=NO;;
             --with-data-dump)           XCODER_DUMP_DATA=YES;;
             --without-data-dump)        XCODER_DUMP_DATA=NO;;
+            --prefix*)                  extract_arg "\-\-prefix" $1 $2; eprc=$?;
+                                        if [ "$eprc" -eq 1 ]; then
+                                            shift;
+                                        fi
+                                        XCODER_PREFIX=$extract_arg_ret;;
             --libdir*)                  extract_arg "\-\-libdir" $1 $2; eprc=$?;
                                         if [ "$eprc" -eq 1 ]; then
                                             shift;

@@ -28,8 +28,10 @@
 
 #ifdef _WIN32
 #include <windows.h>
-#elif __linux__
+#elif __linux__ || __APPLE__
+#if __linux__
 #include <linux/types.h>
+#endif
 #include <sys/file.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -63,7 +65,7 @@
 #include "ni_device_api.h"
 #include "ni_device_api_priv.h"
 #include "ni_util.h"
-#include "ni_rsrc_api.h"
+#include "ni_lat_meas.h"
 
 typedef enum _ni_t35_sei_mesg_type
 {
@@ -203,7 +205,7 @@ static uint8_t g_sei_trailer[NI_CC_SEI_TRAILER_LEN] = {
         }                                                                      \
     }
 
-#elif __linux__
+#elif __linux__ || __APPLE__
 static struct stat g_nvme_stat = {0};
 
 #ifdef XCODER_SELF_KILL_ERR
@@ -333,7 +335,7 @@ static struct stat g_nvme_stat = {0};
 static void decoder_dump_dir_open(ni_session_context_t *p_ctx)
 {
 #ifdef _WIN32
-#elif __linux__
+#elif __linux__ || __APPLE__
     FILE *fp;
     char dir_name[128] = {0};
     char file_name[512] = {0};
@@ -497,6 +499,21 @@ static void decoder_dump_dir_open(ni_session_context_t *p_ctx)
 #endif
 }
 
+// check if fw_rev is higher than the specified
+static uint32_t is_fw_rev_higher(ni_session_context_t* p_ctx, uint8_t major, uint8_t minor)
+{
+    if ((p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX] > major) ||
+        ((p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX] == major) &&
+         (p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX] > minor)))
+    {
+        return 1;
+    }
+    else
+    {
+        return 0;
+    }
+}
+
 /*!******************************************************************************
  *  \brief  Open a xcoder decoder instance
  *
@@ -525,7 +542,6 @@ ni_retcode_t ni_decoder_session_open(ni_session_context_t* p_ctx)
   //Create the session if the create session flag is set
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    int i;
     p_ctx->device_type = NI_DEVICE_TYPE_DECODER;
     p_ctx->pts_table = NULL;
     p_ctx->dts_queue = NULL;
@@ -534,7 +550,6 @@ ni_retcode_t ni_decoder_session_open(ni_session_context_t* p_ctx)
     p_ctx->dec_fme_buf_pool = NULL;
     p_ctx->prev_size = 0;
     p_ctx->sent_size = 0;
-    p_ctx->lone_sei_size = 0;
     p_ctx->status = 0;
     p_ctx->key_frame_type = 0;
     p_ctx->ready_to_close = 0;
@@ -545,14 +560,7 @@ ni_retcode_t ni_decoder_session_open(ni_session_context_t* p_ctx)
     p_ctx->session_timestamp = 0;
     p_ctx->is_dec_pkt_512_aligned = 0;
     p_ctx->p_all_zero_buf = NULL;
-
-    for (i = 0; i < NI_FIFO_SZ; i++)
-    {
-      p_ctx->pkt_custom_sei[i] = NULL;
-      p_ctx->pkt_custom_sei_len[i] = 0;
-    }
-    p_ctx->last_pkt_custom_sei = NULL;
-    p_ctx->last_pkt_custom_sei_len = 0;
+    memset(p_ctx->pkt_custom_sei_set, 0, NI_FIFO_SZ * sizeof(ni_custom_sei_set_t *));
 
     //malloc zero data buffer
     if (ni_posix_memalign(&p_ctx->p_all_zero_buf, sysconf(_SC_PAGESIZE),
@@ -633,6 +641,35 @@ ni_retcode_t ni_decoder_session_open(ni_session_context_t* p_ctx)
         LRETURN;
     }
 
+    // Send SW version to FW if FW version is higher than major 6 minor 1
+    if (is_fw_rev_higher(p_ctx, (uint8_t)'6', (uint8_t)'1'))
+    {
+        // Send SW version to session manager
+        memset(p_buffer, 0, NI_DATA_BUFFER_LEN);
+        memcpy(p_buffer, NI_XCODER_REVISION, sizeof(uint64_t));
+        ni_log(NI_LOG_DEBUG, "%s sw_version major %c minor %c fw_rev major %c minor %c\n", __func__,
+                NI_XCODER_REVISION[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+                NI_XCODER_REVISION[NI_XCODER_REVISION_API_MINOR_VER_IDX],
+                p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+                p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX]);
+        ui32LBA = CONFIG_SESSION_SWVersion_W(p_ctx->session_id);
+        retval = ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
+                                        p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+        CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_config, p_ctx->device_type,
+                    p_ctx->hw_id, &(p_ctx->session_id));
+        CHECK_VPU_RECOVERY(retval);
+
+        if (NI_RETCODE_SUCCESS != retval)
+        {
+            ni_log(NI_LOG_ERROR,
+                   "ERROR %s(): nvme write sw_version command "
+                   "failed, blk_io_handle: %" PRIx64 ", hw_id, %d\n",
+                   __func__, (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id);
+            retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+            LRETURN;
+        }
+    }
+
     //VP9 requires a scaler session to be opened internally and attached as
     //well
     if(p_ctx->codec_format == NI_CODEC_FORMAT_VP9)
@@ -678,8 +715,11 @@ ni_retcode_t ni_decoder_session_open(ni_session_context_t* p_ctx)
 
   // init for frame pts calculation
   p_ctx->is_first_frame = 1;
-  p_ctx->last_pts = 0;
-  p_ctx->last_dts = 0;
+  p_ctx->last_pts = NI_NOPTS_VALUE;
+  p_ctx->last_dts = NI_NOPTS_VALUE;
+  p_ctx->last_dts_interval = 0;
+  p_ctx->pts_correction_last_dts = INT64_MIN;
+  p_ctx->pts_correction_last_pts = INT64_MIN;
 
   //p_ctx->p_leftover = malloc(NI_MAX_PACKET_SZ * 2);
   p_ctx->p_leftover = malloc(p_ctx->max_nvme_io_size * 2);
@@ -859,7 +899,7 @@ ni_retcode_t ni_decoder_session_close(ni_session_context_t* p_ctx, int eos_recie
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-      ni_log(NI_LOG_ERROR, "ERROR %s(): Cannot allocate leftover buffer.\n",
+      ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
              __func__);
       retval = NI_RETCODE_ERROR_INVALID_SESSION;
       LRETURN;
@@ -943,12 +983,8 @@ END:
 
     for (i = 0; i < NI_FIFO_SZ; i++)
     {
-        ni_aligned_free(p_ctx->pkt_custom_sei[i]);
-        p_ctx->pkt_custom_sei_len[i] = 0;
+        ni_aligned_free(p_ctx->pkt_custom_sei_set[i]);
     }
-
-    ni_aligned_free(p_ctx->last_pkt_custom_sei);
-    p_ctx->last_pkt_custom_sei_len = 0;
 
     ni_log(NI_LOG_DEBUG, "%s():  CTX[Card:%" PRIx64 " / HW:%d / INST:%d]\n",
            __func__, (int64_t)p_ctx->device_handle, p_ctx->hw_id,
@@ -986,13 +1022,14 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
 
   if ((!p_ctx) || (!p_packet))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     return NI_RETCODE_INVALID_PARAM;
   }
 
   if ((NI_INVALID_SESSION_ID == p_ctx->session_id))
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): xcoder instance id < 0, return\n",
+      ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
              __func__);
       retval = NI_RETCODE_ERROR_INVALID_SESSION;
       LRETURN;
@@ -1002,7 +1039,8 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
   if ((p_packet->dts != NI_NOPTS_VALUE) && (p_ctx->frame_time_q != NULL))
   {
       abs_time_ns = ni_gettime_ns();
-      ni_lat_meas_q_add_entry(p_ctx->frame_time_q, abs_time_ns, p_packet->dts);
+      ni_lat_meas_q_add_entry((ni_lat_meas_q_t *)p_ctx->frame_time_q,
+                              abs_time_ns, p_packet->dts);
   }
 #endif
 
@@ -1025,10 +1063,8 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
     {
       p_ctx->biggest_bitstream_buffer_allocated = buf_info.buf_avail_size;
     }
-    if (p_ctx->frame_num && p_ctx->biggest_bitstream_buffer_allocated < packet_size)
+    if (p_ctx->biggest_bitstream_buffer_allocated < packet_size)
     {
-      // Aside from the first frame,
-      // we got ourselves a sequence change to a bigger picture!
       // Reallocate decoder bitstream buffers to accomodate.
       retval = ni_config_instance_set_decoder_params(p_ctx, packet_size);
       if (NI_RETCODE_SUCCESS != retval)
@@ -1184,6 +1220,7 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
     if (p_ctx->is_first_frame && (p_ctx->pkt_index != -1))
     {
       p_ctx->pts_offsets[p_ctx->pkt_index] = p_packet->pts;
+      p_ctx->flags_array[p_ctx->pkt_index] = p_packet->flags;
       p_ctx->pkt_offsets_index[p_ctx->pkt_index] = current_pkt_size/512; // assuming packet_size is 512 aligned
       ni_log(NI_LOG_DEBUG,
              "%s:  pkt_index %d pkt_offsets_index %" PRIu64
@@ -1206,6 +1243,7 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
   else
   {
     p_ctx->pts_offsets[p_ctx->pkt_index % NI_FIFO_SZ] = p_packet->pts;
+    p_ctx->flags_array[p_ctx->pkt_index % NI_FIFO_SZ] = p_packet->flags;
     if (p_ctx->pkt_index == 0)
     {
       p_ctx->pkt_offsets_index_min[p_ctx->pkt_index % NI_FIFO_SZ] = 0;
@@ -1253,16 +1291,15 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
     }
 
     /* if this wrap-around pkt_offset_index spot is about to be overwritten, free the previous one. */
-    ni_aligned_free(p_ctx->pkt_custom_sei[p_ctx->pkt_index % NI_FIFO_SZ]);
+    ni_aligned_free(p_ctx->pkt_custom_sei_set[p_ctx->pkt_index % NI_FIFO_SZ]);
 
-    if (p_packet->p_custom_sei)
+    if (p_packet->p_custom_sei_set)
     {
-      p_ctx->pkt_custom_sei[p_ctx->pkt_index % NI_FIFO_SZ] = malloc(p_packet->custom_sei_len);
-      if (p_ctx->pkt_custom_sei[p_ctx->pkt_index % NI_FIFO_SZ])
+      p_ctx->pkt_custom_sei_set[p_ctx->pkt_index % NI_FIFO_SZ] = malloc(sizeof(ni_custom_sei_set_t));
+      if (p_ctx->pkt_custom_sei_set[p_ctx->pkt_index % NI_FIFO_SZ])
       {
-        memcpy(p_ctx->pkt_custom_sei[p_ctx->pkt_index % NI_FIFO_SZ], p_packet->p_custom_sei,
-               p_packet->custom_sei_len);
-        p_ctx->pkt_custom_sei_len[p_ctx->pkt_index % NI_FIFO_SZ] = p_packet->custom_sei_len;
+        ni_custom_sei_set_t *p_custom_sei_set = p_ctx->pkt_custom_sei_set[p_ctx->pkt_index % NI_FIFO_SZ];
+        memcpy(p_custom_sei_set, p_packet->p_custom_sei_set, sizeof(ni_custom_sei_set_t));
       }
       else
       {
@@ -1271,52 +1308,13 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
                "Error %s: failed to allocate custom SEI buffer for pkt.\n",
                __func__);
       }
-
-      if (p_packet->no_slice)
-      {
-        /* this pkt contains custom sei data, but no slice data.
-         * store it for the next pkt which contains slice data. */
-        p_ctx->last_pkt_custom_sei = malloc(p_packet->custom_sei_len);
-        if (p_ctx->last_pkt_custom_sei)
-        {
-          memcpy(p_ctx->last_pkt_custom_sei, p_packet->p_custom_sei, p_packet->custom_sei_len);
-          p_ctx->last_pkt_custom_sei_len = p_packet->custom_sei_len;
-        }
-        else
-        {
-          /* warn and lose the sei data. */
-          ni_log(NI_LOG_ERROR,
-                 "Error %s: failed to allocate custom SEI buffer for pkt.\n",
-                 __func__);
-        }
-      }
-      else
-      {
-        if (p_ctx->last_pkt_custom_sei)
-        {
-          /* this pkt contains slice data and sei data. lose the previous sei data. */
-          ni_aligned_free(p_ctx->last_pkt_custom_sei);
-          p_ctx->last_pkt_custom_sei_len = 0;
-        }
-      }
-    }
-    else if (p_ctx->last_pkt_custom_sei)
-    {
-      /* last pkt contains sei data without slice data, this pkt does't contain sei data,
-       * take the last stored pkt sei as this pkt's sei data
-       * and insert into this pkt_offset_index spot. */
-      p_ctx->pkt_custom_sei[p_ctx->pkt_index % NI_FIFO_SZ] = p_ctx->last_pkt_custom_sei;
-      p_ctx->pkt_custom_sei_len[p_ctx->pkt_index % NI_FIFO_SZ] = p_ctx->last_pkt_custom_sei_len;
-      p_ctx->last_pkt_custom_sei = NULL;
-      p_ctx->last_pkt_custom_sei_len = 0;
     }
     else
     {
-      p_ctx->pkt_custom_sei[p_ctx->pkt_index % NI_FIFO_SZ] = NULL;
-      p_ctx->pkt_custom_sei_len[p_ctx->pkt_index % NI_FIFO_SZ] = 0;
+      p_ctx->pkt_custom_sei_set[p_ctx->pkt_index % NI_FIFO_SZ] = NULL;
     }
 
-    p_ctx->pkt_index ++;
+    p_ctx->pkt_index++;
   }
 
   retval = ni_timestamp_register(p_ctx->buffer_pool, p_ctx->dts_queue, p_packet->dts, 0);
@@ -1326,7 +1324,6 @@ int ni_decoder_session_write(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
              "ERROR %s(): ni_timestamp_register() for dts returned %d\n",
              __func__, retval);
   }
-
 END:
 
     if (NI_RETCODE_SUCCESS == retval)
@@ -1390,10 +1387,66 @@ static int64_t guess_correct_pts(ni_session_context_t* p_ctx, int64_t reordered_
   }
   else
   {
-    pts = dts;
+      if ((NI_NOPTS_VALUE == reordered_pts) ||
+          (NI_NOPTS_VALUE == p_ctx->last_pts) || (dts >= p_ctx->last_pts))
+      {
+          pts = dts;
+      } else
+      {
+          pts = reordered_pts;
+      }
+
     ni_log(NI_LOG_DEBUG, "%s: (dts) pts %" PRId64 "\n", __func__, pts);
   }
   return pts;
+}
+
+static int rotated_array_binary_search(uint64_t *lefts, uint64_t *rights,
+                                       int32_t size, uint64_t target)
+{
+    int lo = 0;
+    int hi = size - 1;
+    while (lo <= hi)
+    {
+        int mid = lo + (hi - lo) / 2;
+        if (lefts[mid] <= target && target < rights[mid])
+        {
+            return mid;
+        }
+
+        if (rights[mid] == 0)
+        {
+            // empty in (mid, hi)
+            hi = mid - 1;
+            continue;
+        }
+
+        if (rights[lo] <= rights[mid])
+        {
+            if (lefts[lo] <= target && target < lefts[mid])
+            {
+                // Elements are all monotonous in (lo, mid)
+                hi = mid - 1;
+            } else
+            {
+                // Rotation in (lo, mid)
+                lo = mid + 1;
+            }
+        } else
+        {
+            if (rights[mid] < target && target < rights[hi])
+            {
+                // Elements are all monotonous in (lo, mid)
+                lo = mid + 1;
+            } else
+            {
+                // Rotation in (lo, mid)
+                hi = mid - 1;
+            }
+        }
+    }
+
+    return -1;
 }
 
 /*!******************************************************************************
@@ -1424,7 +1477,8 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
   int query_retry = 0;
   uint32_t ui32LBA = 0;
   unsigned int bytes_read_so_far = 0;
-#ifdef MEASURE_LATENCY
+  int query_type = INST_BUF_INFO_RW_READ;
+#ifdef MEASURE_LATENCY 
   uint64_t abs_time_ns;
 #endif
 
@@ -1448,15 +1502,27 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
 
   // p_frame->p_data[] can be NULL before actual resolution is returned by
   // decoder and buffer pool is allocated, so no checking here.
-
   total_bytes_to_read = p_frame->data_len[0] + p_frame->data_len[1] +
       p_frame->data_len[2] + metadata_hdr_size;
-  ni_log(NI_LOG_DEBUG, "Total bytes to read %u\n", total_bytes_to_read);
+  ni_log(NI_LOG_DEBUG, "Total bytes to read %u, low_delay %u\n",
+         total_bytes_to_read, p_ctx->decoder_low_delay);
 
+  if (p_ctx->decoder_low_delay > 0 && !p_ctx->ready_to_close)
+  {
+      ni_log(NI_LOG_DEBUG, "frame_num = %" PRIu64 ", pkt_num = %" PRIu64 "\n",
+             p_ctx->frame_num, p_ctx->pkt_num);
+      if (p_ctx->frame_num >= p_ctx->pkt_num)
+      {
+          //nothing to query, leave
+          retval = NI_RETCODE_SUCCESS;
+          LRETURN;
+      }
+      query_type = INST_BUF_INFO_RW_READ_BUSY;
+  }
   for (;;)
   {
     query_retry++;
-    retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_RW_READ,
+    retval = ni_query_instance_buf_info(p_ctx, query_type,
                                         NI_DEVICE_TYPE_DECODER, &buf_info);
     CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_query,
                  p_ctx->device_type, p_ctx->hw_id,
@@ -1510,26 +1576,42 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
 
       ni_log(NI_LOG_TRACE, "Dec read available buf size == 0. retry=%d, eos=%d"
              "\n", query_retry, p_frame->end_of_stream);
-
       if (NI_RETCODE_NVME_SC_WRITE_BUFFER_FULL == p_ctx->status &&
-          query_retry < 1000/2)
+          query_retry < 1000 / 2)
       {
           ni_usleep(25);
           continue;
       } else
       {
+        if(p_ctx->decoder_low_delay>0)
+        {
+            ni_log(NI_LOG_ERROR, "Warning: low_delay mode non sequential input? Disabling LD\n");
+            p_ctx->decoder_low_delay = -1;
+        }
         ni_log(NI_LOG_DEBUG, "Warning: dec read failed %d retries. rc=%d; eos=%d\n",
                query_retry, p_ctx->status, p_frame->end_of_stream);
         
         ni_log(NI_LOG_DEBUG, "Warning: dec read query failed %d retries. rc=%d"
                "\n", query_retry, retval);
       }
-
       retval = NI_RETCODE_SUCCESS;
       LRETURN;
     }
     else
     {
+        // We have to ensure there are adequate number of DTS for picture
+        // reorder delay otherwise wait for more packets to be sent to decoder.
+        ni_timestamp_table_t *p_dts_queue = p_ctx->dts_queue;
+        if ((int)p_dts_queue->list.count < p_ctx->pic_reorder_delay + 1 &&
+            !p_ctx->ready_to_close)
+        {
+            retval = NI_RETCODE_SUCCESS;
+            ni_log(NI_LOG_DEBUG,
+                   "At least %d packets should be sent before reading the "
+                   "first frame!\n",
+                   p_ctx->pic_reorder_delay + 1);
+            LRETURN;
+        }
       // get actual YUV transfer size if this is the stream's very first read
       if (0 == p_ctx->active_video_width || 0 == p_ctx->active_video_height)
       {
@@ -1552,6 +1634,7 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
             (p_ctx->pixel_format == NI_PIX_FMT_YUV420P10LE);
         p_ctx->bit_depth_factor = ni_get_bitdepth_factor_from_pixfmt(p_ctx->pixel_format);
         //p_ctx->bit_depth_factor = data.transfer_frame_stride / data.picture_width;
+        p_ctx->is_first_frame = 1;
 
         ni_log(NI_LOG_DEBUG, "Info dec YUV, adjust frame size from %ux%u to "
                        "%ux%u format = %d\n", p_frame->video_width, p_frame->video_height,
@@ -1661,6 +1744,7 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
   // and recv to catch and recover from a loop condition
 
   rx_size = ni_create_frame(p_frame, bytes_read_so_far, &frame_offset, false);
+  p_ctx->frame_pkt_offset = frame_offset;
 
   if (rx_size > 0)
   {
@@ -1671,7 +1755,44 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
               XCODER_FRAME_OFFSET_DIFF_THRES, 0,
               p_ctx->buffer_pool) != NI_RETCODE_SUCCESS)
       {
-          p_frame->dts = NI_NOPTS_VALUE;
+          if (p_ctx->last_dts != NI_NOPTS_VALUE && !p_ctx->ready_to_close)
+          {
+              p_ctx->pic_reorder_delay++;
+              p_frame->dts = p_ctx->last_dts + p_ctx->last_dts_interval;
+              ni_log(NI_LOG_DEBUG, "Padding DTS: %" PRId64 "\n", p_frame->dts);
+          } else
+          {
+              p_frame->dts = NI_NOPTS_VALUE;
+          }
+      }
+
+      if (p_ctx->is_first_frame)
+      {
+          for (i = 0; i < p_ctx->pic_reorder_delay; i++)
+          {
+              if (p_ctx->last_pts == NI_NOPTS_VALUE &&
+                  p_ctx->last_dts == NI_NOPTS_VALUE)
+              {
+                  // If the p_frame->pts is unknown in the very beginning we assume
+                  // p_frame->pts == 0 as well as DTS less than PTS by 1000 * 1/timebase
+                  if (p_frame->pts >= p_frame->dts &&
+                      p_frame->pts - p_frame->dts < 1000)
+                  {
+                      break;
+                  }
+              }
+
+              if (ni_timestamp_get_with_threshold(
+                      p_ctx->dts_queue, 0, (int64_t *)&p_frame->dts,
+                      XCODER_FRAME_OFFSET_DIFF_THRES,
+                      p_ctx->frame_num % 500 == 0,
+                      p_ctx->buffer_pool) != NI_RETCODE_SUCCESS)
+              {
+                  p_frame->dts = NI_NOPTS_VALUE;
+              }
+          }
+          // Reset for DTS padding counting
+          p_ctx->pic_reorder_delay = 0;
       }
 
     if (p_ctx->is_dec_pkt_512_aligned)
@@ -1683,7 +1804,6 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
         if (p_frame->dts == NI_NOPTS_VALUE)
         {
           p_frame->pts = NI_NOPTS_VALUE;
-          p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
         }
         // if not a bitstream retrieve the pts of the frame corresponding to the first YUV output
         else if((p_ctx->pts_offsets[0] != NI_NOPTS_VALUE) && (p_ctx->pkt_index != -1))
@@ -1723,10 +1843,8 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
           if ((idx != NI_MAX_DEC_REJECT) && bFound)
           {
             p_frame->pts = p_ctx->pts_offsets[idx];
-            if (idx)
-              p_ctx->last_pts = p_ctx->pts_offsets[idx - 1];
-            else
-              p_ctx->last_pts = p_frame->pts;
+            p_frame->flags = p_ctx->flags_array[idx];
+            p_ctx->last_pts = p_frame->pts;
             p_ctx->last_dts = p_frame->dts;
             ni_log(NI_LOG_DEBUG,
                    "%s: (first frame) idx %d last_dts %" PRId64 ""
@@ -1741,6 +1859,7 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
                      "adjusting ts.\n",
                      __func__, p_ctx->session_id);
               p_frame->pts = p_ctx->pts_offsets[idx];
+              p_frame->flags = p_ctx->flags_array[idx];
               p_ctx->last_pts = p_frame->pts;
               p_ctx->last_dts = p_frame->dts;
               p_ctx->session_run_state = SESSION_RUN_STATE_NORMAL;
@@ -1748,8 +1867,6 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
           else // use pts = 0 as offset
           {
             p_frame->pts = 0;
-            p_ctx->last_pts = 0;
-            p_ctx->last_dts = p_frame->dts;
             ni_log(NI_LOG_DEBUG,
                    "%s: (zero default) dts %" PRId64 " pts "
                    "%" PRId64 "\n",
@@ -1759,8 +1876,6 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
         else
         {
           p_frame->pts = 0;
-          p_ctx->last_pts = 0;
-          p_ctx->last_dts = p_frame->dts;
           ni_log(NI_LOG_DEBUG,
                  "%s:  (not bitstream) dts %" PRId64 " pts "
                  "%" PRId64 "\n",
@@ -1772,8 +1887,6 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
           int64_t pts_delta = p_frame->dts - p_ctx->last_dts;
           p_frame->pts = p_ctx->last_pts + pts_delta;
 
-          p_ctx->last_pts = p_frame->pts;
-          p_ctx->last_dts = p_frame->dts;
           ni_log(NI_LOG_DEBUG,
                  "%s:  (!is_first_frame idx) last_dts %" PRId64 ""
                  "dts %" PRId64 " pts_delta %" PRId64 " last_pts "
@@ -1786,118 +1899,52 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
     {
         ni_log(NI_LOG_DEBUG, "%s: frame_offset %" PRIu64 "\n", __func__,
                frame_offset);
-        //ignore timestamps if bitstream
-        if (p_frame->dts == NI_NOPTS_VALUE)
-        {
-            p_frame->pts = NI_NOPTS_VALUE;
-            p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
-            ni_log(NI_LOG_DEBUG,
-                   "%s: (dts NI_NOPTS_VALUE) dts %" PRId64 " "
-                   "pts %" PRId64 "\n",
-                   __func__, p_frame->dts, p_frame->pts);
-        } else
-      {
         if (p_ctx->is_first_frame)
         {
-          p_ctx->is_first_frame = 0;
+            p_ctx->is_first_frame = 0;
         }
-        if (frame_offset == 0)
+        // search for the pkt_offsets of received frame according to frame_offset.
+        // here we get the index(i) which promises (p_ctx->pkt_offsets_index_min[i] <= frame_offset && p_ctx->pkt_offsets_index[i] > frame_offset)
+        // i = -1 if not found
+        i = rotated_array_binary_search(p_ctx->pkt_offsets_index_min,
+                                        p_ctx->pkt_offsets_index, NI_FIFO_SZ,
+                                        frame_offset);
+        if (i >= 0)
         {
-          if (p_ctx->pts_offsets[0] == NI_NOPTS_VALUE)
-          {
-            p_frame->pts = NI_NOPTS_VALUE;
-            p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
-            ni_log(NI_LOG_DEBUG,
-                   "%s: (first frame pts NI_NOPTS_VALUE not "
-                   "bitstream) dts %" PRId64 " pts %" PRId64 "\n",
-                   __func__, p_frame->dts, p_frame->pts);
-          }
-          else
-          {
-            p_frame->pts = p_ctx->pts_offsets[0];
+            p_frame->pts = p_ctx->pts_offsets[i];
+            p_frame->flags = p_ctx->flags_array[i];
             p_ctx->last_pts = p_frame->pts;
             p_ctx->last_dts = p_frame->dts;
             ni_log(NI_LOG_DEBUG,
-                   "%s: (first frame) dts %" PRId64 " pts "
-                   "%" PRId64 "\n",
-                   __func__, p_frame->dts, p_frame->pts);
-          }
+                   "%s: (found pts) dts %" PRId64 " pts "
+                   "%" PRId64 " frame_offset %" PRIu64 " i %d "
+                   "pkt_offsets_index_min %" PRIu64 " pkt_offsets_index "
+                   "%" PRIu64 "\n",
+                   __func__, p_frame->dts, p_frame->pts, frame_offset, i,
+                   p_ctx->pkt_offsets_index_min[i],
+                   p_ctx->pkt_offsets_index[i]);
 
-          if (p_ctx->pkt_custom_sei[0])
-          {
-            p_frame->p_custom_sei = p_ctx->pkt_custom_sei[0];
-            p_frame->custom_sei_len = p_ctx->pkt_custom_sei_len[0];
-            p_ctx->pkt_custom_sei[0] = NULL;
-            p_ctx->pkt_custom_sei_len[0] = 0;
-          }
-        }
-        else
+            p_frame->p_custom_sei_set = p_ctx->pkt_custom_sei_set[i];
+            p_ctx->pkt_custom_sei_set[i] = NULL;
+        } else
         {
-          for (i = 0 ; i < NI_FIFO_SZ ; i++)
-          {
-            if ((frame_offset >= p_ctx->pkt_offsets_index_min[i])
-                &&(frame_offset  < p_ctx->pkt_offsets_index[i]))
-            {
-              if (p_ctx->pts_offsets[i] == NI_NOPTS_VALUE)
-              {
-                //bitstream case
-                p_frame->pts = NI_NOPTS_VALUE;
-                p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
-                ni_log(
-                    NI_LOG_DEBUG,
-                    "%s: (pts NI_NOPTS_VALUE not bitstream) "
-                    "dts %" PRId64 " pts %" PRId64 " frame_offset %" PRIu64 " "
-                    "i %d pkt_offsets_index_min %" PRIu64 " pkt_offsets_index "
-                    "%" PRIu64 "\n",
-                    __func__, p_frame->dts, p_frame->pts, frame_offset, i,
-                    p_ctx->pkt_offsets_index_min[i],
-                    p_ctx->pkt_offsets_index[i]);
-              }
-              else
-              {
-                p_frame->pts = p_ctx->pts_offsets[i];
-                p_ctx->last_pts = p_frame->pts;
-                p_ctx->last_dts = p_frame->dts;
-                ni_log(NI_LOG_DEBUG,
-                       "%s: (found pts) dts %" PRId64 " pts "
-                       "%" PRId64 " frame_offset %" PRIu64 " i %d "
-                       "pkt_offsets_index_min %" PRIu64 " pkt_offsets_index "
-                       "%" PRIu64 "\n",
-                       __func__, p_frame->dts, p_frame->pts, frame_offset, i,
-                       p_ctx->pkt_offsets_index_min[i],
-                       p_ctx->pkt_offsets_index[i]);
-              }
-
-              if (p_ctx->pkt_custom_sei[i % NI_FIFO_SZ])
-              {
-                p_frame->p_custom_sei = p_ctx->pkt_custom_sei[i % NI_FIFO_SZ];
-                p_frame->custom_sei_len = p_ctx->pkt_custom_sei_len[i % NI_FIFO_SZ];
-                p_ctx->pkt_custom_sei[i % NI_FIFO_SZ] = NULL;
-                p_ctx->pkt_custom_sei_len[i % NI_FIFO_SZ] = 0;
-              }
-              break;
-            }
-            if (i == (NI_FIFO_SZ-1))
-            {
-              //backup solution pts
-              p_frame->pts = p_ctx->last_pts + (p_frame->dts - p_ctx->last_dts);
-              p_ctx->last_pts = p_frame->pts;
-              p_ctx->last_dts = p_frame->dts;
-              ni_log(NI_LOG_ERROR, "ERROR: NO pts found consider increasing NI_FIFO_SZ!\n");
-              ni_log(NI_LOG_DEBUG,
-                     "%s: (not found use default) dts %" PRId64 " pts %" PRId64
-                     "\n",
-                     __func__, p_frame->dts, p_frame->pts);
-            }
-          }
+            //backup solution pts
+            p_frame->pts = p_ctx->last_pts + (p_frame->dts - p_ctx->last_dts);
+            ni_log(NI_LOG_ERROR,
+                   "ERROR: NO pts found consider increasing NI_FIFO_SZ!\n");
+            ni_log(NI_LOG_DEBUG,
+                   "%s: (not found use default) dts %" PRId64 " pts %" PRId64
+                   "\n",
+                   __func__, p_frame->dts, p_frame->pts);
         }
-      }
     }
-
-    int64_t best_effort_timestamp = guess_correct_pts(p_ctx, p_frame->pts, p_frame->dts);
-    p_frame->pts = best_effort_timestamp;
+    p_frame->pts = guess_correct_pts(p_ctx, p_frame->pts, p_frame->dts);
+    p_ctx->last_pts = p_frame->pts;
+    if (p_frame->dts != NI_NOPTS_VALUE && p_ctx->last_dts != NI_NOPTS_VALUE)
+        p_ctx->last_dts_interval = p_frame->dts - p_ctx->last_dts;
+    p_ctx->last_dts = p_frame->dts;
     ni_log(NI_LOG_DEBUG, "%s: (best_effort_timestamp) pts %" PRId64 "\n",
-           __func__, best_effort_timestamp);
+           __func__, p_frame->pts);
     p_ctx->frame_num++;
 
 #ifdef XCODER_DUMP_DATA
@@ -1939,8 +1986,8 @@ int ni_decoder_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
       abs_time_ns = ni_gettime_ns();
       ni_log(NI_LOG_INFO, "DTS:%lld,DELTA:%lu,dLAT:%lu;\n", p_frame->dts,
              abs_time_ns - p_ctx->prev_read_frame_time,
-             ni_lat_meas_q_check_latency(p_ctx->frame_time_q, abs_time_ns,
-                                         p_frame->dts));
+             ni_lat_meas_q_check_latency((ni_lat_meas_q_t *)p_ctx->frame_time_q,
+                                         abs_time_ns, p_frame->dts));
       p_ctx->prev_read_frame_time = abs_time_ns;
   }
 #endif
@@ -1976,7 +2023,8 @@ int ni_xcoder_session_query(ni_session_context_t *p_ctx,
 
   if (!p_ctx)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+             __func__);
       retval = NI_RETCODE_INVALID_PARAM;
       LRETURN;
   }
@@ -2036,7 +2084,7 @@ ni_retcode_t ni_encoder_session_open(ni_session_context_t* p_ctx)
 
   if (!p_ctx || !p_ctx->p_session_config)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
              __func__);
       retval = NI_RETCODE_INVALID_PARAM;
       LRETURN;
@@ -2060,7 +2108,6 @@ ni_retcode_t ni_encoder_session_open(ni_session_context_t* p_ctx)
   //Check if there is an instance or we need a new one
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    int i;
     p_ctx->device_type = NI_DEVICE_TYPE_ENCODER;
     p_ctx->pts_table = NULL;
     p_ctx->dts_queue = NULL;
@@ -2083,15 +2130,7 @@ ni_retcode_t ni_encoder_session_open(ni_session_context_t* p_ctx)
     p_ctx->enc_pts_r_idx = 0;
     p_ctx->session_run_state = SESSION_RUN_STATE_NORMAL;
     p_ctx->session_timestamp = 0;
-
-    for (i = 0; i < NI_FIFO_SZ; i++)
-    {
-      p_ctx->pkt_custom_sei[i] = NULL;
-      p_ctx->pkt_custom_sei_len[i] = 0;
-    }
-    p_ctx->last_pkt_custom_sei = NULL;
-    p_ctx->last_pkt_custom_sei_len = 0;
-
+    memset(p_ctx->pkt_custom_sei_set, 0, NI_FIFO_SZ * sizeof(ni_custom_sei_set_t *));
     memset(&(p_ctx->param_err_msg[0]), 0, sizeof(p_ctx->param_err_msg));
 
     //malloc zero data buffer
@@ -2168,6 +2207,43 @@ ni_retcode_t ni_encoder_session_open(ni_session_context_t* p_ctx)
                __func__, (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id);
         retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
         LRETURN;
+    }
+
+    // Send SW version to FW if FW version is higher than major 6 minor 1
+    if (is_fw_rev_higher(p_ctx, (uint8_t)'6', (uint8_t)'1'))
+    {
+        // Send SW version to session manager
+        memset(p_buffer, 0, NI_DATA_BUFFER_LEN);
+        memcpy(p_buffer, NI_XCODER_REVISION, sizeof(uint64_t));
+        ni_log(NI_LOG_DEBUG, "%s sw_version major %c minor %c fw_rev major %c minor %c\n", __func__,
+                NI_XCODER_REVISION[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+                NI_XCODER_REVISION[NI_XCODER_REVISION_API_MINOR_VER_IDX],
+                p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+                p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX]);
+        ui32LBA = CONFIG_SESSION_SWVersion_W(p_ctx->session_id);
+        retval = ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
+                                        p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+        CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_config, p_ctx->device_type,
+                    p_ctx->hw_id, &(p_ctx->session_id));
+        CHECK_VPU_RECOVERY(retval);
+
+        if (NI_RETCODE_SUCCESS != retval)
+        {
+            ni_log(NI_LOG_ERROR,
+                   "ERROR %s(): nvme write sw_version command "
+                   "failed, blk_io_handle: %" PRIx64 ", hw_id, %d\n",
+                   __func__, (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id);
+            retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+            LRETURN;
+        }
+
+        // For FW rev 61 or newer, initialize with the most current size
+        p_ctx->meta_size = sizeof(ni_metadata_enc_bstream_t);
+    }
+    else
+    {
+        // For FW rev 60 or older, initialize with metadata size 32
+        p_ctx->meta_size = NI_FW_ENC_BITSTREAM_META_DATA_SIZE;
     }
 
     ni_log(NI_LOG_DEBUG, "Open session completed\n");
@@ -2308,14 +2384,16 @@ ni_retcode_t ni_encoder_session_flush(ni_session_context_t* p_ctx)
   ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);
   if (!p_ctx)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: session context is null, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session id, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -2328,7 +2406,7 @@ ni_retcode_t ni_encoder_session_flush(ni_session_context_t* p_ctx)
 
   if(NI_RETCODE_SUCCESS != retval)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: ni_config_instance_eos(), return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s(), return\n", __func__);
   }
 
 END:
@@ -2356,14 +2434,15 @@ ni_retcode_t ni_encoder_session_close(ni_session_context_t* p_ctx, int eos_recie
 
   if (!p_ctx)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
-    ni_log(NI_LOG_TRACE, "%s(): exit\n", __func__);
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     return NI_RETCODE_INVALID_PARAM;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -2450,12 +2529,8 @@ END:
     int i;
     for (i = 0; i < NI_FIFO_SZ; i++)
     {
-        ni_aligned_free(p_ctx->pkt_custom_sei[i]);
-        p_ctx->pkt_custom_sei_len[i] = 0;
+        ni_aligned_free(p_ctx->pkt_custom_sei_set[i]);
     }
-
-    ni_aligned_free(p_ctx->last_pkt_custom_sei);
-    p_ctx->last_pkt_custom_sei_len = 0;
 
     ni_log(NI_LOG_DEBUG, "%s(): CTX[Card:%" PRIx64 " / HW:%d / INST:%d]\n",
            __func__, (int64_t)p_ctx->device_handle, p_ctx->hw_id,
@@ -2513,14 +2588,16 @@ int ni_encoder_session_write(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
 
   if (!p_ctx || !p_frame)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invlid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -2529,7 +2606,8 @@ int ni_encoder_session_write(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
   if ((p_frame->dts != NI_NOPTS_VALUE) && (p_ctx->frame_time_q != NULL))
   {
       abs_time_ns = ni_gettime_ns();
-      ni_lat_meas_q_add_entry(p_ctx->frame_time_q, abs_time_ns, p_frame->dts);
+      ni_lat_meas_q_add_entry((ni_lat_meas_q_t *)p_ctx->frame_time_q,
+                              abs_time_ns, p_frame->dts);
   }
 #endif
 
@@ -2555,6 +2633,8 @@ int ni_encoder_session_write(ni_session_context_t* p_ctx, ni_frame_t* p_frame)
     retval = NI_RETCODE_PARAM_INVALID_VALUE;
     LRETURN;
   }
+  // record actual width (in pixels / without padding) for sequnce change detection
+  p_ctx->actual_video_width = p_frame->video_width;
 
   /*!************ Sequence Change related stuff end*************************/
   /*!********************************************************************/
@@ -2789,6 +2869,7 @@ int ni_encoder_session_read(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
   int query_type = INST_BUF_INFO_RW_READ;
   uint32_t ui32LBA = 0;
   ni_metadata_enc_bstream_t *p_meta = NULL;
+  ni_metadata_enc_bstream_rev61_t *p_meta_rev61 = NULL;
   ni_instance_buf_info_t buf_info = { 0 };
 #ifdef MEASURE_LATENCY
   uint64_t abs_time_ns;
@@ -2798,14 +2879,16 @@ int ni_encoder_session_read(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
 
   if (!p_ctx || !p_packet || !p_packet->p_data)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_DEBUG, "xcoder instance id == 0, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -2929,13 +3012,39 @@ int ni_encoder_session_read(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
       LRETURN;
   }
 
-  p_meta = (ni_metadata_enc_bstream_t *)p_packet->p_data;
-  p_packet->pts = (int64_t)(p_meta->frame_tstamp);
-  p_packet->frame_type = p_meta->frame_type;
-  p_packet->avg_frame_qp = p_meta->avg_frame_qp;
-  p_packet->recycle_index = p_meta->recycle_index;
-  p_packet->av1_show_frame = p_meta->av1_show_frame;
-  ni_log(NI_LOG_DEBUG, "RECYCLE INDEX = %u!!!\n", p_meta->recycle_index);
+  // SSIM is supported if fw_rev is higher than major 6 minor 1.
+  if (is_fw_rev_higher(p_ctx, (uint8_t)'6', (uint8_t)'1'))
+  {
+      p_meta = (ni_metadata_enc_bstream_t *)p_packet->p_data;
+      p_packet->pts = (int64_t)(p_meta->frame_tstamp);
+      p_packet->frame_type = p_meta->frame_type;
+      p_packet->avg_frame_qp = p_meta->avg_frame_qp;
+      p_packet->recycle_index = p_meta->recycle_index;
+      p_packet->av1_show_frame = p_meta->av1_show_frame;
+      ni_log(NI_LOG_DEBUG, "%s RECYCLE INDEX = %u!!!\n", __FUNCTION__, p_meta->recycle_index);
+
+      p_ctx->meta_size = p_meta->metadata_size;
+
+      if (p_meta->ssimY != 0)
+      {
+          // The SSIM Y, U, V values returned by FW are 4 decimal places multiplied by 10000.
+	  //Divide by 10000 to get the original value.
+          ni_log(NI_LOG_DEBUG, "%s: ssim Y %.4f U %.4f V %.4f\n", __FUNCTION__,
+                 (float)p_meta->ssimY/10000, (float)p_meta->ssimU/10000, (float)p_meta->ssimV/10000);
+      }
+  }
+  else
+  {
+      // Up to fw_rev major 6 and minor 1, use the old meta data structure
+      p_meta_rev61 = (ni_metadata_enc_bstream_rev61_t *)p_packet->p_data;
+      p_packet->pts = (int64_t)(p_meta_rev61->frame_tstamp);
+      p_packet->frame_type = p_meta_rev61->frame_type;
+      p_packet->avg_frame_qp = p_meta_rev61->avg_frame_qp;
+      p_packet->recycle_index = p_meta_rev61->recycle_index;
+      p_packet->av1_show_frame = p_meta_rev61->av1_show_frame;
+      ni_log(NI_LOG_DEBUG, "%s RECYCLE INDEX = %u!!!\n", __FUNCTION__, p_meta_rev61->recycle_index);
+
+  }
 
   p_packet->data_len = to_read_size;
 
@@ -2999,11 +3108,45 @@ int ni_encoder_session_read(ni_session_context_t* p_ctx, ni_packet_t* p_packet)
       abs_time_ns = ni_gettime_ns();
       ni_log(NI_LOG_INFO, "DTS:%lld,DELTA:%lu,eLAT:%lu;\n", p_packet->dts,
              abs_time_ns - p_ctx->prev_read_frame_time,
-             ni_lat_meas_q_check_latency(p_ctx->frame_time_q, abs_time_ns,
-                                         p_packet->dts));
+             ni_lat_meas_q_check_latency((ni_lat_meas_q_t *)p_ctx->frame_time_q,
+                                         abs_time_ns, p_packet->dts));
       p_ctx->prev_read_frame_time = abs_time_ns;
   }
 #endif
+
+END:
+
+    ni_log(NI_LOG_TRACE, "%s(): exit\n", __func__);
+
+    return retval;
+}
+
+/*!******************************************************************************
+ *  \brief  Send sequnce change to a xcoder encoder instance
+ *
+ *  \param
+ *
+ *  \return
+ *******************************************************************************/
+ni_retcode_t ni_encoder_session_sequence_change(ni_session_context_t* p_ctx, ni_resolution_t *p_resolution)
+{
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+
+    ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);    
+
+    //Configure encoder sequence change
+    retval = ni_config_instance_set_sequence_change(p_ctx, NI_DEVICE_TYPE_ENCODER,
+                                                                        p_resolution);
+    CHECK_ERR_RC(p_ctx, retval, nvme_config_xcoder_config_set_sequence_change,
+                            p_ctx->device_type, p_ctx->hw_id,
+                            &(p_ctx->session_id));
+    CHECK_VPU_RECOVERY(retval);
+    if (retval < 0)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR %s(): config encoder sequence change command failed\n",
+               __func__);
+        retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+    }
 
 END:
 
@@ -3034,6 +3177,21 @@ int ni_scaler_session_open(ni_session_context_t* p_ctx)
   {
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
+  }
+
+  if (p_ctx->scaler_operation == NI_SCALER_OPCODE_STACK)
+  {
+    if ((p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX] < '6') ||
+         ((p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX] == '6') &&
+          (p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX] < '4')))
+    {
+      ni_log(NI_LOG_ERROR, "ERROR: "
+             "FW revision %c%c is less then the minimum required 64\n",
+             p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+             p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX]
+             );
+      return NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION;
+    }
   }
 
   if (p_ctx->session_id == NI_INVALID_SESSION_ID)
@@ -3084,9 +3242,16 @@ int ni_scaler_session_open(ni_session_context_t* p_ctx)
     ui32LBA = OPEN_SESSION_CODEC(NI_DEVICE_TYPE_SCALER, ni_htonl(p_ctx->scaler_operation), 0);
     retval = ni_nvme_send_read_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
                                    p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+    if (retval != NI_RETCODE_SUCCESS)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR ni_nvme_send_read_cmd\n");
+        LRETURN;
+    }
     //Open will return a session status structure with a valid session id if it worked.
     //Otherwise the invalid session id set before the open command will stay
     p_ctx->session_id = ni_ntohs(((ni_session_stats_t *)p_buffer)->ui16SessionId);
+    p_ctx->session_timestamp =
+        ni_htonll(((ni_session_stats_t *)p_buffer)->ui64Session_timestamp);
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
         ni_log(NI_LOG_ERROR,
@@ -3103,6 +3268,59 @@ int ni_scaler_session_open(ni_session_context_t* p_ctx)
            ", p_ctx->hw_id=%d, p_ctx->session_id=%d\n",
            __func__, (int64_t)p_ctx->device_handle, p_ctx->hw_id,
            p_ctx->session_id);
+
+    //Send keep alive timeout Info
+    uint64_t keep_alive_timeout =
+        p_ctx->keep_alive_timeout * 1000000;   //send us to FW
+    memset(p_buffer, 0, NI_DATA_BUFFER_LEN);
+    memcpy(p_buffer, &keep_alive_timeout, sizeof(keep_alive_timeout));
+    ni_log(NI_LOG_DEBUG, "%s keep_alive_timeout %" PRIx64 "\n", __func__,
+           keep_alive_timeout);
+    ui32LBA = CONFIG_SESSION_KeepAliveTimeout_W(p_ctx->session_id);
+    retval = ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
+                                    p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+    CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_config, p_ctx->device_type,
+                p_ctx->hw_id, &(p_ctx->session_id));
+    CHECK_VPU_RECOVERY(retval);
+
+    if (NI_RETCODE_SUCCESS != retval)
+    {
+        ni_log(NI_LOG_ERROR,
+               "ERROR %s(): nvme write keep_alive_timeout command "
+               "failed, blk_io_handle: %" PRIx64 ", hw_id, %d\n",
+               __func__, (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id);
+        retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+        LRETURN;
+    }
+
+    // Send SW version to FW if FW version is higher than major 6 minor 1
+    if (is_fw_rev_higher(p_ctx, (uint8_t)'6', (uint8_t)'1'))
+    {
+        // Send SW version to session manager
+        memset(p_buffer, 0, NI_DATA_BUFFER_LEN);
+        memcpy(p_buffer, NI_XCODER_REVISION, sizeof(uint64_t));
+        ni_log(NI_LOG_DEBUG, "%s sw_version major %c minor %c fw_rev major %c minor %c\n", __func__,
+                NI_XCODER_REVISION[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+                NI_XCODER_REVISION[NI_XCODER_REVISION_API_MINOR_VER_IDX],
+                p_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+                p_ctx->fw_rev[NI_XCODER_REVISION_API_MINOR_VER_IDX]);
+        ui32LBA = CONFIG_SESSION_SWVersion_W(p_ctx->session_id);
+        retval = ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
+                                        p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+        CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_config, p_ctx->device_type,
+                    p_ctx->hw_id, &(p_ctx->session_id));
+        CHECK_VPU_RECOVERY(retval);
+
+        if (NI_RETCODE_SUCCESS != retval)
+        {
+            ni_log(NI_LOG_ERROR,
+                   "ERROR %s(): nvme write sw_version command "
+                   "failed, blk_io_handle: %" PRIx64 ", hw_id, %d\n",
+                   __func__, (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id);
+            retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+            LRETURN;
+        }
+    }
   }
 
   // init for frame pts calculation
@@ -3112,6 +3330,97 @@ int ni_scaler_session_open(ni_session_context_t* p_ctx)
   p_ctx->active_video_width = 0;
   p_ctx->active_video_height = 0;
   p_ctx->actual_video_width = 0;
+
+#ifndef _WIN32
+  if (p_ctx->isP2P)
+  {
+      int ret;
+      char line[256];
+      char syspath[256];
+      struct stat bstat;
+      char *block_dev;
+      char *dom, *bus, *dev, *fnc;
+      FILE *fp;
+
+      p_ctx->netint_fd = open("/dev/netint", O_RDWR);
+      if (p_ctx->netint_fd < 0)
+      {
+          ni_log(NI_LOG_ERROR, "ERROR: Can't open device /dev/netint\n");
+          return NI_RETCODE_FAILURE;
+      }
+
+      block_dev = &p_ctx->blk_xcoder_name[0];
+      if (stat(block_dev, &bstat) < 0)
+      {
+          ni_log(NI_LOG_ERROR, "failed to get stat of file %s\n", block_dev);
+          return NI_RETCODE_FAILURE;
+      }
+
+      if ((bstat.st_mode & S_IFMT) != S_IFBLK)
+      {
+          ni_log(NI_LOG_ERROR, "%s is not a block device\n", block_dev);
+          return NI_RETCODE_FAILURE;
+      }
+
+      ret = snprintf(syspath, sizeof(syspath) - 1,
+                     "/sys/block/%s/device/address", block_dev + 5);
+      syspath[ret] = '\0';
+
+      fp = fopen(syspath, "r");
+
+      if (fp == NULL)
+      {
+          ni_log(NI_LOG_ERROR, "Failed to read address\n");
+          return NI_RETCODE_FAILURE;
+      }
+
+      if (fgets(line, 256, fp) == NULL)
+      {
+          ni_log(NI_LOG_ERROR, "Failed to read line from address\n");
+          fclose(fp);
+          return NI_RETCODE_FAILURE;
+      }
+
+      fclose(fp);
+
+      errno = 0;
+      p_ctx->domain = strtoul(line, &dom, 16);
+      if (errno < 0)
+      {
+          ni_log(NI_LOG_ERROR, "Failed to read PCI domain\n");
+          return NI_RETCODE_FAILURE;
+      }
+
+      errno = 0;
+      p_ctx->bus = strtoul(dom + 1, &bus, 16);
+      if (errno < 0)
+      {
+          ni_log(NI_LOG_ERROR, "Failed to read PCI bus\n");
+          return NI_RETCODE_FAILURE;
+      }
+
+      errno = 0;
+      p_ctx->dev = strtoul(bus + 1, &dev, 16);
+
+      if (errno < 0)
+      {
+          ni_log(NI_LOG_ERROR, "Failed to read PCI device\n");
+          return NI_RETCODE_FAILURE;
+      }
+
+      errno = 0;
+      p_ctx->fn = strtoul(dev + 1, &fnc, 16);
+
+      if (errno < 0)
+      {
+          ni_log(NI_LOG_ERROR, "Falied to read PCI function\n");
+          return NI_RETCODE_FAILURE;
+      }
+
+      ni_log(NI_LOG_DEBUG, "PCI slot = %d:%d:%d:%d\n", p_ctx->domain,
+             p_ctx->bus, p_ctx->dev, p_ctx->fn);
+  }
+#endif
 
 END:
 
@@ -3142,7 +3451,8 @@ ni_retcode_t ni_scaler_session_close(ni_session_context_t* p_ctx, int eos_receiv
 
   if (p_ctx->session_id == NI_INVALID_SESSION_ID)
   {
-      ni_log(NI_LOG_ERROR, "ERROR %s(): invalid session\n", __func__);
+      ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+             __func__);
       retval = NI_RETCODE_ERROR_INVALID_SESSION;
       LRETURN;
   }
@@ -3150,7 +3460,8 @@ ni_retcode_t ni_scaler_session_close(ni_session_context_t* p_ctx, int eos_receiv
   //malloc data buffer
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), NI_DATA_BUFFER_LEN))
   {
-    ni_log(NI_LOG_ERROR, "ERROR %d: malloc scaler close data buffer failed\n", NI_ERRNO);
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() malloc data buffer failed\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -3183,6 +3494,16 @@ ni_retcode_t ni_scaler_session_close(ni_session_context_t* p_ctx, int eos_receiv
     retry++;
   }
 
+#ifndef _WIN32
+  if (p_ctx->isP2P)
+  {
+      if (p_ctx->netint_fd)
+      {
+          close(p_ctx->netint_fd);
+      }
+  }
+#endif
+
 END:
 
     ni_aligned_free(p_ctx->p_all_zero_buf);
@@ -3211,7 +3532,7 @@ ni_retcode_t ni_config_instance_set_scaler_params(ni_session_context_t *p_ctx,
 
     if (!p_ctx || !p_params)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
                __func__);
         retval = NI_RETCODE_INVALID_PARAM;
         LRETURN;
@@ -3219,7 +3540,8 @@ ni_retcode_t ni_config_instance_set_scaler_params(ni_session_context_t *p_ctx,
 
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+      ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+             __func__);
         retval = NI_RETCODE_ERROR_INVALID_SESSION;
         LRETURN;
     }
@@ -3229,10 +3551,12 @@ ni_retcode_t ni_config_instance_set_scaler_params(ni_session_context_t *p_ctx,
         NI_MEM_PAGE_ALIGNMENT;
     if (ni_posix_memalign(&p_scaler_config, sysconf(_SC_PAGESIZE), buffer_size))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate scaler params buffer.\n");
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() malloc p_scaler_config buffer failed\n",
+               NI_ERRNO, __func__);
         retval = NI_RETCODE_ERROR_MEM_ALOC;
         LRETURN;
     }
+    memset(p_scaler_config, 0, buffer_size);
 
     //configure the session here
     ui32LBA = CONFIG_INSTANCE_SetScalerPara_W(p_ctx->session_id,
@@ -3241,6 +3565,7 @@ ni_retcode_t ni_config_instance_set_scaler_params(ni_session_context_t *p_ctx,
     //Flip the bytes!!
     p_cfg = (ni_scaler_config_t *)p_scaler_config;
     p_cfg->filterblit = p_params->filterblit;
+    p_cfg->numInputs = p_params->nb_inputs;
 
     if (ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
                                p_scaler_config, buffer_size, ui32LBA) < 0)
@@ -3249,7 +3574,7 @@ ni_retcode_t ni_config_instance_set_scaler_params(ni_session_context_t *p_ctx,
                "ERROR: ni_nvme_send_write_cmd failed: blk_io_handle: %" PRIx64
                ", hw_id, %d, xcoder_inst_id: %d\n",
                (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id, p_ctx->session_id);
-        //Close the session since we can't configure it as per Farhan
+        // Close the session since we can't configure it as per fw
         retval = ni_scaler_session_close(p_ctx, 0);
         if (NI_RETCODE_SUCCESS != retval)
         {
@@ -3320,14 +3645,15 @@ ni_retcode_t ni_scaler_alloc_frame(ni_session_context_t* p_ctx,
 
     if (p_ctx->session_id == NI_INVALID_SESSION_ID)
     {
-        ni_log(NI_LOG_ERROR, "ERROR %s(): Cannot allocate leftover buffer.\n",
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
                __func__);
         return NI_RETCODE_ERROR_INVALID_SESSION;
     }
 
     if (ni_posix_memalign((void **)&p_data, sysconf(_SC_PAGESIZE), dataLen))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+               NI_ERRNO, __func__);
         return NI_RETCODE_ERROR_MEM_ALOC;
     }
 
@@ -3404,14 +3730,15 @@ ni_retcode_t ni_scaler_config_frame(ni_session_context_t *p_ctx,
 
     if (p_ctx->session_id == NI_INVALID_SESSION_ID)
     {
-        ni_log(NI_LOG_ERROR, "ERROR %s(): Cannot allocate leftover buffer.\n",
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
                __func__);
         return NI_RETCODE_ERROR_INVALID_SESSION;
     }
 
     if (ni_posix_memalign((void **)&p_data, sysconf(_SC_PAGESIZE), dataLen))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+               NI_ERRNO, __func__);
         return NI_RETCODE_ERROR_MEM_ALOC;
     }
 
@@ -3464,6 +3791,131 @@ END:
 }
 
 /*!******************************************************************************
+ *  \brief  config multiple frames in the scaler
+ *
+ *  \param[in]  p_ctx               pointer to session context
+ *  \param[in]  p_cfg_in            pointer to input frame config array
+ *  \param[in]  numInCfgs           number of input frame configs in the p_cfg array
+ *  \param[in]  p_cfg_out           pointer to output frame config
+ *
+ *  \return         NI_RETCODE_INVALID_PARAM
+ *                  NI_RETCODE_ERROR_INVALID_SESSION
+ *                  NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                  NI_RETCODE_ERROR_MEM_ALOC
+ *******************************************************************************/
+ni_retcode_t ni_scaler_multi_config_frame(ni_session_context_t *p_ctx,
+                                          ni_frame_config_t p_cfg_in[],
+                                          int numInCfgs,
+                                          ni_frame_config_t *p_cfg_out)
+{
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+    ni_instance_mgr_allocation_info_t *p_data, *p_data_orig;
+    uint32_t dataLen;
+    uint32_t ui32LBA = 0;
+    int i;
+
+    /* Round up to nearest 4096 bytes */
+    dataLen =
+        sizeof(ni_instance_mgr_allocation_info_t) * (numInCfgs + 1) + NI_MEM_PAGE_ALIGNMENT - 1;
+    dataLen = dataLen & 0xFFFFF000;
+
+    if (!p_ctx || (!p_cfg_in && numInCfgs))
+    {
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    if (p_ctx->session_id == NI_INVALID_SESSION_ID)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+               __func__);
+        return NI_RETCODE_ERROR_INVALID_SESSION;
+    }
+
+    if (ni_posix_memalign((void **)&p_data, sysconf(_SC_PAGESIZE), dataLen))
+    {
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+               NI_ERRNO, __func__);
+        return NI_RETCODE_ERROR_MEM_ALOC;
+    }
+
+    memset(p_data, 0x00, dataLen);
+
+    p_data_orig = p_data;
+
+    for (i = 0; i < numInCfgs; i++)
+    {
+        p_data->picture_width = p_cfg_in[i].picture_width;
+        p_data->picture_height = p_cfg_in[i].picture_height;
+        p_data->picture_format = p_cfg_in[i].picture_format;
+        p_data->options = p_cfg_in[i].options & ~NI_SCALER_FLAG_IO;
+
+        p_data->rectangle_width = p_cfg_in[i].rectangle_width;
+        p_data->rectangle_height = p_cfg_in[i].rectangle_height;
+        p_data->rectangle_x = p_cfg_in[i].rectangle_x;
+        p_data->rectangle_y = p_cfg_in[i].rectangle_y;
+        p_data->rgba_color = p_cfg_in[i].rgba_color;
+        p_data->frame_index = p_cfg_in[i].frame_index;
+        p_data->session_id = p_cfg_in[i].session_id;
+        p_data->output_index = p_cfg_in[i].output_index;
+
+        ni_log(NI_LOG_DEBUG,
+               "Dev in config frame %d: W=%d; H=%d; C=%d; RW=%d; RH=%d; RX=%d; RY=%d\n",
+               i, p_data->picture_width, p_data->picture_height,
+               p_data->picture_format, p_data->rectangle_width,
+               p_data->rectangle_height, p_data->rectangle_x, p_data->rectangle_y);
+
+        p_data++;
+    }
+
+    if (p_cfg_out)
+    {
+        p_data->picture_width = p_cfg_out->picture_width;
+        p_data->picture_height = p_cfg_out->picture_height;
+        p_data->picture_format = p_cfg_out->picture_format;
+        p_data->options = p_cfg_out->options | NI_SCALER_FLAG_IO;
+
+        p_data->rectangle_width = p_cfg_out->rectangle_width;
+        p_data->rectangle_height = p_cfg_out->rectangle_height;
+        p_data->rectangle_x = p_cfg_out->rectangle_x;
+        p_data->rectangle_y = p_cfg_out->rectangle_y;
+        p_data->rgba_color = p_cfg_out->rgba_color;
+        p_data->frame_index = p_cfg_out->frame_index;
+
+        ni_log(NI_LOG_DEBUG,
+               "Dev out config frame: W=%d; H=%d; C=%d; RW=%d; RH=%d; RX=%d; RY=%d\n",
+               p_data->picture_width, p_data->picture_height,
+               p_data->picture_format, p_data->rectangle_width,
+               p_data->rectangle_height, p_data->rectangle_x,
+               p_data->rectangle_y);
+    }
+
+    ui32LBA = CONFIG_INSTANCE_SetScalerAlloc_W(p_ctx->session_id,
+                                               NI_DEVICE_TYPE_SCALER);
+
+    retval = ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
+                                    p_data_orig, dataLen, ui32LBA);
+    CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_config,
+                 p_ctx->device_type, p_ctx->hw_id, &(p_ctx->session_id));
+    if (NI_RETCODE_SUCCESS != retval)
+    {
+        ni_log(NI_LOG_ERROR,
+               "ERROR: ni_nvme_send_admin_cmd failed: blk_io_handle: %" PRIx64
+               ", hw_id, %u, xcoder_inst_id: %d\n",
+               (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id, p_ctx->session_id);
+
+        ni_log(NI_LOG_ERROR,
+               "ERROR ni_scaler_config(): nvme command failed!\n");
+        retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+    }
+
+// cppcheck-suppress unusedLabel
+END:
+
+    ni_aligned_free(p_data_orig);
+    return retval;
+}
+
+/*!******************************************************************************
  *  \brief  Query a particular xcoder instance to get GeneralStatus data
  *
  *  \param   ni_session_context_t p_ctx - xcoder Context
@@ -3484,22 +3936,17 @@ int ni_query_general_status(ni_session_context_t* p_ctx, ni_device_type_t device
 
   if ((!p_ctx) || (!p_gen_status))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (!IS_XCODER_DEVICE_TYPE(device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
-    LRETURN;
-  }
-
-  if (NI_INVALID_SESSION_ID == p_ctx->session_id)
-  {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
-    retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
 
@@ -3507,7 +3954,8 @@ int ni_query_general_status(ni_session_context_t* p_ctx, ni_device_type_t device
 
   if (ni_posix_memalign((void **)&p_buffer, sysconf(_SC_PAGESIZE), dataLen))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -3557,7 +4005,8 @@ ni_retcode_t ni_query_stream_info(ni_session_context_t* p_ctx, ni_device_type_t 
 
   if ((!p_ctx) || (!p_stream_info))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
@@ -3565,14 +4014,16 @@ ni_retcode_t ni_query_stream_info(ni_session_context_t* p_ctx, ni_device_type_t 
   if (! (NI_DEVICE_TYPE_DECODER == device_type ||
          NI_DEVICE_TYPE_ENCODER == device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -3581,7 +4032,8 @@ ni_retcode_t ni_query_stream_info(ni_session_context_t* p_ctx, ni_device_type_t 
 
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), dataLen))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -3643,21 +4095,24 @@ ni_retcode_t ni_query_session_stats(ni_session_context_t *p_ctx,
 
   if ((!p_ctx) || (!p_session_stats))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (!IS_XCODER_DEVICE_TYPE(xc_device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type %d, return\n", device_type);
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -3666,8 +4121,8 @@ ni_retcode_t ni_query_session_stats(ni_session_context_t *p_ctx,
 
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), dataLen))
   {
-      ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer.\n", NI_ERRNO,
-             __func__);
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
       retval = NI_RETCODE_ERROR_MEM_ALOC;
       LRETURN;
   }
@@ -3679,10 +4134,6 @@ ni_retcode_t ni_query_session_stats(ni_session_context_t *p_ctx,
   ((ni_session_stats_t *)p_buffer)->ui16SessionId =
       (uint16_t)NI_INVALID_SESSION_ID;
 
-  // There are some cases that FW will not dma the data but just return error status, so add a default error number.
-  // for example open more than 32 encoder sessions at the same time
-  // TODO - Farhan - Why is this here?
-  //((ni_session_stats_t *)p_buffer)->sess_err_no = NI_RETCODE_DEFAULT_SESSION_ERR_NO;
   if (ni_nvme_send_read_cmd(p_ctx->blk_io_handle, p_ctx->event_handle, p_buffer, dataLen, ui32LBA)
       < 0)
   {
@@ -3778,7 +4229,8 @@ int ni_query_eos(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_i
 
   if (!p_ctx || !p_stream_complete)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
@@ -3786,14 +4238,16 @@ int ni_query_eos(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_i
   if (! (NI_DEVICE_TYPE_DECODER == device_type ||
          NI_DEVICE_TYPE_ENCODER == device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -3859,7 +4313,8 @@ ni_retcode_t ni_query_instance_buf_info(ni_session_context_t *p_ctx,
 
   if (!p_ctx || !p_inst_buf_info)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
@@ -3869,14 +4324,16 @@ ni_retcode_t ni_query_instance_buf_info(ni_session_context_t *p_ctx,
         NI_DEVICE_TYPE_SCALER == device_type ||
         NI_DEVICE_TYPE_AI == device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -3905,14 +4362,16 @@ ni_retcode_t ni_query_instance_buf_info(ni_session_context_t *p_ctx,
           QUERY_INSTANCE_WBUFF_SIZE_BUSY_R(p_ctx->session_id, device_type);
   } else
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown query type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown query type %d, return\n",
+           __func__, rw_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), dataLen))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -3967,14 +4426,16 @@ ni_retcode_t ni_config_session_rw(ni_session_context_t *p_ctx,
 
   if (!p_ctx)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (!((SESSION_READ_CONFIG == rw_type) || (SESSION_WRITE_CONFIG == rw_type)))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown rw type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown config type %d, return\n",
+           __func__, rw_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
@@ -3982,7 +4443,8 @@ ni_retcode_t ni_config_session_rw(ni_session_context_t *p_ctx,
   buffer_size = ((sizeof(ni_session_config_rw_t) + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT;
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate read write config buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -3993,29 +4455,31 @@ ni_retcode_t ni_config_session_rw(ni_session_context_t *p_ctx,
   switch(rw_type)
   {
     case SESSION_READ_CONFIG:
-    	rw_config->uHWAccessField.ui16ReadFrameId = frame_id;
-    	break;
+      rw_config->uHWAccessField.ui16ReadFrameId = frame_id;
+      break;
     case SESSION_WRITE_CONFIG:
-    	rw_config->uHWAccessField.ui16WriteFrameId = frame_id;
-    	break;
+      rw_config->uHWAccessField.ui16WriteFrameId = frame_id;
+      break;
     default:
-    	ni_log(NI_LOG_ERROR, "ERROR: Unknown rw type, return\n");
-    	retval = NI_RETCODE_INVALID_PARAM;
-    	LRETURN;
+      ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown config type %d, return\n",
+             __func__, rw_type);
+      retval = NI_RETCODE_INVALID_PARAM;
+      LRETURN;
   }
 
   switch(rw_type)
   {
     case SESSION_READ_CONFIG:
-    	ui32LBA = CONFIG_SESSION_Read_W(p_ctx->session_id);
-      	break;
+      ui32LBA = CONFIG_SESSION_Read_W(p_ctx->session_id);
+      break;
     case SESSION_WRITE_CONFIG:
-    	ui32LBA = CONFIG_SESSION_Write_W(p_ctx->session_id);
-      	break;
+      ui32LBA = CONFIG_SESSION_Write_W(p_ctx->session_id);
+      break;
     default:
-      	ni_log(NI_LOG_ERROR, "ERROR: Unknown rw type, return\n");
-      	retval = NI_RETCODE_INVALID_PARAM;
-    	LRETURN;
+      ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown config type %d, return\n",
+             __func__, rw_type);
+      retval = NI_RETCODE_INVALID_PARAM;
+      LRETURN;
   }
   if (ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle, p_buffer, buffer_size, ui32LBA) < 0)
   {
@@ -4049,7 +4513,8 @@ ni_retcode_t ni_config_instance_sos(ni_session_context_t* p_ctx, ni_device_type_
 
   if (!p_ctx)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
@@ -4057,14 +4522,16 @@ ni_retcode_t ni_config_instance_sos(ni_session_context_t* p_ctx, ni_device_type_
   if (! (NI_DEVICE_TYPE_DECODER == device_type ||
          NI_DEVICE_TYPE_ENCODER == device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -4100,7 +4567,8 @@ ni_retcode_t ni_config_instance_eos(ni_session_context_t* p_ctx, ni_device_type_
 
   if (!p_ctx)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
@@ -4108,14 +4576,16 @@ ni_retcode_t ni_config_instance_eos(ni_session_context_t* p_ctx, ni_device_type_
   if (! (NI_DEVICE_TYPE_DECODER == device_type ||
          NI_DEVICE_TYPE_ENCODER == device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -4152,7 +4622,8 @@ ni_retcode_t xcoder_config_instance_flush(ni_session_context_t* p_ctx, ni_device
 
   if (!p_ctx)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
@@ -4160,14 +4631,16 @@ ni_retcode_t xcoder_config_instance_flush(ni_session_context_t* p_ctx, ni_device
   if (! (NI_DEVICE_TYPE_DECODER == device_type ||
          NI_DEVICE_TYPE_ENCODER == device_type))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -4214,30 +4687,34 @@ ni_retcode_t ni_config_instance_set_write_len(ni_session_context_t* p_ctx, ni_de
 
   if (!p_ctx)
   {
-	ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
-	retval = NI_RETCODE_INVALID_PARAM;
-	LRETURN;
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
+    retval = NI_RETCODE_INVALID_PARAM;
+    LRETURN;
   }
 
-  if (! (NI_DEVICE_TYPE_DECODER == device_type ||
-		 NI_DEVICE_TYPE_ENCODER == device_type))
+  if (!(NI_DEVICE_TYPE_DECODER == device_type ||
+        NI_DEVICE_TYPE_ENCODER == device_type))
   {
-	ni_log(NI_LOG_ERROR, "ERROR: Unknown device type, return\n");
-	retval = NI_RETCODE_INVALID_PARAM;
-	LRETURN;
+    ni_log(NI_LOG_ERROR, "ERROR: %s() Unknown device type %d, return\n",
+           __func__, device_type);
+    retval = NI_RETCODE_INVALID_PARAM;
+    LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-	ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
-	retval = NI_RETCODE_ERROR_INVALID_SESSION;
-	LRETURN;
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
+    retval = NI_RETCODE_ERROR_INVALID_SESSION;
+    LRETURN;
   }
 
   buffer_size = ((sizeof(len) + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT;
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate write len config buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -4245,6 +4722,74 @@ ni_retcode_t ni_config_instance_set_write_len(ni_session_context_t* p_ctx, ni_de
   memcpy(p_buffer, &len, sizeof(len));
 
   ui32LBA = CONFIG_INSTANCE_SetPktSize_W(p_ctx->session_id, device_type);
+
+  if (ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle, p_buffer, buffer_size, ui32LBA) < 0)
+  {
+      ni_log(NI_LOG_ERROR, "%s(): NVME command Failed\n", __func__);
+      retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+  }
+
+END:
+
+    ni_aligned_free(p_buffer);
+    ni_log(NI_LOG_TRACE, "%s(): exit\n", __func__);
+
+    return retval;
+}
+
+/*!******************************************************************************
+ *  \brief  Send a p_config command to inform encoder sequence change
+ *
+ *  \param   ni_session_context_t p_ctx - xcoder Context
+ *  \param   ni_device_type_t device_type - xcoder type Encoder or Decoder
+ *  \param   ni_resolution_t p_resolution - sequence change resolution
+ *
+ *  \return - NI_RETCODE_SUCCESS on success, NI_RETCODE_ERROR_INVALID_SESSION, NI_RETCODE_ERROR_NVME_CMD_FAILED on failure
+ *******************************************************************************/
+ni_retcode_t ni_config_instance_set_sequence_change(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_resolution_t *p_resolution)
+{
+  ni_retcode_t retval = NI_RETCODE_SUCCESS;
+  uint32_t ui32LBA = 0;
+  void * p_buffer = NULL;
+  uint32_t buffer_size = 0;
+
+  ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);
+
+  if (!p_ctx)
+  {
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
+    retval = NI_RETCODE_INVALID_PARAM;
+    LRETURN;
+  }
+
+  if (!(NI_DEVICE_TYPE_ENCODER == device_type))
+  {
+    ni_log(NI_LOG_ERROR, "ERROR: Seq Change not supported for device type %d, return\n", device_type);
+    retval = NI_RETCODE_INVALID_PARAM;
+    LRETURN;
+  }
+
+  if (NI_INVALID_SESSION_ID == p_ctx->session_id)
+  {
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
+    retval = NI_RETCODE_ERROR_INVALID_SESSION;
+    LRETURN;
+  }
+
+  buffer_size = ((sizeof(ni_resolution_t) + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT;
+  if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), buffer_size))
+  {
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
+    retval = NI_RETCODE_ERROR_MEM_ALOC;
+    LRETURN;
+  }
+  memset(p_buffer, 0, buffer_size);
+  memcpy(p_buffer, p_resolution, sizeof(ni_resolution_t));
+
+  ui32LBA = CONFIG_INSTANCE_SetSeqChange_W(p_ctx->session_id, device_type);
 
   if (ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle, p_buffer, buffer_size, ui32LBA) < 0)
   {
@@ -4279,7 +4824,7 @@ ni_retcode_t ni_config_instance_set_encoder_params(ni_session_context_t* p_ctx)
 
   if (!p_ctx)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
              __func__);
       retval = NI_RETCODE_INVALID_PARAM;
       LRETURN;
@@ -4287,7 +4832,8 @@ ni_retcode_t ni_config_instance_set_encoder_params(ni_session_context_t* p_ctx)
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -4295,7 +4841,8 @@ ni_retcode_t ni_config_instance_set_encoder_params(ni_session_context_t* p_ctx)
   buffer_size = ((buffer_size + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT;
   if (ni_posix_memalign(&p_encoder_config, sysconf(_SC_PAGESIZE), buffer_size))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate encConf buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -4396,21 +4943,23 @@ ni_retcode_t ni_config_instance_set_encoder_frame_params(ni_session_context_t* p
 
     if (!p_ctx || !p_params)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
                __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     return NI_RETCODE_ERROR_INVALID_SESSION;
   }
 
   buffer_size = ((buffer_size + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT;
   if (ni_posix_memalign((void **)&p_cfg, sysconf(_SC_PAGESIZE), buffer_size))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate encConf buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
     return NI_RETCODE_ERROR_MEM_ALOC;
   }
 
@@ -4593,8 +5142,7 @@ int ni_create_frame(ni_frame_t* p_frame, uint32_t read_length, uint64_t* p_frame
     ni_log(NI_LOG_DEBUG, "rx_size = %d metadataSize = %d\n", rx_size,
            metadata_size);
 
-    p_frame->p_custom_sei = NULL;
-    p_frame->custom_sei_len = 0;
+    p_frame->p_custom_sei_set = NULL;
 
     if (rx_size == metadata_size)
     {
@@ -4988,18 +5536,18 @@ int ni_create_frame(ni_frame_t* p_frame, uint32_t read_length, uint64_t* p_frame
         }
     }
 
-  p_frame->dts = 0;
-  p_frame->pts = 0;
-  //p_frame->end_of_stream = isEndOfStream;
-  p_frame->start_of_stream = 0;
+    p_frame->dts = NI_NOPTS_VALUE;
+    p_frame->pts = NI_NOPTS_VALUE;
+    //p_frame->end_of_stream = isEndOfStream;
+    p_frame->start_of_stream = 0;
 
-  if (rx_size == 0)
-  {
-    p_frame->data_len[0] = 0;
-    p_frame->data_len[1] = 0;
-    p_frame->data_len[2] = 0;
-    p_frame->data_len[3] = 0;
-  }
+    if (rx_size == 0)
+    {
+        p_frame->data_len[0] = 0;
+        p_frame->data_len[1] = 0;
+        p_frame->data_len[2] = 0;
+        p_frame->data_len[3] = 0;
+    }
 
   ni_log(NI_LOG_DEBUG, "received [0x%08x] data size: %d, end of stream=%u\n",
                  read_length, rx_size, p_frame->end_of_stream);
@@ -5038,6 +5586,7 @@ void ni_populate_device_capability_struct(ni_device_capability_t* p_cap, void* p
   }
 
   memcpy(p_cap->serial_number, p_id_data->ai8Sn, sizeof(p_cap->serial_number));
+  memcpy(p_cap->model_number, p_id_data->ai8Mn, sizeof(p_cap->model_number));
 
   memset(p_cap->fw_rev, 0, sizeof(p_cap->fw_rev));
   memcpy(p_cap->fw_rev, p_id_data->ai8Fr, sizeof(p_cap->fw_rev));
@@ -5482,6 +6031,7 @@ void ni_set_custom_template(ni_session_context_t *p_ctx,
     p_cfg->i8intraQpDelta = p_enc->rc.intra_qp_delta;
     p_cfg->ui8fillerEnable = p_enc->rc.enable_filler;
     p_cfg->ui8picSkipEnable = p_enc->rc.enable_pic_skip;
+    p_cfg->ui16maxFrameSize = p_enc->maxFrameSize / 2000;
     p_t408->intra_period = p_enc->intra_period;
     p_t408->roiEnable = p_enc->roi_enable;
     p_t408->useLongTerm = p_enc->long_term_ref_enable;
@@ -5740,6 +6290,13 @@ void ni_set_custom_template(ni_session_context_t *p_ctx,
     ni_fix_VUI(p_cfg->ui8VuiRbsp, p_src->pos_num_units_in_tick, p_t408->numUnitsInTick);
     ni_fix_VUI(p_cfg->ui8VuiRbsp, p_src->pos_time_scale, p_t408->timeScale);
   }
+  if (p_src->enable_vfr)
+  {
+      p_cfg->ui8fixedframerate = 0;
+  } else
+  {
+      p_cfg->ui8fixedframerate = 1;
+  }
 
   //new QUADRA param
   if (p_enc->EnableAUD != 0)
@@ -5801,6 +6358,10 @@ void ni_set_custom_template(ni_session_context_t *p_ctx,
     p_cfg->ui8colorTrc = p_enc->colorTrc;
     p_cfg->ui8colorSpace = p_enc->colorSpace;
     p_cfg->ui8videoFullRange = p_enc->videoFullRange;
+  }
+  if (p_enc->videoFullRange)
+  {
+      p_cfg->ui8videoFullRange = p_enc->videoFullRange;
   }
   if (p_enc->hrdEnable != 0)
   {
@@ -5888,6 +6449,11 @@ void ni_set_custom_template(ni_session_context_t *p_ctx,
       p_cfg->ui8LowDelay = p_src->low_delay_mode;
   }
 
+  if (p_enc->enable_ssim != 0)
+  {
+      p_cfg->ui8enableSSIM = p_enc->enable_ssim;
+  }
+
   ni_log(NI_LOG_DEBUG, "lowDelay=%d\n", p_src->low_delay_mode);
   ni_log(NI_LOG_DEBUG, "ui8bitstreamFormat=%d\n", p_cfg->ui8bitstreamFormat);
   ni_log(NI_LOG_DEBUG, "i32picWidth=%d\n", p_cfg->i32picWidth);
@@ -5897,6 +6463,7 @@ void ni_set_custom_template(ni_session_context_t *p_ctx,
   ni_log(NI_LOG_DEBUG, "i32frameRateInfo=%d\n", p_cfg->i32frameRateInfo);
   ni_log(NI_LOG_DEBUG, "i32vbvBufferSize=%d\n", p_cfg->i32vbvBufferSize);
   ni_log(NI_LOG_DEBUG, "i32userQpMax=%d\n", p_cfg->i32userQpMax);
+  ni_log(NI_LOG_DEBUG, "enableSSIM=%d\n", p_cfg->ui8enableSSIM);
   // AVC only
   ni_log(NI_LOG_DEBUG, "i32maxIntraSize=%d\n", p_cfg->i32maxIntraSize);
   ni_log(NI_LOG_DEBUG, "i32userMaxDeltaQp=%d\n", p_cfg->i32userMaxDeltaQp);
@@ -6042,7 +6609,7 @@ void ni_set_custom_template(ni_session_context_t *p_ctx,
   ni_log(NI_LOG_DEBUG, "nrNoiseSigmaCb=%u\n", p_t408->nrNoiseSigmaCb);
   ni_log(NI_LOG_DEBUG, "nrNoiseSigmaCr=%u\n", p_t408->nrNoiseSigmaCr);
 
-  // newly added for T408_520
+  // newly added for T408
   ni_log(NI_LOG_DEBUG, "monochromeEnable=%u\n", p_t408->monochromeEnable);
   ni_log(NI_LOG_DEBUG, "strongIntraSmoothEnable=%u\n",
                  p_t408->strongIntraSmoothEnable);
@@ -6167,24 +6734,24 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
   // fill in common attributes values
   p_config->i32picWidth = 720;
   p_config->i32picHeight = 480;
-  p_config->i32meBlkMode = 0; // (AVC ONLY) syed: 0 means use all possible block partitions
-  p_config->ui8sliceMode = 0; // syed: 0 means 1 slice per picture
+  p_config->i32meBlkMode = 0; // (AVC ONLY) 0 means use all possible block partitions
+  p_config->ui8sliceMode = 0; // 0 means 1 slice per picture
   p_config->i32frameRateInfo = 30;
   p_config->i32frameRateDenominator = 1;
-  p_config->i32vbvBufferSize = 3000; //0; // syed: parameter is ignored if rate control is off, if rate control is on, 0 means do not check vbv constraints
-  p_config->i32userQpMax = 51;       // syed todo: this should also be h264-only parameter
+  p_config->i32vbvBufferSize = 3000; //0; parameter is ignored if rate control is off, if rate control is on, 0 means do not check vbv constraints
+  p_config->i32userQpMax = 51;       // this should also be h264-only parameter
 
   // AVC only
   if (NI_CODEC_FORMAT_H264 == p_ctx->codec_format)
   {
-    p_config->i32maxIntraSize = 8000000; // syed: how big an intra p_frame can get?
+    p_config->i32maxIntraSize = 8000000; // how big an intra p_frame can get?
     p_config->i32userMaxDeltaQp = 51;
     p_config->i32userMinDeltaQp = 51;
     p_config->i32userQpMin = 8;
   }
 
-  p_config->i32bitRate = 0;   //1000000; // syed todo: check if this is applicable (could be coda9 only)
-  p_config->i32bitRateBL = 0; // syed todo: no documentation on this parameter in documents
+  p_config->i32bitRate = 0;
+  p_config->i32bitRateBL = 0; // no documentation on this parameter in documents
   p_config->ui8rcEnable = 0;
   p_config->i32srcBitDepth = p_ctx->src_bit_depth;
   p_config->ui8enablePTS = 0;
@@ -6228,8 +6795,8 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
   p_config->hdrEnableVUI = 0;
   p_config->ui32sourceEndian = p_ctx->src_endian;
 
-  p_config->niParamT408.level = 0;   // TBD
-  p_config->niParamT408.tier = 0;    // syed 0 means main tier
+  p_config->niParamT408.level = 0;
+  p_config->niParamT408.tier = 0;    // 0 means main tier
 
   p_config->niParamT408.internalBitDepth = p_ctx->src_bit_depth;
   p_config->niParamT408.losslessEnable = 0;
@@ -6269,7 +6836,7 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
   p_config->niParamT408.lfCrossSliceBoundaryEnable = 1;
   p_config->niParamT408.betaOffsetDiv2 = 0;
   p_config->niParamT408.tcOffsetDiv2 = 0;
-  p_config->niParamT408.skipIntraTrans = 1; // syed todo: do more investigation
+  p_config->niParamT408.skipIntraTrans = 1;
   p_config->niParamT408.saoEnable = 1;
   p_config->niParamT408.intraNxNEnable = 1;
 
@@ -6286,7 +6853,7 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
     p_config->niParamT408.enable_cu_level_rate_control = 1;
 
   p_config->niParamT408.enable_hvs_qp = 0;
-  p_config->niParamT408.hvs_qp_scale = 2; // syed todo: do more investigation
+  p_config->niParamT408.hvs_qp_scale = 2;
 
   p_config->niParamT408.max_delta_qp = 10;
 
@@ -6300,7 +6867,6 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
       p_config->niParamT408.custom_gop_params.pic_param[i].pic_type = PIC_TYPE_I;
       p_config->niParamT408.custom_gop_params.pic_param[i].poc_offset = 0;
       p_config->niParamT408.custom_gop_params.pic_param[i].pic_qp = 0;
-      // ToDo: value of added num_ref_pic_L0 ???
       p_config->niParamT408.custom_gop_params.pic_param[i].num_ref_pic_L0 = 0;
       p_config->niParamT408.custom_gop_params.pic_param[i].ref_poc_L0 = 0;
       p_config->niParamT408.custom_gop_params.pic_param[i].ref_poc_L1 = 0;
@@ -6337,7 +6903,7 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
     p_config->niParamT408.timeScale *= 2;
   }
 
-  p_config->niParamT408.numTicksPocDiffOne = 0; // syed todo: verify, set to zero to try to match the model's output encoding
+  p_config->niParamT408.numTicksPocDiffOne = 0;
 
   p_config->niParamT408.chromaCbQpOffset = 0;
   p_config->niParamT408.chromaCrQpOffset = 0;
@@ -6361,18 +6927,18 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
   p_config->niParamT408.nrNoiseSigmaCb = 0;
   p_config->niParamT408.nrNoiseSigmaCr = 0;
 
-  p_config->niParamT408.useLongTerm = 0; // syed: keep disabled for now, need to experiment later
+  p_config->niParamT408.useLongTerm = 0;
 
-  // newly added for T408_520
-  p_config->niParamT408.monochromeEnable = 0; // syed: do we expect monochrome input?
+  // newly added for T408
+  p_config->niParamT408.monochromeEnable = 0;
   p_config->niParamT408.strongIntraSmoothEnable = 1;
 
-  p_config->niParamT408.weightPredEnable = 0; //1; // syed: enabling for better quality but need to keep an eye on performance penalty
+  p_config->niParamT408.weightPredEnable = 0;
   p_config->niParamT408.bgDetectEnable = 0;
-  p_config->niParamT408.bgThrDiff = 8;     // syed: matching the C-model
-  p_config->niParamT408.bgThrMeanDiff = 1; // syed: matching the C-model
-  p_config->niParamT408.bgLambdaQp = 32;   // syed: matching the C-model
-  p_config->niParamT408.bgDeltaQp = 3;     // syed: matching the C-model
+  p_config->niParamT408.bgThrDiff = 8;     // matching the C-model
+  p_config->niParamT408.bgThrMeanDiff = 1; // matching the C-model
+  p_config->niParamT408.bgLambdaQp = 32;   // matching the C-model
+  p_config->niParamT408.bgDeltaQp = 3;     // matching the C-model
 
   p_config->niParamT408.customLambdaEnable = 0;
   p_config->niParamT408.customMDEnable = 0;
@@ -6421,7 +6987,7 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
     p_config->niParamT408.enable_mb_level_rc = 0;
   else
     p_config->niParamT408.enable_mb_level_rc = 1;
-  p_config->niParamT408.entropy_coding_mode = 1; // syed: 1 means CABAC, make sure profile is main or above, can't have CABAC in baseline
+  p_config->niParamT408.entropy_coding_mode = 1; // 1 means CABAC, make sure profile is main or above, can't have CABAC in baseline
   p_config->niParamT408.forcedHeaderEnable = 0; // first IDR frame
 
   //QUADRA
@@ -6463,6 +7029,8 @@ void ni_set_default_template(ni_session_context_t* p_ctx, ni_encoder_config_t* p
   p_config->ui8blockRCSize = 0;
   p_config->ui8rcQpDeltaRange = 10;
   p_config->ui8LowDelay = 0;
+  p_config->ui8fixedframerate = 1;
+  p_config->ui8enableSSIM = 0;
 }
 
 /*!******************************************************************************
@@ -6497,8 +7065,8 @@ ni_retcode_t ni_validate_custom_dec_template(ni_xcoder_params_t *p_src,
   p_param_warn = malloc(sizeof(p_ctx->param_err_msg));
   if (!p_param_warn)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s() p_param_warn malloc failure\n",
-             __func__);
+      ni_log(NI_LOG_ERROR, "ERROR %d: %s() p_param_warn malloc failure\n",
+             NI_ERRNO, __func__);
       param_ret = NI_RETCODE_ERROR_MEM_ALOC;
       LRETURN;
   }
@@ -6833,6 +7401,22 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
         LRETURN;
       }
     }
+
+    if(p_cfg->ui8enableSSIM != 0)
+    {
+        if (!is_fw_rev_higher(p_ctx, (uint8_t)'6', (uint8_t)'1'))
+        {
+            p_cfg->ui8enableSSIM = 0;
+            strncpy(p_param_warn, "enableSSIM is not supported for FW lower than Rev 62. All ssim will be 0.", max_err_len);
+            warning = NI_RETCODE_PARAM_WARN;
+        }
+        if ((NI_CODEC_FORMAT_H264 != p_ctx->codec_format) && (NI_CODEC_FORMAT_H265 != p_ctx->codec_format))
+        {
+            p_cfg->ui8enableSSIM = 0;
+            strncpy(p_param_warn, "enableSSIM is only supported on H.264 or H.265", max_err_len);
+            warning = NI_RETCODE_PARAM_WARN;
+        }
+    }
   }
 
   if (QUADRA)
@@ -6848,6 +7432,14 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
                       "this gopPreset is not supported when lookaheadDepth > 0",
                       max_err_len);
               param_ret = NI_RETCODE_PARAM_ERROR_GOP_PRESET;
+              LRETURN;
+          }
+          if (p_src->source_width < 288)
+          {
+              strncpy(p_param_err,
+                      "lookAheadDepth requires input width of at least 288",
+                      max_err_len);
+              param_ret = NI_RETCODE_PARAM_ERROR_PIC_WIDTH;
               LRETURN;
           }
       }
@@ -7054,9 +7646,6 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
         warning = NI_RETCODE_PARAM_WARN;
       }
     }
-  } else if (NI_CODEC_FORMAT_JPEG == p_ctx->codec_format)
-  {
-      // TODO
   } else if (NI_CODEC_FORMAT_AV1 == p_ctx->codec_format)
   {
       if (p_cfg->niParamT408.profile != 1)
@@ -7198,10 +7787,9 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
         LRETURN;
       }
 
-      // TODO: may also need to check custom GOP pattern and block low delay GOP
     }
 
-    if (p_src->low_delay_mode)
+    if (p_src->low_delay_mode || p_cfg->ui8picSkipEnable)
     {
       if (p_cfg->niParamT408.custom_gop_params.custom_gop_size)
       {
@@ -7209,7 +7797,10 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
         {
           if (p_cfg->niParamT408.custom_gop_params.pic_param[i].poc_offset != (i+1))
           {
-            strncpy(p_param_err, "Custom GOP must not have delay encode pic when lowDelay is enabled", max_err_len);
+            if (p_src->low_delay_mode)
+              strncpy(p_param_err, "Custom GOP must not include backward prediction when lowDelay is enabled", max_err_len);
+            else
+              strncpy(p_param_err, "Custom GOP must not include backward prediction when picSkip is enabled", max_err_len);
             param_ret = NI_RETCODE_INVALID_PARAM;
             LRETURN;
           }
@@ -7217,16 +7808,53 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
       } else if (1 != p_cfg->ui8gopSize && !p_cfg->ui8gopLowdelay &&
                  p_cfg->niParamT408.intra_period != 1)
       {
-        strncpy(p_param_err, "Must use low delay GOP or set GOP size 1 when lowDelay is enabled", max_err_len);
+        if (p_src->low_delay_mode)
+          strncpy(p_param_err, "Must use low delay GOP (gopPresetIdx 1,3,7,9) when lowDelay is enabled", max_err_len);
+        else
+          strncpy(p_param_err, "Must use low delay GOP (gopPresetIdx 1,3,7,9) when picSkip is enabled", max_err_len);
         param_ret = NI_RETCODE_PARAM_ERROR_GOP_PRESET;
         LRETURN;
       }
 
       if (p_cfg->ui8multicoreJointMode)
       {
-          strncpy(p_param_err,
-                  "Cannot use multicoreJointMode when lowDelay is enabled",
-                  max_err_len);
+          if (p_src->low_delay_mode)
+            strncpy(p_param_err,
+                    "Cannot use multicoreJointMode when lowDelay is enabled",
+                    max_err_len);
+          else
+            strncpy(p_param_err,
+                    "Cannot use multicoreJointMode when picSkip is enabled",
+                    max_err_len);
+          param_ret = NI_RETCODE_INVALID_PARAM;
+          LRETURN;
+      }
+    }
+
+    if (p_src->low_delay_mode)
+    {
+      if (p_cfg->ui16maxFrameSize == 0)
+      {
+          p_cfg->ui16maxFrameSize = ((p_src->source_width * p_src->source_height * 3 / 4) * p_ctx->bit_depth_factor) / 2000;
+          ni_log(NI_LOG_ERROR, "%s: maxFrameSize is not set in low delay mode. Set it to half of frame size %d\n",
+                 __func__, p_cfg->ui16maxFrameSize*2000);
+      }
+
+      // minimum acceptable value of maxFrameSize is bitrate / framerate in byte
+      uint32_t min_maxFrameSize = ((p_cfg->i32bitRate / p_cfg->i32frameRateInfo * p_cfg->i32frameRateDenominator) / 8) / 2000;
+
+      if (p_cfg->ui16maxFrameSize < min_maxFrameSize)
+      {
+          ni_log(NI_LOG_ERROR, "%s: maxFrameSize %d is too small. Changed to minimum value (bitrate/framerate in byte): %d\n",
+                 __func__, p_cfg->ui16maxFrameSize*2000, min_maxFrameSize*2000);
+          p_cfg->ui16maxFrameSize = min_maxFrameSize;
+      }
+    }
+    else    
+    {
+      if (p_cfg->ui16maxFrameSize != 0)
+      {
+          strncpy(p_param_err, "maxFrameSize can only be used when lowDelay is enabled", max_err_len);
           param_ret = NI_RETCODE_INVALID_PARAM;
           LRETURN;
       }
@@ -7243,7 +7871,7 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
         {
           if (2 == p_cfg->niParamT408.custom_gop_params.pic_param[i].pic_type)
           {
-            strncpy(p_param_err, "Custom GOP can not have B frames for gdrDuration", max_err_len);
+            strncpy(p_param_err, "Custom GOP can not have B frames for intra refresh", max_err_len);
             param_ret = NI_RETCODE_INVALID_PARAM;
             LRETURN;
           }
@@ -7259,14 +7887,22 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
               param_ret = NI_RETCODE_INVALID_PARAM;
               LRETURN;
           }
-        strncpy(p_param_warn, "GOP size forced to 1 and low delay GOP force disabled (no B frames) for gdrDuration", max_err_len);
+        strncpy(p_param_warn, "GOP size forced to 1 and low delay GOP force disabled (no B frames) for intra refresh", max_err_len);
         warning = NI_RETCODE_PARAM_WARN;
         p_cfg->ui8gopSize = 1;
         p_cfg->ui8gopLowdelay = 0;
       }
+      if (p_cfg->ui16gdrDuration == 1)
+      {
+        strncpy(p_param_err,
+                "intra refresh cycle (height / intraRefreshArg MB or CTU) must > 1",
+                max_err_len);
+        param_ret = NI_RETCODE_INVALID_PARAM;
+        LRETURN;
+      }
       if (p_cfg->ui8LookAheadDepth != 0)
       {
-        strncpy(p_param_warn, "lookaheadDepth forced to 0 (disable 2-pass) for gdrDuration", max_err_len);
+        strncpy(p_param_warn, "lookaheadDepth forced to 0 (disable 2-pass) for intra refresh", max_err_len);
         p_cfg->ui8LookAheadDepth = 0;
       }
       if (STD_HEVC == p_cfg->ui8bitstreamFormat ||
@@ -7274,7 +7910,7 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
       {
         if (p_cfg->niParamT408.intra_period < p_cfg->ui16gdrDuration)
         {
-          strncpy(p_param_warn, "intraPeriod forced to match gdrDuration (intraPeriod must >= gdrDuration)", max_err_len);
+          strncpy(p_param_warn, "intraPeriod forced to match intra refersh cycle (intraPeriod must >= intra refersh cycle)", max_err_len);
           p_cfg->niParamT408.intra_period = p_cfg->ui16gdrDuration;
         }
       }
@@ -7282,7 +7918,7 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
       {
         if (p_cfg->niParamT408.avcIdrPeriod < p_cfg->ui16gdrDuration)
         {
-          strncpy(p_param_warn, "intraPeriod forced to match gdrDuration (intraPeriod must >= gdrDuration)", max_err_len);
+          strncpy(p_param_warn, "intraPeriod forced to match intra refersh cycle (intraPeriod must >= intra refersh cycle)", max_err_len);
           p_cfg->niParamT408.avcIdrPeriod = p_cfg->ui16gdrDuration;
         }
       }
@@ -7440,7 +8076,6 @@ ni_retcode_t ni_validate_custom_template(ni_session_context_t *p_ctx,
     LRETURN;
   }
 
-  //if (1 == p_cfg->niParamT408.enable_mb_level_rc)//TODO QDFW-327 Remove the if and set max min QP independently
   {
     if ( p_cfg->niParamT408.minQpI < 0 ||
          p_cfg->niParamT408.minQpI > 51 )
@@ -7624,15 +8259,6 @@ ni_retcode_t ni_check_common_params(ni_t408_config_t *p_param,
         ((!low_delay) && (p_param->avcIdrPeriod != 0) && ((p_param->avcIdrPeriod % intra_period_gop_step_size) != 0)))
     {
       strncpy(p_param_err, "Invalid intra_period and gop_preset_index: intra period is not a multiple of gop structure size", max_err_len);
-      ret = NI_RETCODE_PARAM_ERROR_INTRA_PERIOD;
-      LRETURN;
-    }
-
-    // TODO: this error check will never get triggered. remove? (SZ)
-    if (((!low_delay) && (p_param->intra_period != 0) && ((p_param->intra_period % intra_period_gop_step_size) == 1) && p_param->decoding_refresh_type == 0) ||
-        ((!low_delay) && (p_param->avcIdrPeriod != 0) && ((p_param->avcIdrPeriod % intra_period_gop_step_size) == 1) && p_param->decoding_refresh_type == 0))
-    {
-      strncpy(p_param_err, "Invalid decoding_refresh_type: not support decoding refresh type I p_frame for closed gop structure", max_err_len);
       ret = NI_RETCODE_PARAM_ERROR_INTRA_PERIOD;
       LRETURN;
     }
@@ -8015,6 +8641,7 @@ void *ni_session_keep_alive_thread(void *arguments)
     uint64_t endtime = ni_gettime_ns();
     //interval(nanoseconds) is equals to ctx.keep_alive_timeout/3(330,000,000ns approximately equal to 1/3 second).
     uint64_t interval = args->keep_alive_timeout * 330000000LL;
+#ifndef _ANDROID
 #ifdef __linux__
     struct sched_param sched_param;
 
@@ -8057,6 +8684,7 @@ void *ni_session_keep_alive_thread(void *arguments)
         ni_log(NI_LOG_DEBUG, "%s cannot set priority: %d.\n", __func__,
                GetLastError());
     }
+#endif
 #endif
 
     // Initializes the session context variables that keep alive command and query status command need.
@@ -8197,9 +8825,16 @@ ni_retcode_t ni_uploader_session_open(ni_session_context_t* p_ctx)
     ui32LBA = OPEN_SESSION_CODEC(NI_DEVICE_TYPE_ENCODER, ni_htonl(p_ctx->codec_format), 1/*1 for uploadMode*/);
     retval = ni_nvme_send_read_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
                                    p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+    if (retval != NI_RETCODE_SUCCESS)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR ni_nvme_send_read_cmd\n");
+        LRETURN;
+    }
     //Open will return a session status structure with a valid session id if it worked.
     //Otherwise the invalid session id set before the open command will stay
     p_ctx->session_id = ni_ntohs(((ni_session_stats_t *)p_buffer)->ui16SessionId);
+    p_ctx->session_timestamp =
+        ni_htonll(((ni_session_stats_t *)p_buffer)->ui64Session_timestamp);
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
         ni_log(NI_LOG_ERROR,
@@ -8211,7 +8846,34 @@ ni_retcode_t ni_uploader_session_open(ni_session_context_t* p_ctx)
         retval = NI_RETCODE_ERROR_INVALID_SESSION;
         LRETURN;
     }
-    ni_log(NI_LOG_DEBUG, "Uploader open session ID:0x%x\n",p_ctx->session_id);
+    ni_log(NI_LOG_DEBUG,
+           "Uploader open session ID:0x%x,timestamp:%" PRIu64 "\n",
+           p_ctx->session_id, p_ctx->session_timestamp);
+
+    //Send keep alive timeout Info
+    uint64_t keep_alive_timeout =
+        p_ctx->keep_alive_timeout * 1000000;   //send us to FW
+    memset(p_buffer, 0, NI_DATA_BUFFER_LEN);
+    memcpy(p_buffer, &keep_alive_timeout, sizeof(keep_alive_timeout));
+    ni_log(NI_LOG_DEBUG, "%s keep_alive_timeout %" PRIx64 "\n", __func__,
+           keep_alive_timeout);
+    ui32LBA = CONFIG_SESSION_KeepAliveTimeout_W(p_ctx->session_id);
+    retval = ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
+                                    p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+    CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_config, p_ctx->device_type,
+                p_ctx->hw_id, &(p_ctx->session_id));
+    CHECK_VPU_RECOVERY(retval);
+
+    if (NI_RETCODE_SUCCESS != retval)
+    {
+        ni_log(NI_LOG_ERROR,
+               "ERROR %s(): nvme write keep_alive_timeout command "
+               "failed, blk_io_handle: %" PRIx64 ", hw_id, %d\n",
+               __func__, (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id);
+        retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+        LRETURN;
+    }
+
     ni_log(NI_LOG_DEBUG, "Open session completed\n");
   }
 
@@ -8434,14 +9096,16 @@ int ni_hwupload_session_write(ni_session_context_t *p_ctx, ni_frame_t *p_frame,
 
   if (!p_ctx || !p_frame)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invlid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -8450,7 +9114,8 @@ int ni_hwupload_session_write(ni_session_context_t *p_ctx, ni_frame_t *p_frame,
   if ((p_frame->dts != NI_NOPTS_VALUE) && (p_ctx->frame_time_q != NULL))
   {
       abs_time_ns = ni_gettime_ns();
-      ni_lat_meas_q_add_entry(p_ctx->frame_time_q, abs_time_ns, p_frame->dts);
+      ni_lat_meas_q_add_entry((ni_lat_meas_q_t *)p_ctx->frame_time_q,
+                              abs_time_ns, p_frame->dts);
   }
 #endif
 
@@ -8573,8 +9238,8 @@ int ni_hwupload_session_write(ni_session_context_t *p_ctx, ni_frame_t *p_frame,
       abs_time_ns = ni_gettime_ns();
       ni_log(NI_LOG_INFO, "DTS:%" PRId64 ",DELTA:%lu,uLAT:%lu;\n", p_frame->dts,
              abs_time_ns - p_ctx->prev_read_frame_time,
-             ni_lat_meas_q_check_latency(p_ctx->frame_time_q, abs_time_ns,
-                                         p_frame->dts));
+             ni_lat_meas_q_check_latency((ni_lat_meas_q_t *)p_ctx->frame_time_q,
+                                         abs_time_ns, p_frame->dts));
       p_ctx->prev_read_frame_time = abs_time_ns;
   }
 #endif
@@ -8606,55 +9271,67 @@ int ni_hwupload_session_read_hwdesc(ni_session_context_t *p_ctx,
 {
   int retval = 0;
   ni_instance_buf_info_t hwdesc_info = { 0 };
+  int query_retry = 0;
+
   ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);
-  //niFrameSurface1_t* p_data3 = (niFrameSurface1_t*)((uint8_t*)p_frame->p_data[3]);
-  ////p_data3->rsvd = p_meta->hwdesc->rsvd;
-  //ni_log(NI_LOG_DEBUG, "%s:mar16 HW=%d ui16FrameIdx=%d i8InstID=%d device_handle=%d\n",
-  //               ishwframe, p_data3->ui16FrameIdx, p_data3->i8InstID, p_data3->device_handle);
 
   if (!p_ctx || !hwdesc)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+         __func__);
     retval = NI_RETCODE_INVALID_PARAM;
     LRETURN;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invlid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
-#ifndef _WIN32
-  retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_R_ACQUIRE,
-                                      NI_DEVICE_TYPE_ENCODER, &hwdesc_info);
-#else
-  retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_RW_UPLOAD,
-                                      NI_DEVICE_TYPE_ENCODER, &hwdesc_info);
-#endif
-  CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_query,
-    p_ctx->device_type, p_ctx->hw_id,
-    &(p_ctx->session_id));
 
-  if (NI_RETCODE_SUCCESS != retval)
+  for (;;)
   {
-    ni_log(NI_LOG_DEBUG, "Warning upload read hwdesc fail rc %d or ind "
-      "!\n", retval);
-    retval = NI_RETCODE_FAILURE;
+    query_retry++;
+#ifndef _WIN32
+    retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_R_ACQUIRE,
+                                        NI_DEVICE_TYPE_ENCODER, &hwdesc_info);
+#else
+    retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_RW_UPLOAD,
+                                        NI_DEVICE_TYPE_ENCODER, &hwdesc_info);
+#endif
+    CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_query,
+      p_ctx->device_type, p_ctx->hw_id,
+      &(p_ctx->session_id));
+
+    if (NI_RETCODE_SUCCESS != retval)
+    {
+      ni_log(NI_LOG_DEBUG, "Warning upload read hwdesc fail rc %d or ind "
+        "!\n", retval);
+
+      if (query_retry >= 1000)
+      {
+        retval = NI_RETCODE_FAILURE;
+        LRETURN;
+      }
+    }
+    else
+    {
+      ni_log(NI_LOG_DEBUG, "Info hwupload read hwdesc success, "
+             "frame_ind=%d !\n", hwdesc_info.hw_inst_ind.frame_index);
+
+      hwdesc->ui16FrameIdx = hwdesc_info.hw_inst_ind.frame_index;
+      hwdesc->ui16session_ID = p_ctx->session_id;
+      hwdesc->device_handle =
+          (int32_t)((int64_t)p_ctx->blk_io_handle & 0xFFFFFFFF);
+      hwdesc->bit_depth = p_ctx->bit_depth_factor;
+      hwdesc->src_cpu = (uint8_t)NI_DEVICE_TYPE_ENCODER;
+      hwdesc->output_idx = 0;
+      LRETURN;
+    }
   }
-  else
-  {
-    ni_log(NI_LOG_DEBUG, "Info hwupload read hwdesc success, "
-           "frame_ind=%d !\n", hwdesc_info.hw_inst_ind.frame_index);
-    //hwdesc->i8InstID = hwdesc_info.hw_inst_ind.inst_id;
-    hwdesc->ui16FrameIdx = hwdesc_info.hw_inst_ind.frame_index;
-    hwdesc->ui16session_ID = p_ctx->session_id;
-    hwdesc->device_handle =
-        (int32_t)((int64_t)p_ctx->blk_io_handle & 0xFFFFFFFF);
-    hwdesc->bit_depth = p_ctx->bit_depth_factor;
-    hwdesc->src_cpu = (uint8_t)NI_DEVICE_TYPE_ENCODER;
-    hwdesc->output_idx = 0;
-  }
+
 END:
     return retval;
 }
@@ -8686,7 +9363,8 @@ ni_retcode_t ni_clear_instance_buf(niFrameSurface1_t *surface,
 
   if ((uint16_t)NI_INVALID_SESSION_ID == surface->ui16session_ID)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -8694,8 +9372,8 @@ ni_retcode_t ni_clear_instance_buf(niFrameSurface1_t *surface,
   //malloc data buffer
   if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), NI_DATA_BUFFER_LEN))
   {
-      ni_log(NI_LOG_ERROR, "ERROR %d: %s() alloc data buffer failed\n",
-             __func__, NI_ERRNO);
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+           NI_ERRNO, __func__);
       retval = NI_RETCODE_ERROR_MEM_ALOC;
       LRETURN;
   }
@@ -8723,41 +9401,7 @@ END:
 }
 
 /*!******************************************************************************
-*  \brief  Get info from received xcoder capability
-*
-*  \param
-*
-*  \return
-*******************************************************************************/
-void ni_populate_serial_number(ni_serial_num* p_serial_num, void* p_data)
-{
-  ni_nvme_identity_t* p_id_data = (ni_nvme_identity_t*)p_data;
-
-  if (!p_serial_num || !p_data)
-  {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): Null pointer parameters passed\n",
-             __func__);
-      LRETURN;
-  }
-
-  if ((p_id_data->ui16Vid != NETINT_PCI_VENDOR_ID) ||
-    (p_id_data->ui16Ssvid != NETINT_PCI_VENDOR_ID))
-  {
-    LRETURN;
-  }
-
-  memset(p_serial_num->ai8Sn, 0, sizeof(p_serial_num->ai8Sn));
-  memcpy(p_serial_num->ai8Sn, p_id_data->ai8Sn, sizeof(p_serial_num->ai8Sn));
-
-  ni_log(NI_LOG_DEBUG, "F/W SerialNum: %.20s\n", p_serial_num->ai8Sn);
-
-END:
-    return;
-}
-
-/*!******************************************************************************
 *  \brief  Retrieve a hw desc p_frame from decoder
-* THIS IS TOO CHONKY, NEED A DDIRECT READ FOR DATA 3 + METADATA IF REQUIRED toDO
 *  \param
 *
 *  \return
@@ -8786,18 +9430,23 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
     int query_retry = 0;
     uint32_t ui32LBA = 0;
     unsigned int bytes_read_so_far = 0;
+    int query_type = INST_BUF_INFO_RW_READ;
+#ifdef MEASURE_LATENCY 
+    uint64_t abs_time_ns;
+#endif
 
     ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);
 
     if (!p_ctx || !p_frame)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+               __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-      ni_log(NI_LOG_ERROR, "ERROR %s(): xcoder instance id < 0, return\n",
+      ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
              __func__);
       retval = NI_RETCODE_ERROR_INVALID_SESSION;
       LRETURN;
@@ -8810,13 +9459,26 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
 
   total_bytes_to_read = p_frame->data_len[3] + metadata_hdr_size;
   total_yuv_met_size = p_frame->data_len[0] + p_frame->data_len[1] + p_frame->data_len[2] + metadata_hdr_size;
-  ni_log(NI_LOG_DEBUG, "Total bytes to read %u total_yuv_met_size %u\n",
-                 total_bytes_to_read, total_yuv_met_size);
+  ni_log(NI_LOG_DEBUG,
+         "Total bytes to read %u total_yuv_met_size %u, low_delay %u\n",
+         total_bytes_to_read, total_yuv_met_size, p_ctx->decoder_low_delay);
+  if (p_ctx->decoder_low_delay > 0 && !p_ctx->ready_to_close)
+  {
+      ni_log(NI_LOG_DEBUG, "frame_num = %" PRIu64 ", pkt_num = %" PRIu64 "\n",
+             p_ctx->frame_num, p_ctx->pkt_num);
+      if (p_ctx->frame_num >= p_ctx->pkt_num)
+      {
+          //nothing to query, leave
+          retval = NI_RETCODE_SUCCESS;
+          LRETURN;
+      }
+      query_type = INST_BUF_INFO_RW_READ_BUSY;
+  }
   for (;;)
   {
     query_retry++;
-    retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_RW_READ,
-      NI_DEVICE_TYPE_DECODER, &buf_info);
+    retval = ni_query_instance_buf_info(p_ctx, query_type,
+                                        NI_DEVICE_TYPE_DECODER, &buf_info);
     CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_query,
       p_ctx->device_type, p_ctx->hw_id,
       &(p_ctx->session_id));
@@ -8869,14 +9531,18 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
         }
       }
 
-
       if (NI_RETCODE_NVME_SC_WRITE_BUFFER_FULL == p_ctx->status &&
-          query_retry < 1000)
+          query_retry < 1000 / 2)
       {
           ni_usleep(100);
           continue;
       } else
       {
+          if (p_ctx->decoder_low_delay>0)
+          {
+              ni_log(NI_LOG_ERROR, "Warning: low_delay mode non sequential input? Disabling LD\n");
+              p_ctx->decoder_low_delay = -1;
+          }
           ni_log(NI_LOG_DEBUG, "Warning: dec read desc failed %d retries. rc=%d"
                  "\n", query_retry, retval);
       }
@@ -8885,6 +9551,19 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
     }
     else
     {
+        // We have to ensure there are adequate number of DTS for picture
+        // reorder delay otherwise wait for more packets to be sent to decoder.
+        ni_timestamp_table_t *p_dts_queue = p_ctx->dts_queue;
+        if ((int)p_dts_queue->list.count < p_ctx->pic_reorder_delay + 1 &&
+            !p_ctx->ready_to_close)
+        {
+            retval = NI_RETCODE_SUCCESS;
+            ni_log(NI_LOG_DEBUG,
+                   "At least %d packets should be sent before reading the "
+                   "first frame!\n",
+                   p_ctx->pic_reorder_delay + 1);
+            LRETURN;
+        }
       // get actual YUV transfer size if this is the stream's very first read
       if (0 == p_ctx->active_video_width || 0 == p_ctx->active_video_height)
       {
@@ -8905,6 +9584,7 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
         p_ctx->pixel_format = data.pix_format;
         p_ctx->bit_depth_factor = ni_get_bitdepth_factor_from_pixfmt(p_ctx->pixel_format);
         //p_ctx->bit_depth_factor = data.transfer_frame_stride / data.picture_width;
+        p_ctx->is_first_frame = 1;
 
         ni_log(NI_LOG_DEBUG, "Info dec YUV, adjust frame size from %ux%u to "
           "%ux%u\n", p_frame->video_width, p_frame->video_height,
@@ -9075,6 +9755,7 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
   bytes_read_so_far = total_bytes_to_read;
   //bytes_read_so_far = p_frame->data_len[0] + p_frame->data_len[1] + p_frame->data_len[2] + p_frame->data_len[3] + metadata_hdr_size + sei_size; //since only HW desc
   rx_size = ni_create_frame(p_frame, bytes_read_so_far, &frame_offset, true);
+  p_ctx->frame_pkt_offset = frame_offset;
 
   if (rx_size > 0)
   {
@@ -9085,7 +9766,44 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
               XCODER_FRAME_OFFSET_DIFF_THRES, 0,
               p_ctx->buffer_pool) != NI_RETCODE_SUCCESS)
       {
-          p_frame->dts = NI_NOPTS_VALUE;
+          if (p_ctx->last_dts != NI_NOPTS_VALUE && !p_ctx->ready_to_close)
+          {
+              p_ctx->pic_reorder_delay++;
+              p_frame->dts = p_ctx->last_dts + p_ctx->last_dts_interval;
+              ni_log(NI_LOG_DEBUG, "Padding DTS: %" PRId64 "\n", p_frame->dts);
+          } else
+          {
+              p_frame->dts = NI_NOPTS_VALUE;
+          }
+      }
+
+      if (p_ctx->is_first_frame)
+      {
+          for (i = 0; i < p_ctx->pic_reorder_delay; i++)
+          {
+              if (p_ctx->last_pts == NI_NOPTS_VALUE &&
+                  p_ctx->last_dts == NI_NOPTS_VALUE)
+              {
+                  // If the p_frame->pts is unknown in the very beginning we assume
+                  // p_frame->pts == 0 as well as DTS less than PTS by 1000 * 1/timebase
+                  if (p_frame->pts >= p_frame->dts &&
+                      p_frame->pts - p_frame->dts < 1000)
+                  {
+                      break;
+                  }
+              }
+
+              if (ni_timestamp_get_with_threshold(
+                      p_ctx->dts_queue, 0, (int64_t *)&p_frame->dts,
+                      XCODER_FRAME_OFFSET_DIFF_THRES,
+                      p_ctx->frame_num % 500 == 0,
+                      p_ctx->buffer_pool) != NI_RETCODE_SUCCESS)
+              {
+                  p_frame->dts = NI_NOPTS_VALUE;
+              }
+          }
+          // Reset for DTS padding counting
+          p_ctx->pic_reorder_delay = 0;
       }
 
     if (p_ctx->is_dec_pkt_512_aligned)
@@ -9097,7 +9815,6 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
         if (p_frame->dts == NI_NOPTS_VALUE)
         {
           p_frame->pts = NI_NOPTS_VALUE;
-          p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
         }
         // if not a bitstream retrieve the pts of the frame corresponding to the first YUV output
         else if((p_ctx->pts_offsets[0] != NI_NOPTS_VALUE) && (p_ctx->pkt_index != -1))
@@ -9136,10 +9853,8 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
           if ((idx != NI_MAX_DEC_REJECT) && bFound)
           {
             p_frame->pts = p_ctx->pts_offsets[idx];
-            if (idx)
-              p_ctx->last_pts = p_ctx->pts_offsets[idx - 1];
-            else
-              p_ctx->last_pts = p_frame->pts;
+            p_frame->flags = p_ctx->flags_array[idx];
+            p_ctx->last_pts = p_frame->pts;
             p_ctx->last_dts = p_frame->dts;
             ni_log(NI_LOG_DEBUG,
                    "%s: (first frame) idx %d last_dts %" PRId64 ""
@@ -9154,6 +9869,7 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
                      "adjusting ts.\n",
                      __func__, p_ctx->session_id);
               p_frame->pts = p_ctx->pts_offsets[idx];
+              p_frame->flags = p_ctx->flags_array[idx];
               p_ctx->last_pts = p_frame->pts;
               p_ctx->last_dts = p_frame->dts;
               p_ctx->session_run_state = SESSION_RUN_STATE_NORMAL;
@@ -9161,8 +9877,6 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
           else // use pts = 0 as offset
           {
             p_frame->pts = 0;
-            p_ctx->last_pts = 0;
-            p_ctx->last_dts = p_frame->dts;
             ni_log(NI_LOG_DEBUG,
                    "%s: (zero default) dts %" PRId64 " pts "
                    "%" PRId64 "\n",
@@ -9172,8 +9886,6 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
         else
         {
           p_frame->pts = 0;
-          p_ctx->last_pts = 0;
-          p_ctx->last_dts = p_frame->dts;
           ni_log(NI_LOG_DEBUG,
                  "%s:  (not bitstream) dts %" PRId64 " pts "
                  "%" PRId64 "\n",
@@ -9185,8 +9897,6 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
           int64_t pts_delta = p_frame->dts - p_ctx->last_dts;
           p_frame->pts = p_ctx->last_pts + pts_delta;
 
-          p_ctx->last_pts = p_frame->pts;
-          p_ctx->last_dts = p_frame->dts;
           ni_log(NI_LOG_DEBUG,
                  "%s:  (!is_first_frame idx) last_dts %" PRId64 ""
                  " dts %" PRId64 " pts_delta %" PRId64 " last_pts "
@@ -9199,118 +9909,53 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
     {
         ni_log(NI_LOG_DEBUG, "%s: frame_offset %" PRIu64 "\n", __func__,
                frame_offset);
-        //ignore timestamps if bitstream
-        if (p_frame->dts == NI_NOPTS_VALUE)
-        {
-            p_frame->pts = NI_NOPTS_VALUE;
-            p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
-            ni_log(NI_LOG_DEBUG,
-                   "%s: (dts NI_NOPTS_VALUE) dts "
-                   "%" PRId64 " pts %" PRId64 "\n",
-                   __func__, p_frame->dts, p_frame->pts);
-        } else
-      {
         if (p_ctx->is_first_frame)
         {
-          p_ctx->is_first_frame = 0;
+            p_ctx->is_first_frame = 0;
         }
-        if (frame_offset == 0)
+        // search for the pkt_offsets of received frame according to frame_offset.
+        // here we get the index(i) which promises (p_ctx->pkt_offsets_index_min[i] <= frame_offset && p_ctx->pkt_offsets_index[i] > frame_offset)
+        // i = -1 if not found
+        i = rotated_array_binary_search(p_ctx->pkt_offsets_index_min,
+                                        p_ctx->pkt_offsets_index, NI_FIFO_SZ,
+                                        frame_offset);
+        if (i >= 0)
         {
-          if (p_ctx->pts_offsets[0] == NI_NOPTS_VALUE)
-          {
-            p_frame->pts = NI_NOPTS_VALUE;
-            p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
-            ni_log(NI_LOG_DEBUG,
-                   "%s: (first frame pts NI_NOPTS_VALUE not "
-                   "bitstream) dts %" PRId64 " pts %" PRId64 "\n",
-                   __func__, p_frame->dts, p_frame->pts);
-          }
-          else
-          {
-            p_frame->pts = p_ctx->pts_offsets[0];
+            p_frame->pts = p_ctx->pts_offsets[i];
+            p_frame->flags = p_ctx->flags_array[i];
             p_ctx->last_pts = p_frame->pts;
             p_ctx->last_dts = p_frame->dts;
             ni_log(NI_LOG_DEBUG,
-                   "%s: (first frame) dts %" PRId64 " pts "
-                   "%" PRId64 "\n",
-                   __func__, p_frame->dts, p_frame->pts);
-          }
+                   "%s: (found pts) dts %" PRId64 " pts "
+                   "%" PRId64 " frame_offset %" PRIu64 " i %d "
+                   "pkt_offsets_index_min %" PRIu64 " "
+                   "pkt_offsets_index %" PRIu64 "\n",
+                   __func__, p_frame->dts, p_frame->pts, frame_offset, i,
+                   p_ctx->pkt_offsets_index_min[i],
+                   p_ctx->pkt_offsets_index[i]);
 
-          if (p_ctx->pkt_custom_sei[0])
-          {
-            p_frame->p_custom_sei = p_ctx->pkt_custom_sei[0];
-            p_frame->custom_sei_len = p_ctx->pkt_custom_sei_len[0];
-            p_ctx->pkt_custom_sei[0] = NULL;
-            p_ctx->pkt_custom_sei_len[0] = 0;
-          }
-        }
-        else
+            p_frame->p_custom_sei_set = p_ctx->pkt_custom_sei_set[i];
+            p_ctx->pkt_custom_sei_set[i] = NULL;
+        } else
         {
-          for (i = 0 ; i < NI_FIFO_SZ ; i++)
-          {
-            if ((frame_offset >= p_ctx->pkt_offsets_index_min[i])
-                &&(frame_offset  < p_ctx->pkt_offsets_index[i]))
-            {
-              if (p_ctx->pts_offsets[i] == NI_NOPTS_VALUE)
-              {
-                //bitstream case
-                p_frame->pts = NI_NOPTS_VALUE;
-                p_ctx->last_dts = p_ctx->last_pts = NI_NOPTS_VALUE;
-                ni_log(NI_LOG_DEBUG,
-                       "%s: (pts NI_NOPTS_VALUE not "
-                       "bitstream) dts %" PRId64 " pts %" PRId64
-                       " frame_offset %" PRIu64 " i %d "
-                       "pkt_offsets_index_min %" PRIu64
-                       " pkt_offsets_index %" PRIu64 "\n",
-                       __func__, p_frame->dts, p_frame->pts, frame_offset, i,
-                       p_ctx->pkt_offsets_index_min[i],
-                       p_ctx->pkt_offsets_index[i]);
-              }
-              else
-              {
-                p_frame->pts = p_ctx->pts_offsets[i];
-                p_ctx->last_pts = p_frame->pts;
-                p_ctx->last_dts = p_frame->dts;
-                ni_log(NI_LOG_DEBUG,
-                       "%s: (found pts) dts %" PRId64 " pts "
-                       "%" PRId64 " frame_offset %" PRIu64 " i %d "
-                       "pkt_offsets_index_min %" PRIu64 " "
-                       "pkt_offsets_index %" PRIu64 "\n",
-                       __func__, p_frame->dts, p_frame->pts, frame_offset, i,
-                       p_ctx->pkt_offsets_index_min[i],
-                       p_ctx->pkt_offsets_index[i]);
-              }
-
-              if (p_ctx->pkt_custom_sei[i % NI_FIFO_SZ])
-              {
-                p_frame->p_custom_sei = p_ctx->pkt_custom_sei[i % NI_FIFO_SZ];
-                p_frame->custom_sei_len = p_ctx->pkt_custom_sei_len[i % NI_FIFO_SZ];
-                p_ctx->pkt_custom_sei[i % NI_FIFO_SZ] = NULL;
-                p_ctx->pkt_custom_sei_len[i % NI_FIFO_SZ] = 0;
-              }
-              break;
-            }
-            if (i == (NI_FIFO_SZ-1))
-            {
-              //backup solution pts
-              p_frame->pts = p_ctx->last_pts + (p_frame->dts - p_ctx->last_dts);
-              p_ctx->last_pts = p_frame->pts;
-              p_ctx->last_dts = p_frame->dts;
-              ni_log(NI_LOG_ERROR, "ERROR: NO pts found consider increasing NI_FIFO_SZ!\n");
-              ni_log(NI_LOG_DEBUG,
-                     "%s: (not found use default) dts %" PRId64 " pts %" PRId64
-                     "\n",
-                     __func__, p_frame->dts, p_frame->pts);
-            }
-          }
+            //backup solution pts
+            p_frame->pts = p_ctx->last_pts + (p_frame->dts - p_ctx->last_dts);
+            ni_log(NI_LOG_ERROR,
+                   "ERROR: NO pts found consider increasing NI_FIFO_SZ!\n");
+            ni_log(NI_LOG_DEBUG,
+                   "%s: (not found use default) dts %" PRId64 " pts %" PRId64
+                   "\n",
+                   __func__, p_frame->dts, p_frame->pts);
         }
-      }
     }
 
-    int64_t best_effort_timestamp = guess_correct_pts(p_ctx, p_frame->pts, p_frame->dts);
-    p_frame->pts = best_effort_timestamp;
+    p_frame->pts = guess_correct_pts(p_ctx, p_frame->pts, p_frame->dts);
+    p_ctx->last_pts = p_frame->pts;
+    if (p_frame->dts != NI_NOPTS_VALUE && p_ctx->last_dts != NI_NOPTS_VALUE)
+        p_ctx->last_dts_interval = p_frame->dts - p_ctx->last_dts;
+    p_ctx->last_dts = p_frame->dts;
     ni_log(NI_LOG_DEBUG, "%s: (best_effort_timestamp) pts %" PRId64 "\n",
-           __func__, best_effort_timestamp);
+           __func__, p_frame->pts);
     p_ctx->frame_num++;
   }
 
@@ -9337,6 +9982,18 @@ ni_retcode_t ni_decoder_session_read_desc(ni_session_context_t* p_ctx, ni_frame_
       ni_timestamp_scan_cleanup(p_ctx->pts_table, p_ctx->dts_queue,
                                 p_ctx->buffer_pool);
   }
+
+#ifdef MEASURE_LATENCY
+  if ((p_frame->dts != NI_NOPTS_VALUE) && (p_ctx->frame_time_q != NULL))
+  {
+      abs_time_ns = ni_gettime_ns();
+      ni_log(NI_LOG_INFO, "DTS:%lld,DELTA:%lu,dLAT:%lu;\n", p_frame->dts,
+          abs_time_ns - p_ctx->prev_read_frame_time,
+          ni_lat_meas_q_check_latency((ni_lat_meas_q_t *)p_ctx->frame_time_q,
+              abs_time_ns, p_frame->dts));
+      p_ctx->prev_read_frame_time = abs_time_ns;
+  }
+#endif
 
 END:
 
@@ -9387,13 +10044,14 @@ int ni_hwdownload_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame,
 
   if ((!p_ctx) || (!p_frame))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+           __func__);
     return NI_RETCODE_INVALID_PARAM;
   }
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-      ni_log(NI_LOG_ERROR, "ERROR %s(): xcoder instance id < 0, return\n",
+      ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
              __func__);
       retval = NI_RETCODE_ERROR_INVALID_SESSION;
       LRETURN;
@@ -9489,8 +10147,12 @@ int ni_hwdownload_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame,
   if (p_ctx->is_auto_dl)
       rx_size = (int)bytes_read_so_far;
   else
+  {
       rx_size =
           ni_create_frame(p_frame, bytes_read_so_far, &frame_offset, false);
+      p_ctx->frame_pkt_offset = frame_offset;
+  }
+
 
 #ifdef XCODER_DUMP_ENABLED
   fwrite(p_frame->data[0], rx_size, 1, p_ctx->p_dump[1]);
@@ -9579,7 +10241,7 @@ ni_retcode_t ni_config_instance_set_uploader_params(ni_session_context_t *p_ctx,
 
     if (!p_ctx)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
                __func__);
         retval = NI_RETCODE_INVALID_PARAM;
         LRETURN;
@@ -9587,7 +10249,8 @@ ni_retcode_t ni_config_instance_set_uploader_params(ni_session_context_t *p_ctx,
 
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+             __func__);
         retval = NI_RETCODE_ERROR_INVALID_SESSION;
         LRETURN;
     }
@@ -9596,7 +10259,8 @@ ni_retcode_t ni_config_instance_set_uploader_params(ni_session_context_t *p_ctx,
     if (ni_posix_memalign(&p_uploader_config, sysconf(_SC_PAGESIZE),
                           buffer_size))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate uplConf buffer.\n");
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+               NI_ERRNO, __func__);
         retval = NI_RETCODE_ERROR_MEM_ALOC;
         LRETURN;
     }
@@ -9662,7 +10326,7 @@ ni_retcode_t ni_config_instance_set_decoder_params(ni_session_context_t* p_ctx, 
 
   if (!p_ctx)
   {
-      ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+      ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
              __func__);
       retval = NI_RETCODE_INVALID_PARAM;
       LRETURN;
@@ -9670,7 +10334,8 @@ ni_retcode_t ni_config_instance_set_decoder_params(ni_session_context_t* p_ctx, 
 
   if (NI_INVALID_SESSION_ID == p_ctx->session_id)
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+    ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+           __func__);
     retval = NI_RETCODE_ERROR_INVALID_SESSION;
     LRETURN;
   }
@@ -9678,7 +10343,8 @@ ni_retcode_t ni_config_instance_set_decoder_params(ni_session_context_t* p_ctx, 
   buffer_size = ((buffer_size + (NI_MEM_PAGE_ALIGNMENT - 1)) / NI_MEM_PAGE_ALIGNMENT) * NI_MEM_PAGE_ALIGNMENT;
   if (ni_posix_memalign(&p_decoder_config, sysconf(_SC_PAGESIZE), buffer_size))
   {
-    ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate encConf buffer.\n");
+    ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate p_decoder_config buffer\n",
+           NI_ERRNO, __func__);
     retval = NI_RETCODE_ERROR_MEM_ALOC;
     LRETURN;
   }
@@ -9769,6 +10435,7 @@ END:
  *                  NI_RETCODE_ERROR_INVALID_SESSION
  *                  NI_RETCODE_ERROR_MEM_ALOC
  *                  NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                  NI_RETCODE_FAILURE
  *******************************************************************************/
 ni_retcode_t ni_scaler_session_read_hwdesc(
     ni_session_context_t *p_ctx,
@@ -9777,34 +10444,66 @@ ni_retcode_t ni_scaler_session_read_hwdesc(
     ni_retcode_t retval;
     ni_instance_buf_info_t sInstanceBuf = {0};
     niFrameSurface1_t *pFrameSurface;
+    int query_retry = 0;
 
     if (!p_ctx)
     {
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+               __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
     if (p_ctx->session_id == NI_INVALID_SESSION_ID)
     {
-        ni_log(NI_LOG_ERROR, "ERROR %s: no session\n", __func__);
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+               __func__);
         return NI_RETCODE_ERROR_INVALID_SESSION;
     }
 
-    retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_RW_UPLOAD,
-        NI_DEVICE_TYPE_SCALER, &sInstanceBuf);
+    for (;;)
+    {
+        query_retry++;
 
-    CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_query,
-        p_ctx->device_type, p_ctx->hw_id,
-        &(p_ctx->session_id));
+        retval = ni_query_instance_buf_info(p_ctx, INST_BUF_INFO_RW_UPLOAD,
+                                            NI_DEVICE_TYPE_SCALER, &sInstanceBuf);
 
-    pFrameSurface = (niFrameSurface1_t *) p_frame->p_data[3];
-    pFrameSurface->ui16FrameIdx = sInstanceBuf.hw_inst_ind.frame_index;
-    pFrameSurface->ui16session_ID = p_ctx->session_id;
-    pFrameSurface->device_handle =
-        (int32_t)((int64_t)p_ctx->blk_io_handle & 0xFFFFFFFF);
-    pFrameSurface->src_cpu = (uint8_t) NI_DEVICE_TYPE_SCALER;
-    pFrameSurface->output_idx = 0;
+        CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_query,
+            p_ctx->device_type, p_ctx->hw_id,
+            &(p_ctx->session_id));
 
-// cppcheck-suppress unusedLabel
+        if (retval != NI_RETCODE_SUCCESS)
+        {
+            if (query_retry >= 1000)
+            {
+                ni_log(NI_LOG_DEBUG, "Warning hwdesc read fail rc %d\n", retval);
+                LRETURN;
+            }
+        }
+        else
+        {
+            pFrameSurface = (niFrameSurface1_t *) p_frame->p_data[3];
+            pFrameSurface->ui16FrameIdx = sInstanceBuf.hw_inst_ind.frame_index;
+            pFrameSurface->ui16session_ID = p_ctx->session_id;
+            pFrameSurface->device_handle =
+                (int32_t)((int64_t)p_ctx->blk_io_handle & 0xFFFFFFFF);
+            pFrameSurface->src_cpu = (uint8_t) NI_DEVICE_TYPE_SCALER;
+            pFrameSurface->output_idx = 0;
+
+            /* A frame index of zero is invalid, the memory acquisition failed */
+            if (pFrameSurface->ui16FrameIdx == 0)
+            {
+                if (query_retry >= 1000)
+                {
+                    ni_log(NI_LOG_ERROR, "Warning: 2D could not acquire frame\n");
+                    retval = NI_RETCODE_FAILURE;
+                    LRETURN;
+                }
+                continue;
+            }
+            LRETURN;
+        }
+    }
+
 END:
 
     if (NI_RETCODE_SUCCESS != retval)
@@ -9879,13 +10578,14 @@ int ni_get_planar_from_pixfmt(int pix_fmt)
 /*!*****************************************************************************
  *  \brief  Get an address offset from a hw descriptor
  *
+ *  \param[in]  p_ctx     ni_session_context_t to be referenced
  *  \param[in]  hwdesc    Pointer to caller allocated niFrameSurface1_t
  *  \param[out] p_offset  Value of offset
  *
  *  \return On success    NI_RETCODE_SUCCESS
  *          On failure    NI_RETCODE_INVALID_PARAM
  ******************************************************************************/
-ni_retcode_t ni_get_memory_offset(const niFrameSurface1_t *hwdesc,
+ni_retcode_t ni_get_memory_offset(ni_session_context_t *p_ctx, const niFrameSurface1_t *hwdesc,
                                   uint32_t *p_offset)
 {
     if (!hwdesc)
@@ -9894,15 +10594,15 @@ ni_retcode_t ni_get_memory_offset(const niFrameSurface1_t *hwdesc,
         return NI_RETCODE_INVALID_PARAM;
     }
 
-    if (hwdesc->ui16FrameIdx <= NI_MIN_HWDESC_P2P_BUF_ID ||
-        hwdesc->ui16FrameIdx >= NI_MAX_HWDESC_P2P_BUF_ID)
+    if (hwdesc->ui16FrameIdx <= NI_GET_MIN_HWDESC_P2P_BUF_ID(p_ctx->ddr_config) ||
+        hwdesc->ui16FrameIdx > NI_GET_MAX_HWDESC_P2P_BUF_ID(p_ctx->ddr_config))
     {
         ni_log(NI_LOG_ERROR, "ERROR: %s() pass invalid data\n", __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
-    *p_offset = (hwdesc->ui16FrameIdx - NI_MIN_HWDESC_P2P_BUF_ID) *
-        NI_HWDESC_MEMBIN_SIZE;
+    *p_offset = (hwdesc->ui16FrameIdx - NI_GET_MIN_HWDESC_P2P_BUF_ID(p_ctx->ddr_config)) *
+        NI_HWDESC_UNIFIED_MEMBIN_SIZE;
 
     return NI_RETCODE_SUCCESS;
 }
@@ -9928,7 +10628,7 @@ ni_retcode_t ni_config_instance_network_binary(ni_session_context_t *p_ctx,
 
     if (!p_ctx)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
                __func__);
         retval = NI_RETCODE_INVALID_PARAM;
         LRETURN;
@@ -9936,7 +10636,8 @@ ni_retcode_t ni_config_instance_network_binary(ni_session_context_t *p_ctx,
 
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+               __func__);
         retval = NI_RETCODE_ERROR_INVALID_SESSION;
         LRETURN;
     }
@@ -10139,14 +10840,16 @@ ni_retcode_t ni_ai_session_write(ni_session_context_t *p_ctx,
 
     if (p_frame->data_len[0] == 0)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: invalid data length\n");
+        ni_log(NI_LOG_ERROR, "ERROR: %s() invalid data length\n",
+               __func__);
         retval = NI_RETCODE_INVALID_PARAM;
         LRETURN;
     }
 
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+               __func__);
         retval = NI_RETCODE_ERROR_INVALID_SESSION;
         LRETURN;
     }
@@ -10243,14 +10946,16 @@ ni_retcode_t ni_ai_session_read(ni_session_context_t *p_ctx,
 
     if (!p_ctx || !p_packet || !p_packet->p_data)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+               __func__);
         retval = NI_RETCODE_INVALID_PARAM;
         LRETURN;
     }
 
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
-        ni_log(NI_LOG_DEBUG, "xcoder instance id == 0, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+               __func__);
         retval = NI_RETCODE_ERROR_INVALID_SESSION;
         LRETURN;
     }
@@ -10318,6 +11023,7 @@ ni_retcode_t ni_config_read_inout_layers(ni_session_context_t *p_ctx,
                                          ni_network_data_t *p_network)
 {
     void *p_buffer = NULL;
+    void *p_info = NULL;
     ni_retcode_t retval = NI_RETCODE_SUCCESS;
     uint32_t ui32LBA = 0;
     uint32_t dataLen;
@@ -10332,7 +11038,8 @@ ni_retcode_t ni_config_read_inout_layers(ni_session_context_t *p_ctx,
 
     if (!p_ctx || !p_network)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+               __func__);
         retval = NI_RETCODE_INVALID_PARAM;
         LRETURN;
     }
@@ -10342,7 +11049,8 @@ ni_retcode_t ni_config_read_inout_layers(ni_session_context_t *p_ctx,
         ~(NI_MEM_PAGE_ALIGNMENT - 1);
     if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), dataLen))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+               NI_ERRNO, __func__);
         retval = NI_RETCODE_ERROR_MEM_ALOC;
         LRETURN;
     }
@@ -10386,24 +11094,25 @@ ni_retcode_t ni_config_read_inout_layers(ni_session_context_t *p_ctx,
     /* query the real network layer data */
     dataLen = (sizeof(ni_network_layer_info_t) + (NI_MEM_PAGE_ALIGNMENT - 1)) &
         ~(NI_MEM_PAGE_ALIGNMENT - 1);
-    if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), dataLen))
+    if (ni_posix_memalign(&p_info, sysconf(_SC_PAGESIZE), dataLen))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+      ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate info buffer\n",
+             NI_ERRNO, __func__);
         retval = NI_RETCODE_ERROR_MEM_ALOC;
         LRETURN;
     }
-    memset(p_buffer, 0, dataLen);
+    memset(p_info, 0, dataLen);
 
     ui32LBA = QUERY_INSTANCE_NL_R(p_ctx->session_id, NI_DEVICE_TYPE_AI);
     if (ni_nvme_send_read_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
-                              p_buffer, dataLen, ui32LBA) < 0)
+                              p_info, dataLen, ui32LBA) < 0)
     {
         ni_log(NI_LOG_ERROR, "%s(): NVME command Failed\n", __func__);
         retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
         LRETURN;
     }
 
-    p_network->linfo = *((ni_network_layer_info_t *)p_buffer);
+    p_network->linfo = *((ni_network_layer_info_t *)p_info);
 
     for (l = 0, p_network->input_num = 0, buffer_size = 0;
          l < NI_MAX_NETWORK_INPUT_NUM; l++)
@@ -10456,6 +11165,7 @@ ni_retcode_t ni_config_read_inout_layers(ni_session_context_t *p_ctx,
 END:
 
     ni_aligned_free(p_buffer);
+    ni_aligned_free(p_info);
     ni_log(NI_LOG_TRACE, "%s(): exit\n", __func__);
     return retval;
 }
@@ -10471,7 +11181,7 @@ ni_retcode_t ni_ai_session_open(ni_session_context_t *p_ctx)
 
     if (!p_ctx)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: %s(): NULL pointer p_config passed\n",
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
                __func__);
         retval = NI_RETCODE_INVALID_PARAM;
         LRETURN;
@@ -10505,9 +11215,8 @@ ni_retcode_t ni_ai_session_open(ni_session_context_t *p_ctx)
         if (ni_posix_memalign(&p_ctx->p_all_zero_buf, sysconf(_SC_PAGESIZE),
                               NI_DATA_BUFFER_LEN))
         {
-            ni_log(NI_LOG_ERROR, "ERROR %d: ni_ai_session_open() alloc all zero "
-                           "buffer failed\n",
-                           NI_ERRNO);
+            ni_log(NI_LOG_ERROR, "ERROR %d: %s() alloc all zero buffer failed\n",
+                   NI_ERRNO, __func__);
             retval = NI_RETCODE_ERROR_MEM_ALOC;
             LRETURN;
         }
@@ -10536,6 +11245,11 @@ ni_retcode_t ni_ai_session_open(ni_session_context_t *p_ctx)
         retval =
             ni_nvme_send_read_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
                                   p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+        if (retval != NI_RETCODE_SUCCESS)
+        {
+            ni_log(NI_LOG_ERROR, "ERROR ni_nvme_send_read_cmd\n");
+            LRETURN;
+        }
         //Open will return a session status structure with a valid session id if it worked.
         //Otherwise the invalid session id set before the open command will stay
         if ((uint16_t)NI_INVALID_SESSION_ID ==
@@ -10552,13 +11266,42 @@ ni_retcode_t ni_ai_session_open(ni_session_context_t *p_ctx)
         }
         p_ctx->session_id =
             ni_ntohs(((ni_session_stats_t *)p_buffer)->ui16SessionId);
-        ni_log(NI_LOG_DEBUG, "Ai open session ID:0x%x\n", p_ctx->session_id);
+        p_ctx->session_timestamp =
+            ni_htonll(((ni_session_stats_t *)p_buffer)->ui64Session_timestamp);
+        ni_log(NI_LOG_DEBUG, "Ai open session ID:0x%x,timestamp:%" PRIu64 "\n",
+               p_ctx->session_id, p_ctx->session_timestamp);
+
         ni_log(NI_LOG_DEBUG, "Open session completed\n");
         ni_log(NI_LOG_DEBUG,
                "%s(): p_ctx->device_handle=%" PRIx64
                ", p_ctx->hw_id=%d, p_ctx->session_id=%d\n",
                __func__, (int64_t)p_ctx->device_handle, p_ctx->hw_id,
                p_ctx->session_id);
+
+        //Send keep alive timeout Info
+        uint64_t keep_alive_timeout =
+            p_ctx->keep_alive_timeout * 1000000;   //send us to FW
+        memset(p_buffer, 0, NI_DATA_BUFFER_LEN);
+        memcpy(p_buffer, &keep_alive_timeout, sizeof(keep_alive_timeout));
+        ni_log(NI_LOG_DEBUG, "%s keep_alive_timeout %" PRIx64 "\n", __func__,
+               keep_alive_timeout);
+        ui32LBA = CONFIG_SESSION_KeepAliveTimeout_W(p_ctx->session_id);
+        retval =
+            ni_nvme_send_write_cmd(p_ctx->blk_io_handle, p_ctx->event_handle,
+                                   p_buffer, NI_DATA_BUFFER_LEN, ui32LBA);
+        CHECK_ERR_RC(p_ctx, retval, nvme_admin_cmd_xcoder_config,
+                     p_ctx->device_type, p_ctx->hw_id, &(p_ctx->session_id));
+        CHECK_VPU_RECOVERY(retval);
+
+        if (NI_RETCODE_SUCCESS != retval)
+        {
+            ni_log(NI_LOG_ERROR,
+                   "ERROR %s(): nvme write keep_alive_timeout command "
+                   "failed, blk_io_handle: %" PRIx64 ", hw_id, %d\n",
+                   __func__, (int64_t)p_ctx->blk_io_handle, p_ctx->hw_id);
+            retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+            LRETURN;
+        }
     }
 
     // init for frame pts calculation
@@ -10588,14 +11331,15 @@ ni_retcode_t ni_ai_session_close(ni_session_context_t *p_ctx, int eos_recieved)
 
     if (!p_ctx)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: passed parameters are null!, return\n");
-        ni_log(NI_LOG_TRACE, "%s(): exit\n", __func__);
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+               __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
     if (NI_INVALID_SESSION_ID == p_ctx->session_id)
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Invalid session ID, return\n");
+        ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+               __func__);
         retval = NI_RETCODE_ERROR_INVALID_SESSION;
         LRETURN;
     }
@@ -10697,13 +11441,15 @@ ni_retcode_t ni_ai_alloc_hwframe(ni_session_context_t *p_ctx, int frame_index)
 
     if (!p_ctx)
     {
+        ni_log(NI_LOG_ERROR, "ERROR: %s() passed parameters are null!, return\n",
+               __func__);
         return NI_RETCODE_INVALID_PARAM;
     }
 
     if (p_ctx->session_id == NI_INVALID_SESSION_ID)
     {
-        ni_log(NI_LOG_ERROR, "ERROR %s(): Cannot allocate leftover buffer.\n",
-               __func__);
+      ni_log(NI_LOG_ERROR, "ERROR %s(): Invalid session ID, return.\n",
+             __func__);
         return NI_RETCODE_ERROR_INVALID_SESSION;
     }
 
@@ -10712,7 +11458,8 @@ ni_retcode_t ni_ai_alloc_hwframe(ni_session_context_t *p_ctx, int frame_index)
 
     if (ni_posix_memalign((void **)&p_data, sysconf(_SC_PAGESIZE), dataLen))
     {
-        ni_log(NI_LOG_ERROR, "ERROR: Cannot allocate buffer.\n");
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer\n",
+               NI_ERRNO, __func__);
         return NI_RETCODE_ERROR_MEM_ALOC;
     }
 
@@ -10740,5 +11487,65 @@ ni_retcode_t ni_ai_alloc_hwframe(ni_session_context_t *p_ctx, int frame_index)
 
 END:
     ni_aligned_free(p_data);
+    return retval;
+}
+
+/*!*****************************************************************************
+ *  \brief  Get DDR configuration of Quadra device
+ *
+ *  \param[in/out] p_ctx  pointer to a session context with valid file handle
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ *                        NI_RETCODE_ERROR_MEM_ALOC
+ *                        NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+ni_retcode_t ni_device_get_ddr_configuration(ni_session_context_t *p_ctx)
+{
+    void *p_buffer = NULL;
+    ni_nvme_identity_t *p_id_data;
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+    ni_event_handle_t event_handle = NI_INVALID_EVENT_HANDLE;
+    uint32_t ui32LBA = IDENTIFY_DEVICE_R;
+    ni_device_handle_t device_handle = p_ctx->blk_io_handle;
+
+    ni_log(NI_LOG_TRACE, "%s(): enter\n", __func__);
+
+    if (NI_INVALID_DEVICE_HANDLE == device_handle)
+    {
+        ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid passed parameters\n",
+               __func__);
+        retval = NI_RETCODE_INVALID_PARAM;
+        LRETURN;
+    }
+
+    if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE),
+                          NI_NVME_IDENTITY_CMD_DATA_SZ))
+    {
+        ni_log(NI_LOG_ERROR, "ERROR %d: %s() Cannot allocate buffer.\n",
+               NI_ERRNO, __func__);
+        retval = NI_RETCODE_ERROR_MEM_ALOC;
+        LRETURN;
+    }
+
+    memset(p_buffer, 0, NI_NVME_IDENTITY_CMD_DATA_SZ);
+
+    if (ni_nvme_send_read_cmd(device_handle, event_handle, p_buffer,
+                              NI_NVME_IDENTITY_CMD_DATA_SZ, ui32LBA) < 0)
+    {
+        retval = NI_RETCODE_ERROR_NVME_CMD_FAILED;
+        LRETURN;
+    }
+
+    p_id_data = (ni_nvme_identity_t *) p_buffer;
+    p_ctx->ddr_config = (p_id_data->memory_cfg == NI_QUADRA_MEMORY_CONFIG_SR)
+        ? 1 : 2;
+
+    ni_log(NI_LOG_DEBUG, "Memory configuration %d\n",p_ctx->ddr_config);
+END:
+
+    ni_aligned_free(p_buffer);
+    ni_log(NI_LOG_TRACE, "%s(): retval: %d\n", __func__, retval);
+
     return retval;
 }

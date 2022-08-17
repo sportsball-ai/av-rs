@@ -25,13 +25,7 @@
 *  \brief  NETINT audio/video related utility functions
 *
 *******************************************************************************/
-#ifdef _WIN32
-#include <WinSock2.h>
-#include <windows.h>
-#pragma comment(lib, "wsock32.lib")
-#elif __linux__
-#include <arpa/inet.h>
-#endif
+
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
@@ -284,33 +278,33 @@ void ni_dec_retrieve_aux_data(ni_frame_t *frame)
             // HEVC uses a g,b,r ordering, which we convert to a more natural r,
             // g,b,this is so we are compatible with FFmpeg default soft decoder
             mdm->display_primaries[0][0].num =
-                ntohs(pColourVolume->display_primaries[2][0]);
+                ni_ntohs(pColourVolume->display_primaries[2][0]);
             mdm->display_primaries[0][0].den = chroma_den;
             mdm->display_primaries[0][1].num =
-                ntohs(pColourVolume->display_primaries[2][1]);
+                ni_ntohs(pColourVolume->display_primaries[2][1]);
             mdm->display_primaries[0][1].den = chroma_den;
             mdm->display_primaries[1][0].num =
-                ntohs(pColourVolume->display_primaries[0][0]);
+                ni_ntohs(pColourVolume->display_primaries[0][0]);
             mdm->display_primaries[1][0].den = chroma_den;
             mdm->display_primaries[1][1].num =
-                ntohs(pColourVolume->display_primaries[0][1]);
+                ni_ntohs(pColourVolume->display_primaries[0][1]);
             mdm->display_primaries[1][1].den = chroma_den;
             mdm->display_primaries[2][0].num =
-                ntohs(pColourVolume->display_primaries[1][0]);
+                ni_ntohs(pColourVolume->display_primaries[1][0]);
             mdm->display_primaries[2][0].den = chroma_den;
             mdm->display_primaries[2][1].num =
-                ntohs(pColourVolume->display_primaries[1][1]);
+                ni_ntohs(pColourVolume->display_primaries[1][1]);
             mdm->display_primaries[2][1].den = chroma_den;
-            mdm->white_point[0].num = ntohs(pColourVolume->white_point_x);
+            mdm->white_point[0].num = ni_ntohs(pColourVolume->white_point_x);
             mdm->white_point[0].den = chroma_den;
-            mdm->white_point[1].num = ntohs(pColourVolume->white_point_y);
+            mdm->white_point[1].num = ni_ntohs(pColourVolume->white_point_y);
             mdm->white_point[1].den = chroma_den;
 
             mdm->min_luminance.num =
-                ntohl(pColourVolume->min_display_mastering_luminance);
+                ni_ntohl(pColourVolume->min_display_mastering_luminance);
             mdm->min_luminance.den = luma_den;
             mdm->max_luminance.num =
-                ntohl(pColourVolume->max_display_mastering_luminance);
+                ni_ntohl(pColourVolume->max_display_mastering_luminance);
             mdm->max_luminance.den = luma_den;
 
             mdm->has_luminance = mdm->has_primaries = 1;
@@ -338,8 +332,8 @@ void ni_dec_retrieve_aux_data(ni_frame_t *frame)
                      *)((uint8_t *)frame->p_data[start_offset] +
                         frame->sei_hdr_content_light_level_info_offset);
 
-            clm->max_cll = ntohs(pLightLevel->max_content_light_level);
-            clm->max_fall = ntohs(pLightLevel->max_pic_average_light_level);
+            clm->max_cll = ni_ntohs(pLightLevel->max_content_light_level);
+            clm->max_fall = ni_ntohs(pLightLevel->max_pic_average_light_level);
         }
     }
 
@@ -960,8 +954,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         // save a copy
         if (!p_enc_ctx->p_master_display_meta_data)
         {
-            p_enc_ctx->p_master_display_meta_data =
-                malloc(sizeof(ni_mastering_display_metadata_t));
+            p_enc_ctx->p_master_display_meta_data = malloc(sizeof(ni_mastering_display_metadata_t));
         }
         if (!p_enc_ctx->p_master_display_meta_data)
         {
@@ -973,11 +966,11 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
 
             const int luma_den = 10000;
 
-            uint32_t uint32_t_tmp = htonl(
+            uint32_t uint32_t_tmp = ni_htonl(
                 (uint32_t)(lrint(luma_den * ni_q2d(p_src->max_luminance))));
             memcpy(p_enc_ctx->ui8_mdcv_max_min_lum_data, &uint32_t_tmp,
                    sizeof(uint32_t));
-            uint32_t_tmp = htonl(
+            uint32_t_tmp = ni_htonl(
                 (uint32_t)(lrint(luma_den * ni_q2d(p_src->min_luminance))));
             memcpy(p_enc_ctx->ui8_mdcv_max_min_lum_data + 4, &uint32_t_tmp,
                    sizeof(uint32_t));
@@ -1030,27 +1023,27 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         // when sent to encoder
         dp00 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[1][0]));
-        p_mdcv->display_primaries[0][0] = htons(dp00);
+        p_mdcv->display_primaries[0][0] = ni_htons(dp00);
         dp01 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[1][1]));
-        p_mdcv->display_primaries[0][1] = htons(dp01);
+        p_mdcv->display_primaries[0][1] = ni_htons(dp01);
         dp10 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[2][0]));
-        p_mdcv->display_primaries[1][0] = htons(dp10);
+        p_mdcv->display_primaries[1][0] = ni_htons(dp10);
         dp11 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[2][1]));
-        p_mdcv->display_primaries[1][1] = htons(dp11);
+        p_mdcv->display_primaries[1][1] = ni_htons(dp11);
         dp20 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[0][0]));
-        p_mdcv->display_primaries[2][0] = htons(dp20);
+        p_mdcv->display_primaries[2][0] = ni_htons(dp20);
         dp21 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[0][1]));
-        p_mdcv->display_primaries[2][1] = htons(dp21);
+        p_mdcv->display_primaries[2][1] = ni_htons(dp21);
 
         wpx = (uint16_t)lrint(chroma_den * ni_q2d(p_src->white_point[0]));
-        p_mdcv->white_point_x = htons(wpx);
+        p_mdcv->white_point_x = ni_htons(wpx);
         wpy = (uint16_t)lrint(chroma_den * ni_q2d(p_src->white_point[1]));
-        p_mdcv->white_point_y = htons(wpy);
+        p_mdcv->white_point_y = ni_htons(wpy);
 
         ni_log(NI_LOG_DEBUG, 
             "mastering display color volume, primaries "
@@ -1089,9 +1082,9 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         }
 
         uint16_t max_content_light_level =
-            htons(((ni_content_light_level_t *)aux_data->data)->max_cll);
+            ni_htons(((ni_content_light_level_t *)aux_data->data)->max_cll);
         uint16_t max_pic_average_light_level =
-            htons(((ni_content_light_level_t *)aux_data->data)->max_fall);
+            ni_htons(((ni_content_light_level_t *)aux_data->data)->max_fall);
 
         ni_log(NI_LOG_DEBUG, "content light level info, MaxCLL %u MaxFALL %u\n",
                        ((ni_content_light_level_t *)aux_data->data)->max_cll,
@@ -1666,9 +1659,9 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         p_enc_frame->extra_data_len += p_enc_ctx->roi_len;
 
         ni_log(NI_LOG_DEBUG, "ni_enc_prep_aux_data: supply QP map, cacheRoi %d "
-                       "aux_data %d ctx->roi_map %d frame->roi_len %u\n",
+                       "aux_data %d ctx->roi_map %d frame->roi_len %u ctx->roi_len %u\n",
                        api_params->cacheRoi, aux_data != NULL,
-                       p_enc_ctx->roi_map != NULL, p_enc_frame->roi_len);
+                       p_enc_ctx->roi_map != NULL, p_enc_frame->roi_len, p_enc_ctx->roi_len);
     }
 
     // prep for NetInt long term reference frame support setting: when this has
@@ -1741,6 +1734,85 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
 
         p_enc_ctx->force_idr_frame = 0;
         ni_log(NI_LOG_DEBUG, "%s(): API force IDR frame\n", __func__);
+    }
+
+    // prep for NetInt VUI reconfiguration support: when VUI HRD
+    // setting has been requested by both frame and API, API takes priority
+    ni_vui_hrd_t vui = {0};
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_VUI);
+    if (aux_data)
+    {
+        ni_vui_hrd_t *aux_vui_ptr = (ni_vui_hrd_t *)aux_data->data;
+
+        if (aux_vui_ptr->colorDescPresent < 0 || aux_vui_ptr->colorDescPresent > 1)
+        {
+            ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid colorDescPresent in aux data %d\n",
+                   __func__, aux_vui_ptr->colorDescPresent);
+        }
+        else
+        {
+            vui.colorDescPresent = aux_vui_ptr->colorDescPresent;
+        }
+
+        if((aux_vui_ptr->aspectRatioWidth > NI_MAX_ASPECTRATIO) || (aux_vui_ptr->aspectRatioHeight > NI_MAX_ASPECTRATIO))
+        {
+            ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid aspect ratio in aux data %dx%d\n",
+                   __func__, aux_vui_ptr->aspectRatioWidth, aux_vui_ptr->aspectRatioHeight);
+        }
+        else
+        {
+            vui.colorDescPresent = aux_vui_ptr->colorDescPresent;
+            vui.colorPrimaries = aux_vui_ptr->colorPrimaries;
+            vui.colorTrc = aux_vui_ptr->colorTrc;
+            vui.colorSpace = aux_vui_ptr->colorSpace;
+            vui.aspectRatioWidth = aux_vui_ptr->aspectRatioWidth;
+            vui.aspectRatioHeight = aux_vui_ptr->aspectRatioHeight;
+        }
+
+        if (aux_vui_ptr->videoFullRange < 0 || aux_vui_ptr->videoFullRange > 1)
+        {
+            ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid videoFullRange in aux data %d\n",
+                   __func__, aux_vui_ptr->videoFullRange);
+        }
+        else
+        {
+            vui.videoFullRange = aux_vui_ptr->videoFullRange;
+        }
+    }
+
+    if (p_enc_ctx->vui.aspectRatioWidth > 0)
+    {
+        vui = p_enc_ctx->vui;
+        p_enc_ctx->vui.colorDescPresent =
+            p_enc_ctx->vui.colorPrimaries =
+            p_enc_ctx->vui.colorTrc =
+            p_enc_ctx->vui.colorSpace =
+            p_enc_ctx->vui.aspectRatioWidth =
+            p_enc_ctx->vui.aspectRatioHeight =
+            p_enc_ctx->vui.videoFullRange = 0;
+        ni_log(NI_LOG_DEBUG, "%s(): API set VUI "
+               "colorDescPresent %d colorPrimaries %d "
+               "colorTrc %d colorSpace %d aspectRatioWidth %d "
+               "aspectRatioHeight %d videoFullRange %d\n",
+               __func__, vui.colorDescPresent,
+               vui.colorPrimaries, vui.colorTrc,
+               vui.colorSpace, vui.aspectRatioWidth,
+               vui.aspectRatioHeight, vui.videoFullRange);
+    }
+
+    if (vui.aspectRatioWidth > 0)
+    {
+        p_enc_ctx->enc_change_params->enable_option |=
+            NI_SET_CHANGE_PARAM_VUI_HRD_PARAM;
+
+        p_enc_ctx->enc_change_params->colorDescPresent = vui.colorDescPresent;
+        p_enc_ctx->enc_change_params->colorPrimaries = vui.colorPrimaries;
+        p_enc_ctx->enc_change_params->colorTrc = vui.colorTrc;
+        p_enc_ctx->enc_change_params->colorSpace = vui.colorSpace;
+        p_enc_ctx->enc_change_params->aspectRatioWidth = vui.aspectRatioWidth;
+        p_enc_ctx->enc_change_params->aspectRatioHeight = vui.aspectRatioHeight;
+        p_enc_ctx->enc_change_params->videoFullRange = vui.videoFullRange;
+        p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
     }
 
     // prep for NetInt long term reference interval reconfiguration support:

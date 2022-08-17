@@ -1,9 +1,21 @@
 /*******************************************************************************
  *
- * Copyright (C) 2018 by NETINT Technologies
+ * Copyright (C) 2022 NETINT Technologies
  *
- * Permission to use, copy, modify, and/or distribute this software for any 
- * purpose with or without fee is hereby granted.
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
  *
  ******************************************************************************/
 
@@ -14,5 +26,5 @@
 *
 *******************************************************************************/
 
-#define NI_SW_RELEASE_TIME "2022-04-15_01:11:24_-0700"
-#define NI_SW_RELEASE_ID "Netint_Quadra_release_v3.0.0_RC2"
+#define NI_SW_RELEASE_TIME "2022-08-05_11:04:57_-0700"
+#define NI_SW_RELEASE_ID "Netint_Quadra_release_v4.0.0_RCB"

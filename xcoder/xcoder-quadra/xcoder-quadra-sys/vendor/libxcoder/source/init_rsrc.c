@@ -34,7 +34,7 @@
 #include <stdio.h>
 #include <fcntl.h> 
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #include <unistd.h>
 #include <sys/types.h>
 #elif _WIN32
@@ -59,7 +59,7 @@ int main(int argc, char *argv[])
     int should_match_rev = 1;
     int opt;
     int timeout_seconds = 0;
-    ni_log_level_t log_level;
+    ni_log_level_t log_level = NI_LOG_INFO;
 
     // arg handling
     while ((opt = getopt(argc, argv, "hrt:l:v")) != -1)
@@ -102,11 +102,12 @@ int main(int argc, char *argv[])
                 }
                 break;
             case 'v':
-                printf("Ver:  %s\n"
-                       "Date: %s\n"
-                       "ID:   %s\n",
-                       NI_XCODER_REVISION, NI_SW_RELEASE_TIME,
-                       NI_SW_RELEASE_ID);
+                printf("Release ver: %s\n"
+                       "API ver:     %s\n"
+                       "Date:        %s\n"
+                       "ID:          %s\n",
+                       NI_XCODER_REVISION, LIBXCODER_API_VERSION,
+                       NI_SW_RELEASE_TIME, NI_SW_RELEASE_ID);
                 return 0;
             default:
                 fprintf(stderr, "FATAL: invalid arg '%c'\n", opt);
@@ -114,7 +115,7 @@ int main(int argc, char *argv[])
         }
   }
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
   return ni_rsrc_init(should_match_rev, timeout_seconds);
 #elif _WIN32
   ni_retcode_t retval = ni_rsrc_init(should_match_rev, timeout_seconds);

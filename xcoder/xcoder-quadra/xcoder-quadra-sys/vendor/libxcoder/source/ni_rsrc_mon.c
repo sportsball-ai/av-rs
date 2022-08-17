@@ -31,7 +31,7 @@
  *
  ******************************************************************************/
 
-#ifdef __linux__
+#if __linux__ || __APPLE__
 #include <unistd.h>
 #include <signal.h>
 #endif
@@ -60,7 +60,7 @@
 
 static BOOL WINAPI console_ctrl_handler(DWORD ctrl_type)
 {
-  stop_process = 1;
+  g_xcoder_stop_process = 1;
   return TRUE;
 /*!
   switch (ctrl_type)
@@ -71,7 +71,7 @@ static BOOL WINAPI console_ctrl_handler(DWORD ctrl_type)
     case CTRL_LOGOFF_EVENT: // User logs off. Passed only to services!
     case CTRL_SHUTDOWN_EVENT: // System is shutting down. Passed only to services!
     {
-      stop_process = 1;
+      g_xcoder_stop_process = 1;
       break;
       return TRUE;
     }
@@ -96,7 +96,7 @@ void sig_handler(int sig)
 {
     if (sig == SIGTERM || sig == SIGINT || sig == SIGHUP)
     {
-        stop_process = 1;
+        g_xcoder_stop_process = 1;
     }
 }
 
@@ -308,7 +308,7 @@ int main(int argc, char *argv[])
     char buf[64] = {0};
     time_t hours, minutes, seconds;
     int opt;
-    ni_log_level_t log_level;
+    ni_log_level_t log_level = NI_LOG_INFO;
 
     checkInterval = 0;
 
@@ -388,10 +388,12 @@ int main(int argc, char *argv[])
              NI_XCODER_REVISION);
       return 0;
     case 'v':
-        printf("Ver:  %s\n"
-               "Date: %s\n"
-               "ID:   %s\n",
-               NI_XCODER_REVISION, NI_SW_RELEASE_TIME, NI_SW_RELEASE_ID);
+        printf("Release ver: %s\n"
+               "API ver:     %s\n"
+               "Date:        %s\n"
+               "ID:          %s\n",
+               NI_XCODER_REVISION, LIBXCODER_API_VERSION, NI_SW_RELEASE_TIME,
+               NI_SW_RELEASE_ID);
         return 0;
     case '?':
         if (isprint(opt))
@@ -437,7 +439,7 @@ int main(int argc, char *argv[])
 #ifdef _ANDROID
   system("chown mediacodec:mediacodec /dev/shm_netint/*");
 #endif
-  while (!stop_process)
+  while (!g_xcoder_stop_process)
   {
     now = time(NULL);
     ltime = localtime(&now);
