@@ -155,7 +155,7 @@ mod test {
                     )
                     .unwrap();
                 let frame = scaler.scale(&frame).unwrap();
-                if let Some(mut output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
+                if let Some(mut output) = encoder.encode_hardware_frame((), frame).unwrap() {
                     encoded.append(&mut output.encoded_frame.data);
                     encoded_frames += 1;
                 }
@@ -232,8 +232,7 @@ mod test {
         while !decoder.is_finished() {
             if let Some(frame) = decoder.try_read_decoded_frame().unwrap() {
                 let frame = frame.into();
-                for i in 0..OUTPUTS {
-                    let enc = &mut encodings[i];
+                for enc in encodings.iter_mut() {
                     let frame = enc
                         .cropper
                         .crop(
@@ -247,15 +246,14 @@ mod test {
                         )
                         .unwrap();
                     let frame = enc.scaler.scale(&frame).unwrap();
-                    if let Some(mut output) = enc.encoder.encode_hardware_frame((), frame.into()).unwrap() {
+                    if let Some(mut output) = enc.encoder.encode_hardware_frame((), frame).unwrap() {
                         enc.output.append(&mut output.encoded_frame.data);
                     }
                 }
                 frame_number += 1;
             }
         }
-        for i in 0..OUTPUTS {
-            let enc = &mut encodings[i];
+        for enc in encodings.iter_mut() {
             while let Some(mut output) = enc.encoder.flush().unwrap() {
                 enc.output.append(&mut output.encoded_frame.data);
             }
