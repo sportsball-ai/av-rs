@@ -11,15 +11,3 @@
 
 #[cfg(target_os = "linux")]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        unsafe {
-            ni_rsrc_print_all_devices_capability();
-        }
-    }
-}
