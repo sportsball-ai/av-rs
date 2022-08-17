@@ -286,7 +286,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     }
 
     /// Tries to read a decoded frame. If none is returned and `is_finished` returns false, the caller should try again later.
-    pub fn try_read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+    fn try_read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
         if self.is_finished() {
             return Ok(None);
         }
