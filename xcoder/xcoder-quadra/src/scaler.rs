@@ -38,14 +38,10 @@ impl XcoderScaler {
                 sys::ni_device_session_context_free(session);
             });
 
-            (**session).session_id = sys::NI_INVALID_SESSION_ID;
-            (**session).device_handle = sys::NI_INVALID_DEVICE_HANDLE;
-            (**session).blk_io_handle = sys::NI_INVALID_DEVICE_HANDLE;
             (**session).hw_id = config.hardware.id;
             (**session).sender_handle = config.hardware.device_handle;
             (**session).device_type = sys::ni_device_type_t_NI_DEVICE_TYPE_SCALER as _;
             (**session).scaler_operation = sys::_ni_scaler_opcode_NI_SCALER_OPCODE_SCALE;
-            (**session).keep_alive_timeout = sys::NI_DEFAULT_KEEP_ALIVE_TIMEOUT;
 
             let code = sys::ni_device_session_open(*session, sys::ni_device_type_t_NI_DEVICE_TYPE_SCALER);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
