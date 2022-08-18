@@ -9,6 +9,7 @@ pub struct XcoderScalerConfig {
     pub hardware: XcoderHardware,
     pub width: i32,
     pub height: i32,
+    pub bit_depth: u8,
 }
 
 #[derive(Debug, Snafu)]
@@ -26,6 +27,8 @@ pub struct XcoderScaler {
     did_initialize: bool,
     config: XcoderScalerConfig,
 }
+
+unsafe impl Send for XcoderScaler {}
 
 impl XcoderScaler {
     pub fn new(config: XcoderScalerConfig) -> Result<Self> {
@@ -60,7 +63,8 @@ impl XcoderScaler {
     }
 
     pub fn scale(&mut self, f: &XcoderHardwareFrame) -> Result<XcoderHardwareFrame> {
-        const PIXEL_FORMAT: i32 = sys::GC620_I420_;
+        let pixel_format_in = if f.surface().bit_depth == 2 { sys::GC620_I010_ } else { sys::GC620_I420_ };
+        let pixel_format_out = if self.config.bit_depth == 10 { sys::GC620_I010_ } else { sys::GC620_I420_ };
         unsafe {
             let frame_in = **f;
             let mut frame_out: sys::ni_frame_t = mem::zeroed();
@@ -86,13 +90,13 @@ impl XcoderScaler {
                     self.session,
                     self.config.width as _,
                     self.config.height as _,
-                    PIXEL_FORMAT,
+                    pixel_format_out,
                     (sys::NI_SCALER_FLAG_IO | sys::NI_SCALER_FLAG_PC) as _,
                     0,
                     0,
                     0,
                     0,
-                    1, // pool size
+                    4, // pool size
                     0,
                     sys::ni_device_type_t_NI_DEVICE_TYPE_SCALER,
                 );
@@ -111,7 +115,7 @@ impl XcoderScaler {
                 self.session,
                 frame_in.video_width as _,
                 frame_in.video_height as _,
-                PIXEL_FORMAT,
+                pixel_format_in,
                 0,
                 0,
                 0,
@@ -133,7 +137,7 @@ impl XcoderScaler {
                 self.session,
                 self.config.width as _,
                 self.config.height as _,
-                PIXEL_FORMAT,
+                pixel_format_out,
                 sys::NI_SCALER_FLAG_IO as _,
                 0,
                 0,
@@ -158,7 +162,11 @@ impl XcoderScaler {
                 });
             }
 
-            Ok(XcoderHardwareFrame::new(ScopeGuard::into_inner(data_io_out)))
+            let mut ret = XcoderHardwareFrame::new(ScopeGuard::into_inner(data_io_out));
+            ret.surface_mut().ui16width = self.config.width as _;
+            ret.surface_mut().ui16height = self.config.height as _;
+            ret.surface_mut().bit_depth = if self.config.bit_depth == 10 { 2 } else { 1 };
+            Ok(ret)
         }
     }
 }
@@ -201,6 +209,7 @@ mod test {
             hardware: decoder.hardware(),
             width: 640,
             height: 360,
+            bit_depth: 8,
         })
         .unwrap();
 

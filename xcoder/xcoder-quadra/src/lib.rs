@@ -43,6 +43,10 @@ mod linux_impl {
         pub fn surface(&self) -> &sys::niFrameSurface1_t {
             unsafe { &*((*self).p_data[3] as *const sys::niFrameSurface1_t) }
         }
+
+        unsafe fn surface_mut(&mut self) -> &mut sys::niFrameSurface1_t {
+            &mut *((*self).p_data[3] as *mut sys::niFrameSurface1_t)
+        }
     }
 
     unsafe impl Send for XcoderHardwareFrame {}
@@ -125,6 +129,7 @@ mod test {
             hardware: decoder.hardware(),
             width: 640,
             height: 360,
+            bit_depth: 8,
         })
         .unwrap();
 
@@ -133,7 +138,11 @@ mod test {
             height: 360,
             fps: 29.97,
             bitrate: None,
-            codec: XcoderEncoderCodec::H264,
+            codec: XcoderEncoderCodec::H264 {
+                profile: None,
+                level_idc: None,
+            },
+            bit_depth: 8,
             hardware: Some(decoder.hardware()),
         })
         .unwrap();
@@ -205,6 +214,7 @@ mod test {
                 hardware: decoder.hardware(),
                 width: 640,
                 height: 360,
+                bit_depth: 8,
             })
             .unwrap();
 
@@ -213,7 +223,11 @@ mod test {
                 height: 360,
                 fps: 24.0,
                 bitrate: None,
-                codec: XcoderEncoderCodec::H264,
+                codec: XcoderEncoderCodec::H264 {
+                    profile: None,
+                    level_idc: None,
+                },
+                bit_depth: 8,
                 hardware: Some(decoder.hardware()),
             })
             .unwrap();

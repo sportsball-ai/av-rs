@@ -24,6 +24,8 @@ pub struct XcoderCropper {
     did_initialize: bool,
 }
 
+unsafe impl Send for XcoderCropper {}
+
 #[derive(Clone, Debug)]
 pub struct XcoderCrop {
     pub x: i32,
@@ -64,7 +66,7 @@ impl XcoderCropper {
     }
 
     pub fn crop(&mut self, f: &XcoderHardwareFrame, crop: XcoderCrop) -> Result<XcoderHardwareFrame> {
-        const PIXEL_FORMAT: i32 = sys::GC620_I420_;
+        let pixel_format = if f.surface().bit_depth == 2 { sys::GC620_I010_ } else { sys::GC620_I420_ };
         unsafe {
             let frame_in = **f;
             let mut frame_out: sys::ni_frame_t = mem::zeroed();
@@ -88,13 +90,13 @@ impl XcoderCropper {
                     self.session,
                     frame_in.video_width as _,
                     frame_in.video_height as _,
-                    PIXEL_FORMAT,
+                    pixel_format,
                     (sys::NI_SCALER_FLAG_IO | sys::NI_SCALER_FLAG_PC) as _,
                     0,
                     0,
                     0,
                     0,
-                    1, // pool size
+                    4, // pool size
                     0,
                     sys::ni_device_type_t_NI_DEVICE_TYPE_SCALER,
                 );
@@ -113,7 +115,7 @@ impl XcoderCropper {
                 self.session,
                 frame_in.video_width as _,
                 frame_in.video_height as _,
-                PIXEL_FORMAT,
+                pixel_format,
                 0,
                 crop.width,
                 crop.height,
@@ -135,7 +137,7 @@ impl XcoderCropper {
                 self.session,
                 crop.width as _,
                 crop.height as _,
-                PIXEL_FORMAT,
+                pixel_format,
                 sys::NI_SCALER_FLAG_IO as _,
                 0,
                 0,
@@ -160,7 +162,11 @@ impl XcoderCropper {
                 });
             }
 
-            Ok(XcoderHardwareFrame::new(ScopeGuard::into_inner(data_io_out)))
+            let mut ret = XcoderHardwareFrame::new(ScopeGuard::into_inner(data_io_out));
+            ret.surface_mut().ui16width = crop.width as _;
+            ret.surface_mut().ui16height = crop.height as _;
+            ret.surface_mut().bit_depth = f.surface().bit_depth;
+            Ok(ret)
         }
     }
 }

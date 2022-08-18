@@ -462,7 +462,11 @@ pub mod test {
             height: 720,
             fps: 29.97,
             bitrate: None,
-            codec: XcoderEncoderCodec::H264,
+            codec: XcoderEncoderCodec::H264 {
+                profile: None,
+                level_idc: None,
+            },
+            bit_depth: 8,
             hardware: Some(decoder.hardware()),
         })
         .unwrap();

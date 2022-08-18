@@ -93,10 +93,24 @@ pub struct XcoderEncoder<F> {
     hardware_frames: Vec<Option<XcoderHardwareFrame>>,
 }
 
+unsafe impl<F: Send> Send for XcoderEncoder<F> {}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XcoderH264Profile {
+    High,
+    Main,
+    Baseline,
+}
+
 #[derive(Clone, Debug)]
 pub enum XcoderEncoderCodec {
-    H264,
-    H265,
+    H264 {
+        level_idc: Option<i32>,
+        profile: Option<XcoderH264Profile>,
+    },
+    H265 {
+        level_idc: Option<i32>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -106,6 +120,7 @@ pub struct XcoderEncoderConfig {
     pub fps: f64,
     pub bitrate: Option<u32>,
     pub codec: XcoderEncoderCodec,
+    pub bit_depth: u8,
 
     /// To use the encoder with hardware frames, provide this (e.g. from `XcoderDecoder::hardware`).
     pub hardware: Option<XcoderHardware>,
@@ -127,8 +142,8 @@ impl<F> XcoderEncoder<F> {
                 config.width as _,
                 config.height as _,
                 match config.codec {
-                    XcoderEncoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
-                    XcoderEncoderCodec::H265 => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
+                    XcoderEncoderCodec::H264 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
+                    XcoderEncoderCodec::H265 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
                 },
             );
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
@@ -148,13 +163,40 @@ impl<F> XcoderEncoder<F> {
             // some formats like mpeg-ts require access unit delimiters
             cfg_enc_params.EnableAUD = 1;
 
+            match config.codec {
+                XcoderEncoderCodec::H264 { level_idc, profile } => {
+                    if let Some(level_idc) = level_idc {
+                        cfg_enc_params.level_idc = level_idc;
+                    }
+
+                    if let Some(profile) = profile {
+                        cfg_enc_params.profile = match profile {
+                            XcoderH264Profile::Main => 2,
+                            XcoderH264Profile::High => {
+                                if config.bit_depth > 8 {
+                                    5
+                                } else {
+                                    4
+                                }
+                            }
+                            XcoderH264Profile::Baseline => 1,
+                        };
+                    }
+                }
+                XcoderEncoderCodec::H265 { level_idc } => {
+                    if let Some(level_idc) = level_idc {
+                        cfg_enc_params.level_idc = level_idc;
+                    }
+                }
+            }
+
             let mut frame_data_strides = [0; sys::NI_MAX_NUM_DATA_POINTERS as usize];
             let mut frame_data_heights = [0; sys::NI_MAX_NUM_DATA_POINTERS as usize];
             sys::ni_get_hw_yuv420p_dim(
                 config.width as _,
                 config.height as _,
-                1, // bit depth factor
-                0, // is nv12
+                if config.bit_depth > 8 { 2 } else { 1 }, // bit depth factor
+                0,                                        // is nv12
                 frame_data_strides.as_mut_ptr(),
                 frame_data_heights.as_mut_ptr(),
             );
@@ -180,12 +222,12 @@ impl<F> XcoderEncoder<F> {
             }
             (**session).p_session_config = &*params as *const sys::ni_xcoder_params_t as _;
             (**session).codec_format = match config.codec {
-                XcoderEncoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
-                XcoderEncoderCodec::H265 => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
+                XcoderEncoderCodec::H264 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
+                XcoderEncoderCodec::H265 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
             };
-            (**session).src_bit_depth = 8;
+            (**session).src_bit_depth = config.bit_depth as _;
             (**session).src_endian = sys::NI_FRAME_LITTLE_ENDIAN as _;
-            (**session).bit_depth_factor = 1;
+            (**session).bit_depth_factor = if config.bit_depth > 8 { 2 } else { 1 };
 
             let code = sys::ni_device_session_open(*session, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
@@ -207,7 +249,7 @@ impl<F> XcoderEncoder<F> {
                     config.width as _,
                     frame_data_heights[0],
                     frame_data_strides.as_mut_ptr(),
-                    if matches!(config.codec, XcoderEncoderCodec::H264) { 1 } else { 0 },
+                    if matches!(config.codec, XcoderEncoderCodec::H264 { .. }) { 1 } else { 0 },
                     sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _,
                     false,
                 );
@@ -265,6 +307,12 @@ impl<F> XcoderEncoder<F> {
                 let packet = self.encoded_frame.packet();
                 self.did_finish = packet.end_of_stream != 0;
                 if code > 0 {
+                    if (*self.session).pkt_num == 0 {
+                        // If we don't set pkt_num, libxcoder doesn't free up packet buffer
+                        // resources and will assert after 6000 frames. This mimics the FFmpeg
+                        // patch by setting it to 1 after the first successful read.
+                        (*self.session).pkt_num = 1;
+                    }
                     if packet.recycle_index > 0 && (packet.recycle_index as usize) < self.hardware_frames.len() {
                         self.hardware_frames[packet.recycle_index as usize] = None;
                     }
@@ -467,7 +515,11 @@ mod test {
             height: 1080,
             fps: 29.97,
             bitrate: None,
-            codec: XcoderEncoderCodec::H264,
+            codec: XcoderEncoderCodec::H264 {
+                profile: Some(XcoderH264Profile::Main),
+                level_idc: Some(41),
+            },
+            bit_depth: 8,
             hardware: None,
         })
         .unwrap();
