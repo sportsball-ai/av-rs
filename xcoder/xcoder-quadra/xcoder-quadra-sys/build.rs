@@ -55,6 +55,7 @@ fn main() {
             .flag("-fPIC")
             .flag("-Werror")
             .flag("-Wno-unused-command-line-argument")
+            .flag("-DLIBXCODER_OBJS_BUILD")
             .compile("xcoder-cpp-sys");
 
         let bindings = bindgen::Builder::default();
