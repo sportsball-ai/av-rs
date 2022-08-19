@@ -59,6 +59,8 @@ fn main() {
             .flag("-fPIC")
             .flag("-Werror")
             .flag("-Wno-unused-command-line-argument")
+            .flag("-Wno-format-overflow")
+            .flag("-Wno-stringop-overflow")
             .compile("xcoder-cpp-sys");
 
         let bindings = bindgen::Builder::default();
