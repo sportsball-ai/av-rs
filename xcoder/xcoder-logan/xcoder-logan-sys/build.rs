@@ -61,6 +61,7 @@ fn main() {
             .flag("-Wno-unused-command-line-argument")
             .flag("-Wno-format-overflow")
             .flag("-Wno-stringop-overflow")
+            .flag("-DLIBXCODER_OBJS_BUILD")
             .compile("xcoder-cpp-sys");
 
         let bindings = bindgen::Builder::default();
