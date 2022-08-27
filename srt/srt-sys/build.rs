@@ -43,4 +43,17 @@ fn main() {
         }
         _ => {}
     }
+
+    // the "whilelist_" functions have been renamed in newer bindgen versions, but we use the
+    // old names for wider compatibility
+    #[allow(deprecated)]
+    let bindings = bindgen::Builder::default()
+        .header(format!("{}/include/srt/srt.h", build.display()))
+        .whitelist_function("srt_.+")
+        .whitelist_type("SRT_.+")
+        .generate()
+        .expect("unable to generate bindings");
+
+    let out_path = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    bindings.write_to_file(out_path.join("bindings.rs")).expect("unable to write bindings");
 }

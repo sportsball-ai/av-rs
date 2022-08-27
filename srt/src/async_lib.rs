@@ -56,7 +56,7 @@ impl<'c> AsyncListener<'c> {
         let ptr = &mut *cb as *mut Box<dyn ListenerCallback>;
         let pb = unsafe { Pin::new_unchecked(cb) };
         check_code("srt_listen_callback", unsafe {
-            sys::srt_listen_callback(self.socket.raw(), listener_callback, ptr as *mut _)
+            sys::srt_listen_callback(self.socket.raw(), Some(listener_callback), ptr as *mut _)
         })?;
         Ok(AsyncListener {
             _callback: Some(pb),
@@ -98,7 +98,7 @@ impl<'a, 'c> Future for Accept<'a, 'c> {
                     let sock = unsafe { sys::srt_accept(sock, &mut storage as *mut _ as *mut _, &mut len as *mut _ as *mut _) };
                     let socket = Socket { api, sock };
                     let addr = sockaddr_from_storage(&storage, len)?;
-                    Ok((AsyncStream::new(socket.get(sys::SRT_SOCKOPT::STREAMID)?, socket)?, addr))
+                    Ok((AsyncStream::new(socket.get(sys::SRT_SOCKOPT_SRTO_STREAMID)?, socket)?, addr))
                 });
                 let ret = Pin::new(&mut handle).poll(cx);
                 self.state = State::Busy(handle);
@@ -121,8 +121,8 @@ pub struct AsyncStream {
 
 impl AsyncStream {
     fn new(id: Option<String>, socket: Socket) -> Result<Self> {
-        socket.set(sys::SRT_SOCKOPT::SNDSYN, false)?;
-        socket.set(sys::SRT_SOCKOPT::RCVSYN, false)?;
+        socket.set(sys::SRT_SOCKOPT_SRTO_SNDSYN, false)?;
+        socket.set(sys::SRT_SOCKOPT_SRTO_RCVSYN, false)?;
         Ok(Self {
             epoll_reactor: socket.api.get_epoll_reactor()?,
             socket,
@@ -148,6 +148,13 @@ impl AsyncStream {
 
     pub fn id(&self) -> Option<&String> {
         self.id.as_ref()
+    }
+
+    /// Returns the underlying stats for the socket.
+    ///
+    /// Refer to https://github.com/Haivision/srt/blob/v1.4.4/docs/API/statistics.md to learn more about them.
+    pub fn raw_stats(&mut self, clear: bool, instantaneous: bool) -> Result<sys::SRT_TRACEBSTATS> {
+        self.socket.raw_stats(clear, instantaneous)
     }
 }
 
@@ -190,7 +197,7 @@ impl<'a> Future for Connect {
 
 impl AsyncRead for AsyncStream {
     fn poll_read(self: Pin<&mut Self>, cx: &mut Context, buf: &mut ReadBuf) -> Poll<io::Result<()>> {
-        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT::EVENT) {
+        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_EVENT) {
             if events & READ_EVENTS == 0 {
                 self.epoll_reactor.wake_when_read_ready(&self.socket, cx.waker().clone());
                 return Poll::Pending;
@@ -210,7 +217,7 @@ impl AsyncRead for AsyncStream {
 
 impl AsyncWrite for AsyncStream {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, src: &[u8]) -> Poll<io::Result<usize>> {
-        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT::EVENT) {
+        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_EVENT) {
             if events & WRITE_EVENTS == 0 {
                 self.epoll_reactor.wake_when_write_ready(&self.socket, cx.waker().clone());
                 return Poll::Pending;
@@ -286,6 +293,26 @@ mod test {
                 assert_eq!(&buf, &payload);
             }
         }
+
+        assert!(server_conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
+    }
+
+    #[tokio::test]
+    async fn test_async_client_server_disconnect() {
+        let listener = AsyncListener::bind("127.0.0.1:1238").unwrap();
+
+        let options = Default::default();
+        let (accept_result, connect_result) = join!(listener.accept(), AsyncStream::connect("127.0.0.1:1238", &options));
+        let mut server_conn = accept_result.unwrap().0;
+        let client_conn = connect_result.unwrap();
+        assert_eq!(client_conn.id(), None);
+
+        // Drop the client.
+        mem::drop(client_conn);
+
+        // This read should return an error immediately.
+        let mut buf = [0; 1316];
+        assert!(server_conn.read(&mut buf).await.is_err());
     }
 
     #[tokio::test]

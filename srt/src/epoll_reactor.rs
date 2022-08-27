@@ -1,7 +1,7 @@
 use super::{new_srt_error, sys, Result, Socket};
 use libc::c_int as int;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::Write,
     net,
     os::unix::{io::IntoRawFd, net::UnixStream},
@@ -23,8 +23,8 @@ pub(crate) struct EpollReactor {
     wakers: Arc<Mutex<HashMap<sys::SRTSOCKET, Wakers>>>,
 }
 
-pub const READ_EVENTS: int = sys::SRT_EPOLL_OPT::SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT::SRT_EPOLL_IN as int;
-pub const WRITE_EVENTS: int = sys::SRT_EPOLL_OPT::SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT::SRT_EPOLL_OUT as int;
+pub const READ_EVENTS: int = sys::SRT_EPOLL_OPT_SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT_SRT_EPOLL_IN as int;
+pub const WRITE_EVENTS: int = sys::SRT_EPOLL_OPT_SRT_EPOLL_ERR as int | sys::SRT_EPOLL_OPT_SRT_EPOLL_OUT as int;
 pub const READ_WRITE_EVENTS: int = READ_EVENTS | WRITE_EVENTS;
 
 impl EpollReactor {
@@ -106,6 +106,8 @@ impl EpollReactor {
         let mut writefds = [0; 200];
         let mut sys_readfds = [0; 1];
         let mut sys_writefds = [0; 1];
+        let mut removed = HashSet::new();
+
         loop {
             let mut rnum = readfds.len() as int;
             let mut wnum = writefds.len() as int;
@@ -131,7 +133,9 @@ impl EpollReactor {
             }
 
             if rnum > 0 || wnum > 0 {
+                removed.clear();
                 let mut wakers = wakers.lock().expect("the lock should not be poisoned");
+
                 for &fd in &readfds[..readfds.len().min(rnum as _)] {
                     match wakers.get_mut(&fd) {
                         Some(fd_wakers) => {
@@ -143,13 +147,16 @@ impl EpollReactor {
                             } else {
                                 wakers.remove(&fd);
                                 unsafe { sys::srt_epoll_remove_usock(eid, fd) };
+                                removed.insert(fd);
                             }
                         }
                         None => unsafe {
                             sys::srt_epoll_remove_usock(eid, fd);
+                            removed.insert(fd);
                         },
                     }
                 }
+
                 for &fd in &writefds[..writefds.len().min(wnum as _)] {
                     match wakers.get_mut(&fd) {
                         Some(fd_wakers) => {
@@ -163,9 +170,14 @@ impl EpollReactor {
                                 unsafe { sys::srt_epoll_remove_usock(eid, fd) };
                             }
                         }
-                        None => unsafe {
-                            sys::srt_epoll_remove_usock(eid, fd);
-                        },
+                        None => {
+                            // In the case of a socket error, fd will be in both readfds and
+                            // writefds, which means it may have already been removed if there was
+                            // no write waker waiting on it.
+                            if !removed.contains(&fd) {
+                                unsafe { sys::srt_epoll_remove_usock(eid, fd) };
+                            }
+                        }
                     }
                 }
             }
