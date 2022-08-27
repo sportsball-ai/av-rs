@@ -214,21 +214,32 @@ impl Socket {
         self.sock
     }
 
+    fn raw_stats(&mut self, clear: bool, instantaneous: bool) -> Result<sys::SRT_TRACEBSTATS> {
+        unsafe {
+            let mut perf: sys::SRT_TRACEBSTATS = mem::zeroed();
+            check_code(
+                "srt_bistats",
+                sys::srt_bistats(self.raw(), &mut perf, if clear { 1 } else { 0 }, if instantaneous { 1 } else { 0 }),
+            )?;
+            Ok(perf)
+        }
+    }
+
     fn set_connect_options(&self, options: &ConnectOptions) -> Result<()> {
         if let Some(v) = &options.passphrase {
-            self.set(sys::SRT_SOCKOPT::PASSPHRASE, v)?;
+            self.set(sys::SRT_SOCKOPT_SRTO_PASSPHRASE, v)?;
         }
         if let Some(v) = &options.stream_id {
-            self.set(sys::SRT_SOCKOPT::STREAMID, v)?;
+            self.set(sys::SRT_SOCKOPT_SRTO_STREAMID, v)?;
         }
         if let Some(v) = &options.too_late_packet_drop {
-            self.set(sys::SRT_SOCKOPT::TLPKTDROP, *v)?;
+            self.set(sys::SRT_SOCKOPT_SRTO_TLPKTDROP, *v)?;
         }
         if let Some(v) = &options.timestamp_based_packet_delivery_mode {
-            self.set(sys::SRT_SOCKOPT::TSBPDMODE, *v)?;
+            self.set(sys::SRT_SOCKOPT_SRTO_TSBPDMODE, *v)?;
         }
         if let Some(v) = &options.receive_buffer_size {
-            self.set(sys::SRT_SOCKOPT::RCVBUF, *v)?;
+            self.set(sys::SRT_SOCKOPT_SRTO_RCVBUF, *v)?;
         }
         Ok(())
     }
@@ -319,7 +330,7 @@ extern "C" fn listener_callback(
             ListenerCallbackAction::Deny => -1,
             ListenerCallbackAction::Allow { passphrase } => {
                 if let Some(v) = &passphrase {
-                    if v.set(ns, sys::SRT_SOCKOPT::PASSPHRASE).is_err() {
+                    if v.set(ns, sys::SRT_SOCKOPT_SRTO_PASSPHRASE).is_err() {
                         return -1;
                     }
                 }
@@ -339,9 +350,9 @@ pub enum ListenerOption {
 impl ListenerOption {
     pub(crate) fn set(&self, sock: &Socket) -> Result<()> {
         match self {
-            ListenerOption::TimestampBasedPacketDeliveryMode(v) => sock.set(sys::SRT_SOCKOPT::TSBPDMODE, *v),
-            ListenerOption::TooLatePacketDrop(v) => sock.set(sys::SRT_SOCKOPT::TLPKTDROP, *v),
-            ListenerOption::ReceiveBufferSize(v) => sock.set(sys::SRT_SOCKOPT::RCVBUF, *v),
+            ListenerOption::TimestampBasedPacketDeliveryMode(v) => sock.set(sys::SRT_SOCKOPT_SRTO_TSBPDMODE, *v),
+            ListenerOption::TooLatePacketDrop(v) => sock.set(sys::SRT_SOCKOPT_SRTO_TLPKTDROP, *v),
+            ListenerOption::ReceiveBufferSize(v) => sock.set(sys::SRT_SOCKOPT_SRTO_RCVBUF, *v),
         }
     }
 }
@@ -375,7 +386,7 @@ impl<'c> Listener<'c> {
         let ptr = &mut *cb as *mut Box<dyn ListenerCallback>;
         let pb = unsafe { Pin::new_unchecked(cb) };
         check_code("srt_listen_callback", unsafe {
-            sys::srt_listen_callback(self.socket.raw(), listener_callback, ptr as *mut _)
+            sys::srt_listen_callback(self.socket.raw(), Some(listener_callback), ptr as *mut _)
         })?;
         Ok(Listener {
             _callback: Some(pb),
@@ -394,7 +405,7 @@ impl<'c> Listener<'c> {
         let addr = sockaddr_from_storage(&storage, len)?;
         Ok((
             Stream {
-                id: socket.get(sys::SRT_SOCKOPT::STREAMID)?,
+                id: socket.get(sys::SRT_SOCKOPT_SRTO_STREAMID)?,
                 socket,
             },
             addr,
@@ -441,6 +452,13 @@ impl Stream {
     pub fn id(&self) -> Option<&String> {
         self.id.as_ref()
     }
+
+    /// Returns the underlying stats for the socket.
+    ///
+    /// Refer to https://github.com/Haivision/srt/blob/v1.4.4/docs/API/statistics.md to learn more about them.
+    pub fn raw_stats(&mut self, clear: bool, instantaneous: bool) -> Result<sys::SRT_TRACEBSTATS> {
+        self.socket.raw_stats(clear, instantaneous)
+    }
 }
 
 impl Read for Stream {
@@ -478,6 +496,8 @@ mod test {
             let mut buf = [0; 1316];
             assert_eq!(conn.read(&mut buf).unwrap(), 3);
             assert_eq!(&buf[0..3], b"foo");
+
+            assert!(conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
         });
 
         let mut conn = Stream::connect("127.0.0.1:1234", &ConnectOptions::default()).unwrap();

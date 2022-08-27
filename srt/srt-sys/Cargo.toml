@@ -13,3 +13,5 @@ libc = "0.2.71"
 
 [build-dependencies]
 cmake = "0.1"
+# We're very permissive here with bindgen due to https://github.com/rust-lang/cargo/issues/5237
+bindgen = "0.*"
