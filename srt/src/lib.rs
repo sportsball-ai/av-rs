@@ -241,6 +241,9 @@ impl Socket {
         if let Some(v) = &options.receive_buffer_size {
             self.set(sys::SRT_SOCKOPT_SRTO_RCVBUF, *v)?;
         }
+        if let Some(v) = &options.send_buffer_size {
+            self.set(sys::SRT_SOCKOPT_SRTO_SNDBUF, *v)?;
+        }
         Ok(())
     }
 
@@ -345,6 +348,7 @@ pub enum ListenerOption {
     TimestampBasedPacketDeliveryMode(bool),
     TooLatePacketDrop(bool),
     ReceiveBufferSize(i32),
+    SendBufferSize(i32),
 }
 
 impl ListenerOption {
@@ -353,6 +357,7 @@ impl ListenerOption {
             ListenerOption::TimestampBasedPacketDeliveryMode(v) => sock.set(sys::SRT_SOCKOPT_SRTO_TSBPDMODE, *v),
             ListenerOption::TooLatePacketDrop(v) => sock.set(sys::SRT_SOCKOPT_SRTO_TLPKTDROP, *v),
             ListenerOption::ReceiveBufferSize(v) => sock.set(sys::SRT_SOCKOPT_SRTO_RCVBUF, *v),
+            ListenerOption::SendBufferSize(v) => sock.set(sys::SRT_SOCKOPT_SRTO_SNDBUF, *v),
         }
     }
 }
@@ -425,6 +430,7 @@ pub struct ConnectOptions {
     pub timestamp_based_packet_delivery_mode: Option<bool>,
     pub too_late_packet_drop: Option<bool>,
     pub receive_buffer_size: Option<i32>,
+    pub send_buffer_size: Option<i32>,
 }
 
 impl Stream {
