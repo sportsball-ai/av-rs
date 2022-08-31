@@ -158,6 +158,15 @@ impl<T: io::Write> BitstreamWriter<T> {
         Ok(())
     }
 
+    // Writes the given bytes to the bitstream. The bitstream must be byte aligned.
+    pub fn write_bytes(&mut self, data: &[u8]) -> io::Result<()> {
+        if !self.byte_aligned() {
+            return Err(io::Error::new(io::ErrorKind::Other, "bitstream is not byte aligned"));
+        }
+        self.inner.write_all(data)?;
+        Ok(())
+    }
+
     // Writes the remaining bits to the underlying writer if there are any, and flushes it. If the
     // bitstream is not byte-aligned, zero-bits will be appended until it is.
     pub fn flush(&mut self) -> io::Result<()> {
@@ -167,6 +176,10 @@ impl<T: io::Write> BitstreamWriter<T> {
             self.next_bits_length = 0;
         }
         self.inner.flush()
+    }
+
+    pub fn unwritten_bits(&self) -> usize {
+        self.next_bits_length
     }
 
     pub fn inner(&self) -> &T {

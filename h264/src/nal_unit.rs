@@ -1,4 +1,4 @@
-use super::{decode, syntax_elements::*, Bitstream};
+use super::{decode, encode, syntax_elements::*, Bitstream, BitstreamWriter};
 
 use std::io;
 
@@ -30,14 +30,14 @@ impl<T: Clone> Clone for NALUnit<T> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct RBSP<T> {
     inner: T,
-    zeros: usize,
 }
 
 impl<T> RBSP<T> {
     pub fn new(inner: T) -> Self {
-        Self { inner, zeros: 0 }
+        Self { inner }
     }
 
     pub fn into_inner(self) -> T {
@@ -45,16 +45,36 @@ impl<T> RBSP<T> {
     }
 }
 
-impl<T: Clone> Clone for RBSP<T> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-            zeros: self.zeros,
+pub struct RBSPIter<T> {
+    inner: T,
+    zeros: usize,
+}
+
+impl<T: IntoIterator<Item = u8>> IntoIterator for RBSP<T> {
+    type Item = u8;
+    type IntoIter = RBSPIter<T::IntoIter>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RBSPIter {
+            inner: self.inner.into_iter(),
+            zeros: 0,
         }
     }
 }
 
-impl<T: Iterator<Item = u8>> Iterator for &mut RBSP<T> {
+impl<'a, T: Iterator<Item = u8>> IntoIterator for &'a mut RBSP<T> {
+    type Item = u8;
+    type IntoIter = RBSPIter<&'a mut T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RBSPIter {
+            inner: &mut self.inner,
+            zeros: 0,
+        }
+    }
+}
+
+impl<T: Iterator<Item = u8>> Iterator for RBSPIter<T> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -161,6 +181,14 @@ impl<T: Iterator<Item = u8>> NALUnit<T> {
             nal_unit_type,
             rbsp_byte: RBSP::new(bs.into_inner()),
         })
+    }
+}
+
+impl<T: IntoIterator<Item = u8>> NALUnit<T> {
+    pub fn encode<W: io::Write>(self, bs: &mut BitstreamWriter<W>) -> io::Result<()> {
+        encode!(bs, &self.forbidden_zero_bit, &self.nal_ref_idc, &self.nal_unit_type)?;
+        bs.flush()?;
+        bs.inner_mut().write_all(&EmulationPrevention::new(self.rbsp_byte).collect::<Vec<u8>>())
     }
 }
 

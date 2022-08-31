@@ -1,4 +1,4 @@
-use super::{decode, syntax_elements::*, Bitstream, Decode};
+use super::{decode, encode, syntax_elements::*, Bitstream, BitstreamWriter, Decode, Encode};
 
 use std::io;
 
@@ -269,7 +269,7 @@ impl Decode for SequenceParameterSet {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct VUIParameters {
     pub aspect_ratio_info_present_flag: U1,
 
@@ -324,6 +324,17 @@ pub struct VUIParameters {
     pub low_delay_hrd_flag: U1,
     // }
     pub pic_struct_present_flag: U1,
+
+    pub bitstream_restriction_flag: U1,
+    // if (bitstream_restriction_flag)
+    pub motion_vectors_over_pic_boundaries_flag: U1,
+    pub max_bytes_per_pic_denom: UE,
+    pub max_bits_per_mb_denom: UE,
+    pub log2_max_mv_length_horizontal: UE,
+    pub log2_max_mv_length_vertical: UE,
+    pub max_num_reorder_frames: UE,
+    pub max_dec_frame_buffering: UE,
+    // }
 }
 
 pub const ASPECT_RATIO_IDC_EXTENDED_SAR: u8 = 255;
@@ -397,11 +408,103 @@ impl Decode for VUIParameters {
 
         decode!(bs, &mut ret.pic_struct_present_flag)?;
 
+        decode!(bs, &mut ret.bitstream_restriction_flag)?;
+        if ret.bitstream_restriction_flag.0 != 0 {
+            decode!(
+                bs,
+                &mut ret.motion_vectors_over_pic_boundaries_flag,
+                &mut ret.max_bytes_per_pic_denom,
+                &mut ret.max_bits_per_mb_denom,
+                &mut ret.log2_max_mv_length_horizontal,
+                &mut ret.log2_max_mv_length_vertical,
+                &mut ret.max_num_reorder_frames,
+                &mut ret.max_dec_frame_buffering
+            )?;
+        }
+
         Ok(ret)
     }
 }
 
-#[derive(Clone, Debug, Default)]
+impl Encode for VUIParameters {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        encode!(bs, &self.aspect_ratio_info_present_flag)?;
+
+        if self.aspect_ratio_info_present_flag.0 != 0 {
+            encode!(bs, &self.aspect_ratio_idc)?;
+
+            if self.aspect_ratio_idc.0 == ASPECT_RATIO_IDC_EXTENDED_SAR {
+                encode!(bs, &self.sar_width, &self.sar_height)?;
+            }
+        }
+
+        encode!(bs, &self.overscan_info_present_flag)?;
+
+        if self.overscan_info_present_flag.0 != 0 {
+            encode!(bs, &self.overscan_appropriate_flag)?;
+        }
+
+        encode!(bs, &self.video_signal_type_present_flag)?;
+
+        if self.video_signal_type_present_flag.0 != 0 {
+            encode!(bs, &self.video_format, &self.video_full_range_flag, &self.colour_description_present_flag)?;
+
+            if self.colour_description_present_flag.0 != 0 {
+                encode!(bs, &self.colour_primaries, &self.transfer_characteristics, &self.matrix_coefficients)?;
+            }
+        }
+
+        encode!(bs, &self.chroma_loc_info_present_flag)?;
+
+        if self.chroma_loc_info_present_flag.0 != 0 {
+            encode!(bs, &self.chroma_sample_loc_type_top_field, &self.chroma_sample_loc_type_bottom_field)?;
+        }
+
+        encode!(bs, &self.timing_info_present_flag)?;
+
+        if self.timing_info_present_flag.0 != 0 {
+            encode!(bs, &self.num_units_in_tick, &self.time_scale, &self.fixed_frame_rate_flag)?;
+        }
+
+        encode!(bs, &self.nal_hrd_parameters_present_flag)?;
+        if self.nal_hrd_parameters_present_flag.0 != 0 {
+            if let Some(params) = &self.nal_hrd_parameters {
+                params.encode(bs)?;
+            }
+        }
+
+        encode!(bs, &self.vcl_hrd_parameters_present_flag)?;
+        if self.vcl_hrd_parameters_present_flag.0 != 0 {
+            if let Some(params) = &self.vcl_hrd_parameters {
+                params.encode(bs)?;
+            }
+        }
+
+        if self.nal_hrd_parameters_present_flag.0 != 0 || self.vcl_hrd_parameters_present_flag.0 != 0 {
+            encode!(bs, &self.low_delay_hrd_flag)?;
+        }
+
+        encode!(bs, &self.pic_struct_present_flag)?;
+
+        encode!(bs, &self.bitstream_restriction_flag)?;
+        if self.bitstream_restriction_flag.0 != 0 {
+            encode!(
+                bs,
+                &self.motion_vectors_over_pic_boundaries_flag,
+                &self.max_bytes_per_pic_denom,
+                &self.max_bits_per_mb_denom,
+                &self.log2_max_mv_length_horizontal,
+                &self.log2_max_mv_length_vertical,
+                &self.max_num_reorder_frames,
+                &self.max_dec_frame_buffering
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HRDParameters {
     pub cpb_cnt_minus1: UE,
     pub bit_rate_scale: U4,
@@ -435,7 +538,25 @@ impl Decode for HRDParameters {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+impl Encode for HRDParameters {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        encode!(bs, &self.cpb_cnt_minus1, &self.bit_rate_scale, &self.cpb_size_scale)?;
+
+        for sched in &self.sei_scheds {
+            sched.encode(bs)?;
+        }
+
+        encode!(
+            bs,
+            &self.initial_cpb_removal_delay_length_minus1,
+            &self.cpb_removal_delay_length_minus1,
+            &self.dpb_output_delay_length_minus1,
+            &self.time_offset_length
+        )
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SEISched {
     pub bit_rate_value_minus1: UE,
     pub cpb_size_value_minus1: UE,
@@ -447,6 +568,12 @@ impl Decode for SEISched {
         let mut ret = Self::default();
         decode!(bs, &mut ret.bit_rate_value_minus1, &mut ret.cpb_size_value_minus1, &mut ret.cbr_flag)?;
         Ok(ret)
+    }
+}
+
+impl Encode for SEISched {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        encode!(bs, &self.bit_rate_value_minus1, &self.cpb_size_value_minus1, &self.cbr_flag)
     }
 }
 
@@ -496,5 +623,12 @@ mod test {
         assert_eq!(1, sps.vui_parameters.num_units_in_tick.0);
         assert_eq!(6000, sps.vui_parameters.time_scale.0);
         assert_eq!(0, sps.vui_parameters.fixed_frame_rate_flag.0);
+
+        let mut encoded_vui = vec![];
+        sps.vui_parameters.encode(&mut BitstreamWriter::new(&mut encoded_vui)).unwrap();
+        assert_eq!(
+            encoded_vui,
+            vec![0x80, 0xb5, 0x01, 0x01, 0x01, 0x40, 0x00, 0x00, 0x00, 0x40, 0x00, 0x05, 0xdc, 0x03, 0xc6, 0x0c, 0x65]
+        );
     }
 }
