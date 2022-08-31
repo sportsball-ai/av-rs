@@ -5,7 +5,7 @@ use std::io;
 // ITU-T H.264, 04/2017, 7.2
 macro_rules! define_syntax_element_u {
     ($e:ident, $t:tt, $n:literal) => {
-        #[derive(Clone, Copy, Debug, Default)]
+        #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
         pub struct $e(pub $t);
 
         impl Decode for $e {
@@ -38,7 +38,7 @@ define_syntax_element_u!(U48, u64, 48);
 define_syntax_element_u!(F1, u8, 1);
 
 // ITU-T H.264, 04/2017, 7.2 / 9.1
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct UE(pub u64);
 
 impl Decode for UE {
@@ -58,7 +58,7 @@ impl Encode for UE {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, Eq, PartialEq)]
 pub struct SE(pub i64);
 
 impl Decode for SE {

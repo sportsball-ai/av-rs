@@ -1,4 +1,4 @@
-use super::{decode, sequence_parameter_set::VUIParameters, syntax_elements::*, Bitstream, Decode};
+use super::{decode, encode, sequence_parameter_set::VUIParameters, syntax_elements::*, Bitstream, BitstreamWriter, Decode, Encode};
 
 use std::io;
 
@@ -20,6 +20,15 @@ impl Decode for SEI {
             }
         }
         Ok(ret)
+    }
+}
+
+impl Encode for SEI {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        for msg in &self.sei_message {
+            msg.encode(bs)?;
+        }
+        bs.write_bits(0x80, 8)
     }
 }
 
@@ -54,6 +63,26 @@ impl Decode for SEIMessage {
         ret.payload = bs.read_bytes(payload_size as _)?;
 
         Ok(ret)
+    }
+}
+
+impl Encode for SEIMessage {
+    fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
+        let mut payload_type = self.payload_type;
+        while payload_type >= 0xFF {
+            bs.write_bits(0xFF, 8)?;
+            payload_type -= 0xFF;
+        }
+        bs.write_bits(payload_type, 8)?;
+
+        let mut payload_size = self.payload.len();
+        while payload_size >= 0xFF {
+            bs.write_bits(0xFF, 8)?;
+            payload_size -= 0xFF;
+        }
+        bs.write_bits(payload_size as u64, 8)?;
+
+        bs.write_bytes(&self.payload)
     }
 }
 
@@ -145,6 +174,58 @@ impl PicTiming {
         Ok(ret)
     }
 
+    pub fn encode<W: io::Write>(&self, bs: &mut BitstreamWriter<W>, vui_params: &VUIParameters) -> io::Result<()> {
+        let hrd_params = vui_params.nal_hrd_parameters.as_ref().or(vui_params.vcl_hrd_parameters.as_ref());
+        if let Some(hrd_params) = hrd_params {
+            bs.write_bits(self.cpb_removal_delay, hrd_params.cpb_removal_delay_length_minus1.0 as usize + 1)?;
+            bs.write_bits(self.dpb_output_delay, hrd_params.dpb_output_delay_length_minus1.0 as usize + 1)?;
+        }
+
+        if vui_params.pic_struct_present_flag.0 == 0 {
+            return Ok(());
+        }
+
+        encode!(bs, &self.pic_struct)?;
+
+        for timecode in &self.timecodes {
+            encode!(bs, &timecode.clock_timestamp_flag)?;
+            if timecode.clock_timestamp_flag.0 == 0 {
+                continue;
+            }
+
+            encode!(
+                bs,
+                &timecode.ct_type,
+                &timecode.nuit_field_based_flag,
+                &timecode.counting_type,
+                &timecode.full_timestamp_flag,
+                &timecode.discontinuity_flag,
+                &timecode.cnt_dropped_flag,
+                &timecode.n_frames
+            )?;
+
+            if timecode.full_timestamp_flag.0 == 1 {
+                encode!(bs, &timecode.seconds, &timecode.minutes, &timecode.hours)?;
+            } else {
+                encode!(bs, &timecode.seconds_flag)?;
+                if timecode.seconds_flag.0 == 1 {
+                    encode!(bs, &timecode.seconds, &timecode.minutes_flag)?;
+                    if timecode.minutes_flag.0 == 1 {
+                        encode!(bs, &timecode.minutes, &timecode.hours_flag)?;
+                        if timecode.hours_flag.0 == 1 {
+                            encode!(bs, &timecode.hours)?;
+                        }
+                    }
+                }
+            }
+
+            let time_offset_length = hrd_params.map(|p| p.time_offset_length.0 as usize).unwrap_or(24);
+            bs.write_bits(timecode.time_offset.0 as _, time_offset_length)?;
+        }
+
+        Ok(())
+    }
+
     pub fn num_clock_ts(&self) -> usize {
         match self.pic_struct.0 {
             3..=4 | 7 => 2,
@@ -168,13 +249,14 @@ mod test {
         ]);
         let sps = SequenceParameterSet::decode(&mut bs).unwrap();
 
-        let mut bs = Bitstream::new(vec![
+        let data = vec![
             0x00, 0x07, 0x80, 0xae, 0x19, 0x00, 0x01, 0xaf, 0x40, 0x01, 0x0c, 0x00, 0x00, 0x44, 0x00, 0x00, 0x02, 0x08, 0x24, 0x1c, 0x29, 0x00, 0x40, 0x04,
             0x47, 0xb5, 0x00, 0x31, 0x47, 0x41, 0x39, 0x34, 0x03, 0xd4, 0xff, 0xfc, 0x80, 0x80, 0xfd, 0x80, 0x80, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa,
             0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa,
             0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xfa, 0x00, 0x00, 0xff,
             0x80,
-        ]);
+        ];
+        let mut bs = Bitstream::new(data.iter().copied());
         let sei = SEI::decode(&mut bs).unwrap();
         assert_eq!(3, sei.sei_message.len());
         assert_eq!(0, sei.sei_message[0].payload_type);
@@ -203,6 +285,10 @@ mod test {
         assert_eq!(0, timecode.minutes_flag.0);
         assert_eq!(0, timecode.hours_flag.0);
         assert_eq!(0, timecode.time_offset.0);
+
+        let mut encoded = vec![];
+        sei.encode(&mut BitstreamWriter::new(&mut encoded)).unwrap();
+        assert_eq!(encoded, data);
     }
 
     #[test]
