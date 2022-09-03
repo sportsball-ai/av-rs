@@ -121,8 +121,10 @@ impl<S: SegmentStorage> Segmenter<S> {
                                     match self.analyzer.stream(p.packet_id) {
                                         Some(analyzer::Stream::AVCVideo { .. }) => {
                                             for nalu in h264::iterate_annex_b(&payload) {
-                                                let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
-                                                is_keyframe |= nalu_type == h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE;
+                                                if !nalu.is_empty() {
+                                                    let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
+                                                    is_keyframe |= nalu_type == h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE;
+                                                }
                                             }
                                         }
                                         Some(analyzer::Stream::HEVCVideo { .. }) => {
