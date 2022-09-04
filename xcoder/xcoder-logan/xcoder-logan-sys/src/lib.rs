@@ -6,7 +6,8 @@
     non_camel_case_types,
     unaligned_references,
     clippy::redundant_static_lifetimes,
-    clippy::too_many_arguments
+    clippy::too_many_arguments,
+    clippy::useless_transmute
 )]
 
 #[cfg(target_os = "linux")]
