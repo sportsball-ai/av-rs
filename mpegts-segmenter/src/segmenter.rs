@@ -115,8 +115,11 @@ impl<S: SegmentStorage> Segmenter<S> {
                                 if p.adaptation_field.as_ref().and_then(|af| af.random_access_indicator).unwrap_or(false) {
                                     true
                                 } else if let Some(payload) = &p.payload {
-                                    // some muxers don't set RAI bits. if possible, see if this
-                                    // packet includes the start of a keyframe
+                                    // Some muxers don't set RAI bits. If possible, see if this
+                                    // packet includes the start of a keyframe. This is only the
+                                    // first packet (<188 bytes), not the entire frame. That means
+                                    // we need to be defensive and not error out if we reach the
+                                    // end unexpectedly soon.
                                     let mut is_keyframe = false;
                                     match self.analyzer.stream(p.packet_id) {
                                         Some(analyzer::Stream::AVCVideo { .. }) => {
@@ -128,13 +131,14 @@ impl<S: SegmentStorage> Segmenter<S> {
                                             }
                                         }
                                         Some(analyzer::Stream::HEVCVideo { .. }) => {
-                                            use h264::Decode;
+                                            use h265::Decode;
                                             for nalu in h265::iterate_annex_b(&payload) {
                                                 let mut bs = h265::Bitstream::new(nalu.iter().copied());
-                                                let header = h265::NALUnitHeader::decode(&mut bs)?;
-                                                if header.nuh_layer_id.0 == 0 {
-                                                    if let 16..=21 = header.nal_unit_type.0 {
-                                                        is_keyframe = true
+                                                if let Some(header) = h265::NALUnitHeader::decode(&mut bs).ok() {
+                                                    if header.nuh_layer_id.0 == 0 {
+                                                        if let 16..=21 = header.nal_unit_type.0 {
+                                                            is_keyframe = true
+                                                        }
                                                     }
                                                 }
                                             }
@@ -609,5 +613,35 @@ mod test {
             ntp_timestamps,
             &[Some(16592063487166754097), Some(16592063487167157824), Some(16592063487167574436)]
         );
+    }
+
+    // This is a regression test to ensure that if the first packet of a keyframe ends with the
+    // H264 start sequence ([0, 0, 0, 1]), we don't panic.
+    #[tokio::test]
+    async fn test_segmenter_empty_nalu() {
+        let mut storage = MemorySegmentStorage::new();
+
+        let mut f = File::open("src/testdata/h264.ts").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        // Cut off the data right after the packet we're going to alter.
+        let last_video_frame_start_packet = 47098;
+        let buf = &mut buf[..(last_video_frame_start_packet + 1) * PACKET_LENGTH];
+
+        // Then replace the last 4 bytes with the H264 start sequence.
+        let first_video_packet = &mut buf[last_video_frame_start_packet * PACKET_LENGTH..(last_video_frame_start_packet + 1) * PACKET_LENGTH];
+        first_video_packet[PACKET_LENGTH - 4..].copy_from_slice(&[0, 0, 0, 1]);
+
+        // Just make sure we don't panic.
+        segment(
+            buf.as_ref(),
+            SegmenterConfig {
+                min_segment_duration: Duration::from_secs(1),
+            },
+            &mut storage,
+        )
+        .await
+        .unwrap();
     }
 }
