@@ -7,34 +7,34 @@ pub struct LoginRequestBody<'a> {
     pub password: &'a str,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Section {
     pub name: String,
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SectionsResponseBody {
     pub data: Vec<Section>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     pub name: String,
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset {
     pub title: String,
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "itemType")]
 pub enum Content {
@@ -50,7 +50,7 @@ pub struct SectionContentResponseBody {
     pub data: Vec<Content>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SRTEndpointDetails {
     #[serde(rename = "srtMode")]
@@ -63,7 +63,7 @@ pub struct SRTEndpointDetails {
     pub passphrase: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum EndpointDetails {
     #[serde(deserialize_with = "deserialize_srt_details", rename = "srt")]
