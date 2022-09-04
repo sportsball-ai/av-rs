@@ -119,7 +119,7 @@ impl<T: Iterator<Item = u8>> EmulationPrevention<T> {
     }
 }
 
-impl<'a, T: Iterator<Item = u8>> Iterator for &mut EmulationPrevention<T> {
+impl<T: Iterator<Item = u8>> Iterator for &mut EmulationPrevention<T> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {

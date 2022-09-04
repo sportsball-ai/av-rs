@@ -164,7 +164,7 @@ struct Connect {
     state: State<AsyncStream>,
 }
 
-impl<'a> Future for Connect {
+impl Future for Connect {
     type Output = Result<AsyncStream>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
