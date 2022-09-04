@@ -82,7 +82,7 @@ impl<'a> Iterator for Packetize<'a> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PacketHeader {
     pub stream_id: u8,
     pub optional_header: Option<OptionalHeader>,
@@ -154,7 +154,7 @@ impl PacketHeader {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OptionalHeader {
     pub data_alignment_indicator: bool,
     pub pts: Option<u64>,

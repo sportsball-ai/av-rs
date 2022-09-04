@@ -9,7 +9,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 pub use core2::io;
 use core2::io::Read;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AVCDecoderConfigurationRecord {
     pub configuration_version: u8,
     pub avc_profile_indication: u8,
@@ -57,7 +57,7 @@ impl AVCDecoderConfigurationRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HVCDecoderConfigurationRecord {
     pub configuration_version: u8,
     pub general_profile_space: u8,
@@ -140,7 +140,7 @@ impl HVCDecoderConfigurationRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AudioSpecificConfig {
     pub object_type: u16,
 }
@@ -272,7 +272,7 @@ impl<'a> DecoderConfigDescriptorData<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum AudioDataTransportStreamMPEGVersion {
     MPEG4,
     MPEG2,

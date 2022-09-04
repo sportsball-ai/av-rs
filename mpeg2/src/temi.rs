@@ -3,7 +3,7 @@ use crate::{DecodeError, EncodeError};
 
 pub const AF_DESCR_TAG_TIMELINE: u8 = 0x04;
 
-#[derive(Debug, PartialEq, PartialOrd, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Copy, Clone)]
 pub enum TimeFieldLength {
     None = 0,
     Short = 1,
@@ -17,7 +17,7 @@ impl Default for TimeFieldLength {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Clone)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct TEMITimelineDescriptor {
     pub has_timestamp: TimeFieldLength,
     pub timescale: u32,
