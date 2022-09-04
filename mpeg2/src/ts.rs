@@ -6,7 +6,7 @@ use core2::io::Write;
 
 pub const PID_PAT: u16 = 0x00;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Packet<'a> {
     pub packet_id: u16,
     pub payload_unit_start_indicator: bool,
@@ -15,7 +15,7 @@ pub struct Packet<'a> {
     pub payload: Option<Cow<'a, [u8]>>,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,

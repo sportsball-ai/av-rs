@@ -5,7 +5,7 @@ use alloc::{borrow::Cow, vec::Vec};
 use core::mem;
 use core2::io::Write;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Packet<'a> {
     pub header: PacketHeader,
     pub data: Cow<'a, [u8]>,
