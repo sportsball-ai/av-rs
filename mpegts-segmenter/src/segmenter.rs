@@ -627,7 +627,7 @@ mod test {
 
         // Cut off the data right after the packet we're going to alter.
         let last_video_frame_start_packet = 47098;
-        let buf = &mut buf[..(last_video_frame_start_packet + 1) * PACKET_LENGTH];
+        buf.resize((last_video_frame_start_packet + 1) * PACKET_LENGTH, 0);
 
         // Then replace the last 4 bytes with the H264 start sequence.
         let first_video_packet = &mut buf[last_video_frame_start_packet * PACKET_LENGTH..(last_video_frame_start_packet + 1) * PACKET_LENGTH];
