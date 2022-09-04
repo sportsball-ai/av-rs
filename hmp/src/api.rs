@@ -44,7 +44,7 @@ pub enum Content {
     Other,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SectionContentResponseBody {
     pub data: Vec<Content>,
@@ -80,7 +80,7 @@ fn deserialize_srt_details<'de, D: Deserializer<'de>>(deserializer: D) -> Result
     SRTEndpointDetailsWrapper::deserialize(deserializer).map(|w| w.srt)
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Endpoint {
     pub uri: String,
@@ -88,7 +88,7 @@ pub struct Endpoint {
     pub details: EndpointDetails,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerEndpointResponseBody {
     pub data: Vec<Endpoint>,
