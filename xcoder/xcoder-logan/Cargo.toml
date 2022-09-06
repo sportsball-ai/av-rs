@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 av-traits = { path = "../../av-traits" }
+h264 = { path = "../../h264" }
 snafu = { version = "0.7.0", default-features = false }
 scopeguard = "1.1.0"
 

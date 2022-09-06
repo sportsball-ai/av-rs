@@ -1,9 +1,35 @@
 use alloc::vec::Vec;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum VideoTimecodeMode {
+    Normal,
+    DropFrame,
+}
+
+/// A SMPTE video timecode.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VideoTimecode {
+    pub hours: u32,
+    pub minutes: u32,
+    pub seconds: u32,
+
+    /// The number of frames within the second, between 0 and 29 inclusive.
+    pub frames: u32,
+
+    pub discontinuity: bool,
+    pub mode: VideoTimecodeMode,
+}
+
 pub trait RawVideoFrame<S> {
     /// The samples that make up the frame's image. Typically this consists of 3 Y/U/V planes of
     /// `u8`s, but any format that the encoder supports can be used.
     fn samples(&self, plane: usize) -> &[S];
+
+    /// If given, the video encoder may encode timecode information in the resulting bitstream. Not
+    /// all codecs and encoders support this.
+    fn timecode(&self) -> Option<&VideoTimecode> {
+        None
+    }
 }
 
 pub struct EncodedVideoFrame {

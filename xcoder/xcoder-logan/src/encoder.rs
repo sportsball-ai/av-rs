@@ -1,7 +1,8 @@
-use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
+use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput, VideoTimecode, VideoTimecodeMode};
+use h264::{Encode, U1};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
-use std::{collections::VecDeque, mem};
+use std::{collections::VecDeque, io, mem};
 use xcoder_logan_sys as sys;
 
 #[derive(Debug, Snafu)]
@@ -87,7 +88,7 @@ pub struct XcoderEncoder<F> {
     output_frames: VecDeque<VideoEncoderOutput<F>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum XcoderEncoderCodec {
     H264,
     H265,
@@ -141,7 +142,7 @@ impl<F> XcoderEncoder<F> {
             params.enable_aud = 1;
 
             // H.264 requires 16-byte alignment while H.265 requires 8.
-            let align_to_16_bytes = matches!(config.codec, XcoderEncoderCodec::H264 { .. });
+            let align_to_16_bytes = config.codec == XcoderEncoderCodec::H264;
             let aligned_height = if align_to_16_bytes {
                 ((config.height + 15) / 16) * 16
             } else {
@@ -161,6 +162,28 @@ impl<F> XcoderEncoder<F> {
                 params.hevc_enc_params.conf_win_right = (aligned_width - config.width) as _;
             }
 
+            if config.codec == XcoderEncoderCodec::H264 {
+                // We have to override the default VUI to indicate that pic struct is present in
+                // any SEI messages we may add.
+                let vui = h264::VUIParameters {
+                    timing_info_present_flag: U1(1),
+                    fixed_frame_rate_flag: U1(1),
+                    pic_struct_present_flag: U1(1),
+                    ..Default::default()
+                };
+                let mut dest = io::Cursor::new(params.ui8VuiRbsp.as_mut_slice());
+                let vui_bits = {
+                    let mut bs = h264::BitstreamWriter::new(&mut dest);
+                    vui.encode(&mut bs).expect("the vui should fit within the max length");
+                    bs.inner().position() as usize * 8 + bs.unwritten_bits()
+                };
+                params.ui32VuiDataSizeBytes = (vui_bits as u32 + 7) / 8;
+                params.ui32VuiDataSizeBits = vui_bits as _;
+                // libxcoder needs to know where to fill in the timing info
+                params.pos_num_units_in_tick = 5;
+                params.pos_time_scale = params.pos_num_units_in_tick + 32;
+            }
+
             let params = Box::new(params);
 
             let session = sys::ni_device_session_context_alloc_init();
@@ -174,8 +197,8 @@ impl<F> XcoderEncoder<F> {
             (**session).hw_id = -1;
             (**session).p_session_config = &*params as *const sys::ni_encoder_params_t as _;
             (**session).codec_format = match config.codec {
-                XcoderEncoderCodec::H264 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
-                XcoderEncoderCodec::H265 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
+                XcoderEncoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
+                XcoderEncoderCodec::H265 => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
             };
             (**session).src_bit_depth = 8;
             (**session).src_endian = sys::NI_FRAME_LITTLE_ENDIAN as _;
@@ -236,6 +259,79 @@ impl<F> XcoderEncoder<F> {
         }
     }
 
+    fn sei_nalu(config: &XcoderEncoderConfig, timecode: &VideoTimecode) -> Option<Vec<u8>> {
+        match config.codec {
+            XcoderEncoderCodec::H264 => {
+                use h264::*;
+
+                let payload = PicTiming {
+                    pic_struct: U4(0), // progressive frame
+                    timecodes: vec![Timecode {
+                        clock_timestamp_flag: U1(1),
+                        ct_type: U2(2),               // unknown origin picture scan
+                        nuit_field_based_flag: U1(1), // one frame per two ticks
+                        counting_type: U5(match timecode.mode {
+                            VideoTimecodeMode::Normal => 0,
+                            VideoTimecodeMode::DropFrame => 4,
+                        }),
+                        full_timestamp_flag: U1(1),
+                        discontinuity_flag: U1(if timecode.discontinuity { 1 } else { 0 }),
+                        cnt_dropped_flag: U1(match timecode.mode {
+                            VideoTimecodeMode::Normal => 0,
+                            VideoTimecodeMode::DropFrame => {
+                                if timecode.frames == 2 && timecode.seconds == 0 && timecode.minutes % 10 != 0 {
+                                    1
+                                } else {
+                                    0
+                                }
+                            }
+                        }),
+                        n_frames: U8(timecode.frames as _),
+                        seconds: U6(timecode.seconds as _),
+                        minutes: U6(timecode.minutes as _),
+                        hours: U5(timecode.hours as _),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+                let mut encoded_payload = vec![];
+                payload
+                    .encode(
+                        &mut BitstreamWriter::new(&mut encoded_payload),
+                        &h264::VUIParameters {
+                            pic_struct_present_flag: U1(1),
+                            ..Default::default()
+                        },
+                    )
+                    .expect("encoding the payload to a vec should never fail");
+
+                let sei = SEI {
+                    sei_message: vec![SEIMessage {
+                        payload_type: SEI_PAYLOAD_TYPE_PIC_TIMING,
+                        payload: encoded_payload,
+                    }],
+                };
+                let mut encoded_sei = vec![];
+                sei.encode(&mut BitstreamWriter::new(&mut encoded_sei))
+                    .expect("encoding the sei to a vec should never fail");
+
+                let nalu = NALUnit {
+                    forbidden_zero_bit: F1(0),
+                    nal_ref_idc: U2(0),
+                    nal_unit_type: U5(NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION),
+                    rbsp_byte: RBSP::new(encoded_sei.into_iter()),
+                };
+                let mut encoded_nalu = vec![0, 0, 0, 1];
+                nalu.encode(&mut BitstreamWriter::new(&mut encoded_nalu))
+                    .expect("encoding the nalu to a vec should never fail");
+                Some(encoded_nalu)
+            }
+            XcoderEncoderCodec::H265 => None,
+        }
+    }
+}
+
+impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
     fn try_reading_encoded_frames(&mut self) -> Result<()> {
         unsafe {
             while !self.did_finish {
@@ -259,16 +355,38 @@ impl<F> XcoderEncoder<F> {
                     if packet.pts == 0 && packet.avg_frame_qp == 0 {
                         self.encoded_frame.parameter_sets = Some(self.encoded_frame.as_slice().to_vec());
                     } else {
+                        let raw_frame = self
+                            .input_frames
+                            .pop_front()
+                            .expect("there should never be more output frames than input frames");
+                        let mut data = match self.encoded_frame.parameter_sets() {
+                            Some(sets) => [sets, self.encoded_frame.as_slice()].concat(),
+                            None => self.encoded_frame.as_slice().to_vec(),
+                        };
+                        if let Some(sei) = raw_frame.timecode().and_then(|tc| Self::sei_nalu(&self.config, tc)) {
+                            // If we have an SEI to write, we told the encoder to reserve space for
+                            // it by setting sei_total_len. Now we just need to fill that space in.
+                            let mut zeroes = 0;
+                            for (i, byte) in data.iter().enumerate() {
+                                if *byte == 0 {
+                                    zeroes += 1;
+                                    if zeroes == 4 {
+                                        // We found the spot for the SEI. Now copy it in. Note this
+                                        // is a little less hacky than it seems, because this many
+                                        // consecutive zeroes aren't legal in a well-formed
+                                        // bitstream.
+                                        data[i - 3..i - 3 + sei.len()].copy_from_slice(&sei);
+                                        break;
+                                    }
+                                } else {
+                                    zeroes = 0;
+                                }
+                            }
+                        }
                         self.output_frames.push_back(VideoEncoderOutput {
-                            raw_frame: self
-                                .input_frames
-                                .pop_front()
-                                .expect("there should never be more output frames than input frames"),
+                            raw_frame,
                             encoded_frame: EncodedVideoFrame {
-                                data: match self.encoded_frame.parameter_sets() {
-                                    Some(sets) => [sets, self.encoded_frame.as_slice()].concat(),
-                                    None => self.encoded_frame.as_slice().to_vec(),
-                                },
+                                data,
                                 is_keyframe: self.encoded_frame.is_key_frame(),
                             },
                         });
@@ -282,9 +400,7 @@ impl<F> XcoderEncoder<F> {
         }
         Ok(())
     }
-}
 
-impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
     /// Attempts to write the decoded frame to the encoder, performing cropping and scaling
     /// beforehand if necessary. If Some is returned, the caller must try again with the same
     /// frame later.
@@ -301,6 +417,13 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             } else {
                 frame.force_key_frame = 0;
                 frame.ni_pict_type = 0;
+            }
+
+            frame.sei_total_len = 0;
+            if let Some(sei) = f.timecode().and_then(|tc| Self::sei_nalu(&self.config, tc)) {
+                // There's no way with this version of libxcoder to make the encoder write our
+                // SEI for us, but this will make it reserve space for us to fill it in.
+                frame.sei_total_len = sei.len() as _;
             }
 
             for i in 0..3 {
@@ -398,19 +521,25 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use h264::{Decode, U32};
     use std::{
         process::{self, Command},
         sync::Arc,
     };
 
-    #[derive(Clone)]
+    #[derive(Clone, Default)]
     struct TestFrame {
         samples: Arc<Vec<Vec<u8>>>,
+        timecode: Option<VideoTimecode>,
     }
 
     impl RawVideoFrame<u8> for TestFrame {
         fn samples(&self, plane: usize) -> &[u8] {
             &self.samples[plane]
+        }
+
+        fn timecode(&self) -> Option<&VideoTimecode> {
+            self.timecode.as_ref()
         }
     }
 
@@ -443,6 +572,7 @@ mod test {
             }
             let frame = TestFrame {
                 samples: Arc::new(vec![y, u.clone(), v.clone()]),
+                ..Default::default()
             };
             if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.data);
@@ -485,6 +615,7 @@ mod test {
 
         let frame = TestFrame {
             samples: Arc::new(vec![y, u, v]),
+            ..Default::default()
         };
 
         for _ in 0..N {
@@ -523,5 +654,92 @@ mod test {
         // running there should be a very small number of open descriptors.
         assert!(shm_file_descriptors < 100);
         assert!(nvme_file_descriptors < 100);
+    }
+
+    #[test]
+    fn test_video_encoder_timecodes() {
+        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+            width: 480,
+            height: 270,
+            fps: 29.97,
+            bitrate: None,
+            codec: XcoderEncoderCodec::H264,
+        })
+        .unwrap();
+
+        let mut encoded = vec![];
+        let mut encoded_frames = 0;
+
+        let y = vec![16u8; 480 * 270];
+        let u = vec![200u8; 480 * 270 / 4];
+        let v = vec![128u8; 480 * 270 / 4];
+
+        let frame = TestFrame {
+            samples: Arc::new(vec![y, u, v]),
+            timecode: Some(VideoTimecode {
+                hours: 1,
+                minutes: 2,
+                seconds: 3,
+                frames: 4,
+                discontinuity: false,
+                mode: VideoTimecodeMode::Normal,
+            }),
+        };
+
+        for _ in 0..30 {
+            if let Some(mut output) = encoder.encode(frame.clone(), EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.data);
+                encoded_frames += 1;
+            }
+        }
+        while let Some(mut output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.data);
+            encoded_frames += 1;
+        }
+
+        assert_eq!(encoded_frames, 30);
+
+        let mut vui_parameters = None;
+        for nalu in h264::iterate_annex_b(&encoded) {
+            let nalu = h264::NALUnit::decode(h264::Bitstream::new(nalu.iter().copied())).unwrap();
+            match nalu.nal_unit_type.0 {
+                h264::NAL_UNIT_TYPE_SEQUENCE_PARAMETER_SET => {
+                    let sps = h264::SequenceParameterSet::decode(&mut h264::Bitstream::new(nalu.rbsp_byte)).unwrap();
+                    assert_eq!(
+                        sps.vui_parameters,
+                        h264::VUIParameters {
+                            timing_info_present_flag: U1(1),
+                            fixed_frame_rate_flag: U1(1),
+                            num_units_in_tick: U32(1001),
+                            time_scale: U32(60000),
+                            pic_struct_present_flag: U1(1),
+                            ..Default::default()
+                        }
+                    );
+                    vui_parameters = Some(sps.vui_parameters);
+                }
+                h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
+                    let vui_parameters = vui_parameters.as_ref().unwrap();
+
+                    let sei = h264::SEI::decode(&mut h264::Bitstream::new(nalu.rbsp_byte)).unwrap();
+                    assert_eq!(sei.sei_message.len(), 1);
+                    let message = sei.sei_message.into_iter().next().unwrap();
+
+                    assert_eq!(message.payload_type, h264::SEI_PAYLOAD_TYPE_PIC_TIMING);
+                    let pic_timing = h264::PicTiming::decode(&mut h264::Bitstream::new(message.payload), vui_parameters).unwrap();
+                    assert_eq!(pic_timing.pic_struct.0, 0);
+                    assert_eq!(pic_timing.timecodes.len(), 1);
+
+                    let timecode = &pic_timing.timecodes[0];
+                    assert_eq!(timecode.full_timestamp_flag.0, 1);
+                    assert_eq!(timecode.discontinuity_flag.0, 0);
+                    assert_eq!(timecode.hours.0, 1);
+                    assert_eq!(timecode.minutes.0, 2);
+                    assert_eq!(timecode.seconds.0, 3);
+                    assert_eq!(timecode.n_frames.0, 4);
+                }
+                _ => {}
+            }
+        }
     }
 }
