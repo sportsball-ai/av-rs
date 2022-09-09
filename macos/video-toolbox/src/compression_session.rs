@@ -158,6 +158,9 @@ impl<C: Send> CompressionSession<C> {
 impl<C: Send> Drop for CompressionSession<C> {
     fn drop(&mut self) {
         let _ = self.flush();
+        unsafe {
+            sys::VTCompressionSessionInvalidate(self.inner.0);
+        }
     }
 }
 
