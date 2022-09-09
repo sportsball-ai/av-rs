@@ -19,8 +19,11 @@ pub struct CompressionSessionOutputFrame<C> {
     pub context: C,
 }
 
+struct CompressionSessionInner(sys::VTCompressionSessionRef);
+core_foundation::trait_impls!(CompressionSessionInner);
+
 pub struct CompressionSession<C: Send> {
-    sess: sys::VTCompressionSessionRef,
+    inner: CompressionSessionInner,
     frames: mpsc::Receiver<Result<CompressionSessionOutputFrame<C>, OSStatus>>,
     _callback_context: Pin<Box<CallbackContext<C>>>,
     _frame_context: PhantomData<C>,
@@ -84,7 +87,7 @@ impl<C: Send> CompressionSession<C> {
             .into(),
         )?;
         Ok(Self {
-            sess,
+            inner: CompressionSessionInner(sess),
             frames: rx,
             _callback_context: callback_context,
             _frame_context: PhantomData,
@@ -92,11 +95,11 @@ impl<C: Send> CompressionSession<C> {
     }
 
     pub fn set_property<V: CFType>(&mut self, key: sys::CFStringRef, value: V) -> Result<(), OSStatus> {
-        unsafe { result(sys::VTSessionSetProperty(self.sess as _, key as _, value.cf_type_ref()).into()) }
+        unsafe { result(sys::VTSessionSetProperty(self.inner.0 as _, key as _, value.cf_type_ref()).into()) }
     }
 
     pub fn prepare_to_encode_frames(&mut self) -> Result<(), OSStatus> {
-        unsafe { result(sys::VTCompressionSessionPrepareToEncodeFrames(self.sess).into()) }
+        unsafe { result(sys::VTCompressionSessionPrepareToEncodeFrames(self.inner.0).into()) }
     }
 
     pub fn frames(&self) -> &mpsc::Receiver<Result<CompressionSessionOutputFrame<C>, OSStatus>> {
@@ -116,7 +119,7 @@ impl<C: Send> CompressionSession<C> {
                 };
 
                 sys::VTCompressionSessionEncodeFrame(
-                    self.sess,
+                    self.inner.0,
                     image_buffer.cf_type_ref() as _,
                     sys::CMTime {
                         value: presentation_time.value,
@@ -138,7 +141,7 @@ impl<C: Send> CompressionSession<C> {
         result(
             unsafe {
                 sys::VTCompressionSessionCompleteFrames(
-                    self.sess,
+                    self.inner.0,
                     sys::CMTime {
                         value: 0,
                         timescale: 0,
@@ -155,6 +158,9 @@ impl<C: Send> CompressionSession<C> {
 impl<C: Send> Drop for CompressionSession<C> {
     fn drop(&mut self) {
         let _ = self.flush();
+        unsafe {
+            sys::VTCompressionSessionInvalidate(self.inner.0);
+        }
     }
 }
 
