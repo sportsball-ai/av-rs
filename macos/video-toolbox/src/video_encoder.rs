@@ -333,10 +333,8 @@ mod test {
                 if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
                     keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
                 }
-            } else {
-                if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
-                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
-                }
+            } else if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
             }
         }
         assert_eq!(keyframe_count, 12);
@@ -375,10 +373,8 @@ mod test {
                 if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
                     keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
                 }
-            } else {
-                if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
-                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
-                }
+            } else if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
             }
         }
         assert_eq!(keyframe_count, 4);
