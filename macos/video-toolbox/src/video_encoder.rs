@@ -27,6 +27,7 @@ pub struct VideoEncoderConfig {
     pub fps: f64,
     pub codec: VideoEncoderCodec,
     pub input_format: VideoEncoderInputFormat,
+    pub high_availability_mode: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +64,9 @@ impl<F: Send> VideoEncoder<F> {
             sess.set_property(sys::kVTCompressionPropertyKey_AllowFrameReordering, Boolean::from(false))?;
             sess.set_property(sys::kVTCompressionPropertyKey_RealTime, Boolean::from(true))?;
             sess.set_property(sys::kVTCompressionPropertyKey_ExpectedFrameRate, Number::from(config.fps))?;
+            if config.high_availability_mode {
+                sess.set_property(sys::kVTCompressionPropertyKey_MaxKeyFrameInterval, Number::from(i32::MAX))?;
+            }
 
             match &config.codec {
                 VideoEncoderCodec::H264 { bitrate } => {
@@ -254,6 +258,7 @@ mod test {
             fps: 29.97,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
+            high_availability_mode: false,
         })
         .unwrap();
 
@@ -300,15 +305,17 @@ mod test {
         let mut encoder = VideoEncoder::new(VideoEncoderConfig {
             width: 1920,
             height: 1080,
-            fps: 29.97,
+            fps: 30.0,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
+            high_availability_mode: false,
         })
         .unwrap();
 
         let u = vec![200u8; 1920 * 1080 / 4];
         let v = vec![128u8; 1920 * 1080 / 4];
-        for i in 0..90 {
+        let mut keyframe_count = 0;
+        for i in 0..360 {
             let mut y = Vec::with_capacity(1920 * 1080);
             for line in 0..1080 {
                 let sample = if line / 12 == i {
@@ -322,10 +329,59 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
-                assert!(output.encoded_frame.is_keyframe);
+            if i % 90 == 0 {
+                if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
+                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
+                }
+            } else {
+                if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
+                }
             }
         }
+        assert_eq!(keyframe_count, 12);
+    }
+
+    #[test]
+    fn test_video_encoder_with_encode_frame_type_in_high_availability_mode() {
+        let mut encoder = VideoEncoder::new(VideoEncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            codec: VideoEncoderCodec::H264 { bitrate: Some(10000) },
+            input_format: VideoEncoderInputFormat::Yuv420Planar,
+            high_availability_mode: true,
+        })
+        .unwrap();
+
+        let u = vec![200u8; 1920 * 1080 / 4];
+        let v = vec![128u8; 1920 * 1080 / 4];
+        let mut keyframe_count = 0;
+        for i in 0..360 {
+            let mut y = Vec::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    16
+                } else {
+                    (16.0 + (line as f64 / 1080.0) * 219.0).round() as u8
+                };
+                y.resize(y.len() + 1920, sample);
+            }
+            let frame = TestFrame {
+                samples: vec![y, u.clone(), v.clone()],
+            };
+            if i % 90 == 0 {
+                if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
+                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
+                }
+            } else {
+                if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
+                }
+            }
+        }
+        assert_eq!(keyframe_count, 4);
     }
 
     #[test]
