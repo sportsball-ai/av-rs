@@ -27,7 +27,7 @@ pub struct VideoEncoderConfig {
     pub fps: f64,
     pub codec: VideoEncoderCodec,
     pub input_format: VideoEncoderInputFormat,
-    pub high_availability_mode: bool,
+    pub max_key_frame_interval: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -64,8 +64,8 @@ impl<F: Send> VideoEncoder<F> {
             sess.set_property(sys::kVTCompressionPropertyKey_AllowFrameReordering, Boolean::from(false))?;
             sess.set_property(sys::kVTCompressionPropertyKey_RealTime, Boolean::from(true))?;
             sess.set_property(sys::kVTCompressionPropertyKey_ExpectedFrameRate, Number::from(config.fps))?;
-            if config.high_availability_mode {
-                sess.set_property(sys::kVTCompressionPropertyKey_MaxKeyFrameInterval, Number::from(i32::MAX))?;
+            if let Some(max_key_frame_interval) = config.max_key_frame_interval {
+                sess.set_property(sys::kVTCompressionPropertyKey_MaxKeyFrameInterval, Number::from(max_key_frame_interval))?;
             }
 
             match &config.codec {
@@ -258,7 +258,7 @@ mod test {
             fps: 29.97,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
-            high_availability_mode: false,
+            max_key_frame_interval: None,
         })
         .unwrap();
 
@@ -308,7 +308,7 @@ mod test {
             fps: 30.0,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
-            high_availability_mode: false,
+            max_key_frame_interval: None,
         })
         .unwrap();
 
@@ -341,14 +341,14 @@ mod test {
     }
 
     #[test]
-    fn test_video_encoder_with_encode_frame_type_in_high_availability_mode() {
+    fn test_video_encoder_with_encode_frame_type_and_max_key_frame_interval() {
         let mut encoder = VideoEncoder::new(VideoEncoderConfig {
             width: 1920,
             height: 1080,
             fps: 30.0,
             codec: VideoEncoderCodec::H264 { bitrate: Some(10000) },
             input_format: VideoEncoderInputFormat::Yuv420Planar,
-            high_availability_mode: true,
+            max_key_frame_interval: Some(i32::MAX),
         })
         .unwrap();
 
