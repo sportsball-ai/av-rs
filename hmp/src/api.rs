@@ -7,34 +7,34 @@ pub struct LoginRequestBody<'a> {
     pub password: &'a str,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Section {
     pub name: String,
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SectionsResponseBody {
     pub data: Vec<Section>,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     pub name: String,
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset {
     pub title: String,
     pub id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "itemType")]
 pub enum Content {
@@ -44,13 +44,13 @@ pub enum Content {
     Other,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct SectionContentResponseBody {
     pub data: Vec<Content>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(default, rename_all = "camelCase")]
 pub struct SRTEndpointDetails {
     #[serde(rename = "srtMode")]
@@ -63,7 +63,7 @@ pub struct SRTEndpointDetails {
     pub passphrase: String,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum EndpointDetails {
     #[serde(deserialize_with = "deserialize_srt_details", rename = "srt")]
@@ -80,7 +80,7 @@ fn deserialize_srt_details<'de, D: Deserializer<'de>>(deserializer: D) -> Result
     SRTEndpointDetailsWrapper::deserialize(deserializer).map(|w| w.srt)
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Endpoint {
     pub uri: String,
@@ -88,7 +88,7 @@ pub struct Endpoint {
     pub details: EndpointDetails,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PlayerEndpointResponseBody {
     pub data: Vec<Endpoint>,

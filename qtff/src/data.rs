@@ -262,7 +262,7 @@ impl ReadData for MediaData {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct MediaHeaderData {
     pub version: u8,
     pub flags: [u8; 3],
@@ -278,7 +278,7 @@ impl AtomData for MediaHeaderData {
     const TYPE: FourCC = FourCC::MDHD;
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct HandlerReferenceData {
     pub version: u8,
     pub flags: [u8; 3],
@@ -293,7 +293,7 @@ impl AtomData for HandlerReferenceData {
     const TYPE: FourCC = FourCC::HDLR;
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct ChunkOffset64Data {
     pub version: u8,
     pub flags: [u8; 3],
@@ -304,7 +304,7 @@ impl AtomData for ChunkOffset64Data {
     const TYPE: FourCC = FourCC::CO64;
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct ChunkOffsetData {
     pub version: u8,
     pub flags: [u8; 3],
@@ -315,7 +315,7 @@ impl AtomData for ChunkOffsetData {
     const TYPE: FourCC = FourCC::STCO;
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SampleSizeData {
     pub version: u8,
     pub flags: [u8; 3],
@@ -416,13 +416,13 @@ impl SampleSizeData {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct TimeToSampleDataEntry {
     pub sample_count: u32,
     pub sample_duration: u32,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct TimeToSampleData {
     pub version: u8,
     pub flags: [u8; 3],
@@ -482,14 +482,14 @@ impl TimeToSampleData {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SampleToChunkDataEntry {
     pub first_chunk: u32,
     pub samples_per_chunk: u32,
     pub sample_description_id: u32,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 pub struct SampleToChunkData {
     pub version: u8,
     pub flags: [u8; 3],
@@ -675,10 +675,10 @@ pub trait MediaType: fmt::Debug {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GeneralMediaType;
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct GeneralSampleDescriptionDataEntry {
     pub data_format: u32,
     pub reserved: [u8; 6],
@@ -689,7 +689,7 @@ impl MediaType for GeneralMediaType {
     type SampleDescriptionDataEntry = GeneralSampleDescriptionDataEntry;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoMediaType;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -744,7 +744,7 @@ impl ReadData for VideoSampleDescriptionDataEntry {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoSampleDescriptionDataEntryExtensions {
     pub avc_decoder_configuration: Option<AVCDecoderConfigurationData>,
     pub hvc_decoder_configuration: Option<HVCDecoderConfigurationData>,
@@ -759,7 +759,7 @@ impl ReadData for VideoSampleDescriptionDataEntryExtensions {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AVCDecoderConfigurationData {
     pub record: Vec<u8>,
 }
@@ -776,7 +776,7 @@ impl ReadData for AVCDecoderConfigurationData {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HVCDecoderConfigurationData {
     pub record: Vec<u8>,
 }
@@ -818,17 +818,17 @@ impl ReadData for VideoMediaInformationData {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct VideoMediaInformationHeaderData {}
 
 impl AtomData for VideoMediaInformationHeaderData {
     const TYPE: FourCC = FourCC::VMHD;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SoundMediaType;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ElementaryStreamDescriptorData {
     pub version: u32,
     pub descriptor: Vec<u8>,
@@ -851,7 +851,7 @@ impl ReadData for ElementaryStreamDescriptorData {
     }
 }
 
-#[derive(Clone, Default, Debug, PartialEq)]
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct SoundSampleDescriptionDataEntryExtensions {
     pub elementary_stream_descriptor: Option<ElementaryStreamDescriptorData>,
 }
@@ -936,7 +936,7 @@ impl ReadData for SoundSampleDescriptionDataEntryV1 {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct SoundSampleDescriptionDataEntryV2 {
     // TODO: add v2 fields. the docs i'm looking at right now seem to be confused about whether v2
 // appends new fields to v1 or replaces fields in v1 :-/
@@ -1013,14 +1013,14 @@ impl ReadData for SoundMediaInformationData {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct SoundMediaInformationHeaderData {}
 
 impl AtomData for SoundMediaInformationHeaderData {
     const TYPE: FourCC = FourCC::SMHD;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TimecodeMediaType;
 
 pub enum TimecodeSampleDescriptionFlags {
@@ -1030,7 +1030,7 @@ pub enum TimecodeSampleDescriptionFlags {
     Counter = 0x0008,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct TimecodeSampleDescriptionDataEntry {
     pub data_format: u32,
     pub reserved: [u8; 6],
@@ -1043,7 +1043,7 @@ pub struct TimecodeSampleDescriptionDataEntry {
     pub reserved3: u8,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TimecodeSample {
     Counter(u32),
     Timecode(Timecode),
@@ -1064,7 +1064,7 @@ impl TimecodeSample {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Timecode {
     pub negative: bool,
     pub hours: u8,
@@ -1094,7 +1094,7 @@ impl Timecode {
     }
 
     pub fn from_frame_number(n: i64, fps: f64) -> Timecode {
-        let abs_number = n.abs() as u64;
+        let abs_number = n.unsigned_abs();
         if (fps.round() - fps).abs() > std::f64::EPSILON {
             let fp10m = (fps * 600.0).round() as u64;
             let ten_minutes = abs_number / fp10m;
@@ -1197,7 +1197,7 @@ impl<M: MediaType> ReadData for BaseMediaInformationData<M> {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct BaseMediaInformationHeaderData {}
 
 impl AtomData for BaseMediaInformationHeaderData {
@@ -1417,7 +1417,7 @@ impl MetadataData {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct MetadataHandlerData {
     pub version: u8,
     pub flags: [u8; 3],
@@ -1429,13 +1429,13 @@ impl AtomData for MetadataHandlerData {
     const TYPE: FourCC = FourCC::HDLR;
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MetadataItemKeysDataEntry {
     pub key_namespace: u32,
     pub key_value: Vec<u8>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MetadataItemKeysData {
     pub entries: Vec<MetadataItemKeysDataEntry>,
 }
@@ -1578,28 +1578,28 @@ impl ReadData for MetadataItemListData {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct TrackReferenceData {}
 
 impl AtomData for TrackReferenceData {
     const TYPE: FourCC = FourCC::TREF;
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct ExtendedLanguageTagData {}
 
 impl AtomData for ExtendedLanguageTagData {
     const TYPE: FourCC = FourCC::ELNG;
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct DataInformationData {}
 
 impl AtomData for DataInformationData {
     const TYPE: FourCC = FourCC::DINF;
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub struct UserDataData {}
 
 impl AtomData for UserDataData {

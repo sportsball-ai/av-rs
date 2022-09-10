@@ -6,7 +6,7 @@ use core2::io::Write;
 
 pub const PID_PAT: u16 = 0x00;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Packet<'a> {
     pub packet_id: u16,
     pub payload_unit_start_indicator: bool,
@@ -15,7 +15,7 @@ pub struct Packet<'a> {
     pub payload: Option<Cow<'a, [u8]>>,
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct AdaptationField {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
@@ -208,7 +208,7 @@ impl AdaptationField {
 pub const TABLE_ID_PAT: u8 = 0;
 pub const TABLE_ID_PMT: u8 = 2;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TableSection<'a> {
     pub table_id: u8,
     pub section_syntax_indicator: bool,
@@ -308,7 +308,7 @@ impl<'a> TableSection<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TableSyntaxSection<'a> {
     pub table_id_extension: u16,
     pub data: &'a [u8],
@@ -336,7 +336,7 @@ impl<'a> TableSyntaxSection<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PATEntry {
     pub program_number: u16,
     pub program_map_pid: u16,
@@ -364,7 +364,7 @@ impl PATEntry {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PATData {
     pub entries: Vec<PATEntry>,
 }
@@ -385,7 +385,7 @@ impl PATData {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PMTElementaryStreamInfo<'a> {
     pub stream_type: u8,
     pub elementary_pid: u16,
@@ -423,7 +423,7 @@ impl<'a> PMTElementaryStreamInfo<'a> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct PMTData<'a> {
     pub pcr_pid: u16,
     pub elementary_stream_info: Vec<PMTElementaryStreamInfo<'a>>,

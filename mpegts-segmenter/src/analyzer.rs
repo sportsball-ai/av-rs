@@ -5,7 +5,7 @@ use std::{collections::VecDeque, error::Error};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Timecode {
     pub hours: u8,
     pub minutes: u8,
