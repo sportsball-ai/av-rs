@@ -329,15 +329,14 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if i % 90 == 0 {
-                if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
-                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
-                }
-            } else if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+            if let Some(output) = encoder
+                .encode(frame, if i == 0 { EncodedFrameType::Key } else { EncodedFrameType::Auto })
+                .unwrap()
+            {
                 keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
             }
         }
-        assert_eq!(keyframe_count, 12);
+        assert!(keyframe_count > 1);
     }
 
     #[test]
@@ -369,11 +368,12 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if i % 90 == 0 {
-                if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
-                    keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
-                }
-            } else if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+
+            if let Some(output) = encoder
+                // force a keyframe every 3 seconds
+                .encode(frame, if i % 90 == 0 { EncodedFrameType::Key } else { EncodedFrameType::Auto })
+                .unwrap()
+            {
                 keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
             }
         }
