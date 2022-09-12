@@ -4,15 +4,21 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    if let Ok(info) = pkg_config::probe_library("x264") {
-        for path in info.link_paths {
-            println!("cargo:rustc-link-search={}", path.display());
-        }
+    let lib = pkg_config::probe_library("x264").unwrap();
+
+    // pkg-config emits cargo: directives for linking automatically.
+
+    let mut wrapper = cc::Build::new();
+
+    // Pass include paths on to cc. It'd be nice if pkg-config allowed fetching CFLAGS and
+    // passing that on; see <https://github.com/alexcrichton/pkg-config-rs/issues/43>. But
+    // the include paths are likely all that's included/significant for compilation.
+    for p in &lib.include_paths {
+        eprintln!("include path: {}", p.display());
+        wrapper.include(p);
     }
 
-    println!("cargo:rustc-link-lib=static=x264");
-
-    cc::Build::new().file("src/lib.c").compile("x264-sys");
+    wrapper.file("src/lib.c").compile("x264-sys");
 
     let bindings = bindgen::Builder::default();
 
@@ -20,6 +26,8 @@ fn main() {
     // names for wider compatibility
     #[allow(deprecated)]
     let bindings = bindings
+        // As with cc, pass along include paths to clang.
+        .clang_args(lib.include_paths.iter().map(|p| format!("-I{}", p.to_str().expect("path is valid UTF-8"))))
         .header("src/lib.h")
         .whitelist_function("x264_.+")
         .whitelist_type("x264_.+")
