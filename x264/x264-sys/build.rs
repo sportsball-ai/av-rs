@@ -14,7 +14,6 @@ fn main() {
     // passing that on; see <https://github.com/alexcrichton/pkg-config-rs/issues/43>. But
     // the include paths are likely all that's included/significant for compilation.
     for p in &lib.include_paths {
-        eprintln!("include path: {}", p.display());
         wrapper.include(p);
     }
 
