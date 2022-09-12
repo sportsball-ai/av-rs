@@ -27,6 +27,7 @@ pub struct VideoEncoderConfig {
     pub fps: f64,
     pub codec: VideoEncoderCodec,
     pub input_format: VideoEncoderInputFormat,
+    pub max_key_frame_interval: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +64,9 @@ impl<F: Send> VideoEncoder<F> {
             sess.set_property(sys::kVTCompressionPropertyKey_AllowFrameReordering, Boolean::from(false))?;
             sess.set_property(sys::kVTCompressionPropertyKey_RealTime, Boolean::from(true))?;
             sess.set_property(sys::kVTCompressionPropertyKey_ExpectedFrameRate, Number::from(config.fps))?;
+            if let Some(max_key_frame_interval) = config.max_key_frame_interval {
+                sess.set_property(sys::kVTCompressionPropertyKey_MaxKeyFrameInterval, Number::from(max_key_frame_interval))?;
+            }
 
             match &config.codec {
                 VideoEncoderCodec::H264 { bitrate } => {
@@ -254,6 +258,7 @@ mod test {
             fps: 29.97,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
+            max_key_frame_interval: None,
         })
         .unwrap();
 
@@ -300,15 +305,17 @@ mod test {
         let mut encoder = VideoEncoder::new(VideoEncoderConfig {
             width: 1920,
             height: 1080,
-            fps: 29.97,
+            fps: 30.0,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
+            max_key_frame_interval: None,
         })
         .unwrap();
 
         let u = vec![200u8; 1920 * 1080 / 4];
         let v = vec![128u8; 1920 * 1080 / 4];
-        for i in 0..90 {
+        let mut keyframe_count = 0;
+        for i in 0..360 {
             let mut y = Vec::with_capacity(1920 * 1080);
             for line in 0..1080 {
                 let sample = if line / 12 == i {
@@ -322,10 +329,55 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
-                assert!(output.encoded_frame.is_keyframe);
+            if let Some(output) = encoder
+                .encode(frame, if i == 0 { EncodedFrameType::Key } else { EncodedFrameType::Auto })
+                .unwrap()
+            {
+                keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
             }
         }
+        assert!(keyframe_count > 1);
+    }
+
+    #[test]
+    fn test_video_encoder_with_encode_frame_type_and_max_key_frame_interval() {
+        let mut encoder = VideoEncoder::new(VideoEncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+            codec: VideoEncoderCodec::H264 { bitrate: Some(10000) },
+            input_format: VideoEncoderInputFormat::Yuv420Planar,
+            max_key_frame_interval: Some(i32::MAX),
+        })
+        .unwrap();
+
+        let u = vec![200u8; 1920 * 1080 / 4];
+        let v = vec![128u8; 1920 * 1080 / 4];
+        let mut keyframe_count = 0;
+        for i in 0..360 {
+            let mut y = Vec::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    16
+                } else {
+                    (16.0 + (line as f64 / 1080.0) * 219.0).round() as u8
+                };
+                y.resize(y.len() + 1920, sample);
+            }
+            let frame = TestFrame {
+                samples: vec![y, u.clone(), v.clone()],
+            };
+
+            if let Some(output) = encoder
+                // force a keyframe every 3 seconds
+                .encode(frame, if i % 90 == 0 { EncodedFrameType::Key } else { EncodedFrameType::Auto })
+                .unwrap()
+            {
+                keyframe_count += if output.encoded_frame.is_keyframe { 1 } else { 0 };
+            }
+        }
+        assert_eq!(keyframe_count, 4);
     }
 
     #[test]
