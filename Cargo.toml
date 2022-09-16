@@ -2,6 +2,7 @@
 
 members = [
     "av-traits",
+    "ffmpeg",
     "srt",
     "srt/srt-sys",
     "h264",
