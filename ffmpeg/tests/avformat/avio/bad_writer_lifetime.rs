@@ -1,4 +1,4 @@
-use ffmpeg::avio::*;
+use ffmpeg::avformat::avio::*;
 use std::mem::drop;
 
 fn main() {

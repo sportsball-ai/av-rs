@@ -1,5 +1,5 @@
 error[E0505]: cannot move out of `buf` because it is borrowed
-  --> tests/avio/bad_writer_lifetime.rs:10:10
+  --> tests/avformat/avio/bad_writer_lifetime.rs:10:10
    |
 6  |     let w = Writer::new(&mut *buf).unwrap();
    |                               --- borrow of `buf` occurs here

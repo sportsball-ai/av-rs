@@ -1,4 +1,6 @@
 #[macro_use]
 extern crate thiserror;
 
-pub mod avio;
+pub mod avformat;
+
+pub use ffmpeg_sys as sys;

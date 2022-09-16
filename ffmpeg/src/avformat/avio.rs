@@ -235,7 +235,7 @@ mod tests {
     #[test]
     fn test_lifetimes() {
         let t = trybuild::TestCases::new();
-        t.compile_fail("tests/avio/bad_reader_lifetime.rs");
-        t.compile_fail("tests/avio/bad_writer_lifetime.rs");
+        t.compile_fail("tests/avformat/avio/bad_reader_lifetime.rs");
+        t.compile_fail("tests/avformat/avio/bad_writer_lifetime.rs");
     }
 }
