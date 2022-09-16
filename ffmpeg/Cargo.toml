@@ -1,0 +1,11 @@
+[package]
+name = "ffmpeg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ffmpeg-sys = {version = "4", git = "https://github.com/meh/rust-ffmpeg-sys", default-features = false, features = ["avcodec", "avformat"]}
+thiserror = "1.0"
+
+[dev-dependencies]
+trybuild = "1.0"
