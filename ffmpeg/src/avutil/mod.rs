@@ -1,7 +1,6 @@
 use std::{ffi::CStr, os::raw::c_int};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-#[repr(transparent)]
 pub struct Error(pub c_int);
 
 impl Error {
