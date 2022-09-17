@@ -4,8 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ffmpeg-sys = {version = "4", git = "https://github.com/meh/rust-ffmpeg-sys", default-features = false, features = ["avcodec", "avformat"]}
+# XXX: ffmpeg-sys doesn't seem to build without avcodec.
+ffmpeg-sys = {version = "4", git = "https://github.com/meh/rust-ffmpeg-sys", default-features = false, features = ["avcodec"] }
 thiserror = "1.0"
+
+[features]
+avcodec = ["ffmpeg-sys/avcodec"]
+avfilter = ["ffmpeg-sys/avfilter"]
+avformat = ["ffmpeg-sys/avformat"]
+swscale = ["ffmpeg-sys/swscale"]
 
 [dev-dependencies]
 trybuild = "1.0"
