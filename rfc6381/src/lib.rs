@@ -52,8 +52,8 @@ pub fn codec_from_h265_nalu<T: Iterator<Item = u8>>(mut nalu: h265::NALUnit<h265
 }
 
 #[cfg(feature = "ffmpeg")]
-pub fn codec_from_ffmpeg_codec_context(codec: &ffmpeg_sys::AVCodecContext) -> Option<String> {
-    use ffmpeg_sys::*;
+pub fn codec_from_ffmpeg_codec_context(codec: &ffmpeg::sys::AVCodecContext) -> Option<String> {
+    use ffmpeg::sys::AVCodecID;
     match codec.codec_id {
         AVCodecID::AV_CODEC_ID_AAC => Some(format!("mp4a.40.{}", codec.profile + 1)),
         AVCodecID::AV_CODEC_ID_H264 => {

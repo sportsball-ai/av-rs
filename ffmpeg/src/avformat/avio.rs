@@ -4,6 +4,7 @@ use std::{
     mem,
     os::raw::{c_int, c_void},
 };
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {

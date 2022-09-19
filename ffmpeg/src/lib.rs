@@ -1,6 +1,4 @@
-#[macro_use]
-extern crate thiserror;
-
+#[cfg(feature = "avformat")]
 pub mod avformat;
 pub mod avutil;
 

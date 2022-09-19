@@ -5,9 +5,9 @@ edition = "2018"
 
 [features]
 default = []
-ffmpeg = ["ffmpeg-sys"]
+ffmpeg = ["dep:ffmpeg"]
 
 [dependencies]
 h264 = { path = "../h264" }
 h265 = { path = "../h265" }
-ffmpeg-sys = {version = "4.0.2", git = "https://github.com/meh/rust-ffmpeg-sys", default-features = false, features = ["avcodec"], optional = true}
+ffmpeg = { path = "../ffmpeg", features = ["avcodec"], optional = true }
