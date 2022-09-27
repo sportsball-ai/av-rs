@@ -1,6 +1,7 @@
 use av_traits::{EncodedFrameType, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use snafu::Snafu;
 
+#[cfg(feature = "v2-compat")]
 mod xcoder_259;
 mod xcoder_310;
 
@@ -31,19 +32,24 @@ pub struct XcoderEncoderConfig {
 
 // Encodes video using NETINT hardware. Only YUV 420 inputs are supported.
 pub enum XcoderEncoder<F> {
+    #[cfg(feature = "v2-compat")]
     Xcoder259(xcoder_259::XcoderEncoder<F>),
     Xcoder310(xcoder_310::XcoderEncoder<F>),
 }
 
 impl<F> XcoderEncoder<F> {
     pub fn new(config: XcoderEncoderConfig) -> Result<Self> {
-        match xcoder_310::XcoderEncoder::new(config.clone()) {
+        #[cfg(not(feature = "v2-compat"))]
+        return Ok(Self::Xcoder310(xcoder_310::XcoderEncoder::new(config)?));
+
+        #[cfg(feature = "v2-compat")]
+        return match xcoder_310::XcoderEncoder::new(config.clone()) {
             Ok(enc) => Ok(Self::Xcoder310(enc)),
-            Err(e) => match xcoder_259::XcoderEncoder::new(config)  {
+            Err(e) => match xcoder_259::XcoderEncoder::new(config) {
                 Ok(enc) => Ok(Self::Xcoder259(enc)),
                 _ => Err(e),
             },
-        }
+        };
     }
 }
 
@@ -53,6 +59,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 
     fn encode(&mut self, input: F, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<F>>> {
         match self {
+            #[cfg(feature = "v2-compat")]
             Self::Xcoder259(e) => e.encode(input, frame_type),
             Self::Xcoder310(e) => e.encode(input, frame_type),
         }
@@ -60,6 +67,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 
     fn flush(&mut self) -> Result<Option<VideoEncoderOutput<F>>> {
         match self {
+            #[cfg(feature = "v2-compat")]
             Self::Xcoder259(e) => e.flush(),
             Self::Xcoder310(e) => e.flush(),
         }
@@ -68,8 +76,8 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 
 #[cfg(test)]
 mod test {
-    use av_traits::{VideoTimecode, VideoTimecodeMode};
     use super::*;
+    use av_traits::{VideoTimecode, VideoTimecodeMode};
     use h264::{Decode, U1, U32};
     use std::{
         process::{self, Command},

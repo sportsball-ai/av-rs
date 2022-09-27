@@ -64,7 +64,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose -p xcoder-logan -- --test-threads=1
+          args: --verbose -p xcoder-logan --features v2-compat -- --test-threads=1
   test_xcoder_quadra:
     name: Test xcoder-quadra
     runs-on:
