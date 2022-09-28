@@ -20,7 +20,7 @@ mod tests {
     #[test]
     fn it_works() {
         unsafe {
-            ni_rsrc_print_all_devices_capability();
+            ni_logan_rsrc_print_all_devices_capability();
         }
     }
 }

@@ -1,5 +1,5 @@
 use super::{Result, XcoderEncoderCodec, XcoderEncoderConfig, XcoderEncoderError};
-use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput, VideoTimecode, VideoTimecodeMode};
+use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use h264::{Encode, U1};
 use scopeguard::{guard, ScopeGuard};
 use std::{collections::VecDeque, io, mem};
@@ -238,77 +238,6 @@ impl<F> XcoderEncoder<F> {
             })
         }
     }
-
-    fn sei_nalu(config: &XcoderEncoderConfig, timecode: &VideoTimecode) -> Option<Vec<u8>> {
-        match config.codec {
-            XcoderEncoderCodec::H264 => {
-                use h264::*;
-
-                let payload = PicTiming {
-                    pic_struct: U4(0), // progressive frame
-                    timecodes: vec![Timecode {
-                        clock_timestamp_flag: U1(1),
-                        ct_type: U2(2),               // unknown origin picture scan
-                        nuit_field_based_flag: U1(1), // one frame per two ticks
-                        counting_type: U5(match timecode.mode {
-                            VideoTimecodeMode::Normal => 0,
-                            VideoTimecodeMode::DropFrame => 4,
-                        }),
-                        full_timestamp_flag: U1(1),
-                        discontinuity_flag: U1(if timecode.discontinuity { 1 } else { 0 }),
-                        cnt_dropped_flag: U1(match timecode.mode {
-                            VideoTimecodeMode::Normal => 0,
-                            VideoTimecodeMode::DropFrame => {
-                                if timecode.frames == 2 && timecode.seconds == 0 && timecode.minutes % 10 != 0 {
-                                    1
-                                } else {
-                                    0
-                                }
-                            }
-                        }),
-                        n_frames: U8(timecode.frames as _),
-                        seconds: U6(timecode.seconds as _),
-                        minutes: U6(timecode.minutes as _),
-                        hours: U5(timecode.hours as _),
-                        ..Default::default()
-                    }],
-                    ..Default::default()
-                };
-                let mut encoded_payload = vec![];
-                payload
-                    .encode(
-                        &mut BitstreamWriter::new(&mut encoded_payload),
-                        &h264::VUIParameters {
-                            pic_struct_present_flag: U1(1),
-                            ..Default::default()
-                        },
-                    )
-                    .expect("encoding the payload to a vec should never fail");
-
-                let sei = SEI {
-                    sei_message: vec![SEIMessage {
-                        payload_type: SEI_PAYLOAD_TYPE_PIC_TIMING,
-                        payload: encoded_payload,
-                    }],
-                };
-                let mut encoded_sei = vec![];
-                sei.encode(&mut BitstreamWriter::new(&mut encoded_sei))
-                    .expect("encoding the sei to a vec should never fail");
-
-                let nalu = NALUnit {
-                    forbidden_zero_bit: F1(0),
-                    nal_ref_idc: U2(0),
-                    nal_unit_type: U5(NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION),
-                    rbsp_byte: RBSP::new(encoded_sei.into_iter()),
-                };
-                let mut encoded_nalu = vec![0, 0, 0, 1];
-                nalu.encode(&mut BitstreamWriter::new(&mut encoded_nalu))
-                    .expect("encoding the nalu to a vec should never fail");
-                Some(encoded_nalu)
-            }
-            XcoderEncoderCodec::H265 => None,
-        }
-    }
 }
 
 impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
@@ -339,30 +268,15 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
                             .input_frames
                             .pop_front()
                             .expect("there should never be more output frames than input frames");
-                        let mut data = match self.encoded_frame.parameter_sets() {
-                            Some(sets) => [sets, self.encoded_frame.as_slice()].concat(),
-                            None => self.encoded_frame.as_slice().to_vec(),
+                        let data = match self.encoded_frame.parameter_sets() {
+                            Some(sets) => self.config.assemble_access_unit(
+                                h264::iterate_annex_b(sets).chain(h264::iterate_annex_b(&self.encoded_frame.as_slice())),
+                                raw_frame.timecode(),
+                            ),
+                            None => self
+                                .config
+                                .assemble_access_unit(h264::iterate_annex_b(&self.encoded_frame.as_slice()), raw_frame.timecode()),
                         };
-                        if let Some(sei) = raw_frame.timecode().and_then(|tc| Self::sei_nalu(&self.config, tc)) {
-                            // If we have an SEI to write, we told the encoder to reserve space for
-                            // it by setting sei_total_len. Now we just need to fill that space in.
-                            let mut zeroes = 0;
-                            for (i, byte) in data.iter().enumerate() {
-                                if *byte == 0 {
-                                    zeroes += 1;
-                                    if zeroes == 4 {
-                                        // We found the spot for the SEI. Now copy it in. Note this
-                                        // is a little less hacky than it seems, because this many
-                                        // consecutive zeroes aren't legal in a well-formed
-                                        // bitstream.
-                                        data[i - 3..i - 3 + sei.len()].copy_from_slice(&sei);
-                                        break;
-                                    }
-                                } else {
-                                    zeroes = 0;
-                                }
-                            }
-                        }
                         self.output_frames.push_back(VideoEncoderOutput {
                             raw_frame,
                             encoded_frame: EncodedVideoFrame {
@@ -397,13 +311,6 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             } else {
                 frame.force_key_frame = 0;
                 frame.ni_logan_pict_type = 0;
-            }
-
-            frame.sei_total_len = 0;
-            if let Some(sei) = f.timecode().and_then(|tc| Self::sei_nalu(&self.config, tc)) {
-                // There's no way with this version of libxcoder to make the encoder write our
-                // SEI for us, but this will make it reserve space for us to fill it in.
-                frame.sei_total_len = sei.len() as _;
             }
 
             for i in 0..3 {

@@ -7,7 +7,9 @@ edition = "2021"
 default = []
 
 # When used, the crate will also compile and link to the 2.5.9 software,
-# allowing the use of NETINT devices on either 2.X or 3.X firmwares.
+# allowing the use of NETINT devices on either 2.X or 3.X firmwares. The major
+# downside to doing this is you won't also be able to link to the Quadra
+# library.
 v2-compat = ["xcoder-logan-259-sys"]
 
 [dependencies]

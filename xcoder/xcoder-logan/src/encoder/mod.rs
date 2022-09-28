@@ -1,4 +1,4 @@
-use av_traits::{EncodedFrameType, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
+use av_traits::{EncodedFrameType, RawVideoFrame, VideoEncoder, VideoEncoderOutput, VideoTimecode, VideoTimecodeMode};
 use snafu::Snafu;
 
 #[cfg(feature = "v2-compat")]
@@ -28,6 +28,109 @@ pub struct XcoderEncoderConfig {
     pub fps: f64,
     pub bitrate: Option<u32>,
     pub codec: XcoderEncoderCodec,
+}
+
+impl XcoderEncoderConfig {
+    fn sei_nalu(&self, timecode: &VideoTimecode) -> Option<Vec<u8>> {
+        match self.codec {
+            XcoderEncoderCodec::H264 => {
+                use h264::*;
+
+                let payload = PicTiming {
+                    pic_struct: U4(0), // progressive frame
+                    timecodes: vec![Timecode {
+                        clock_timestamp_flag: U1(1),
+                        ct_type: U2(2),               // unknown origin picture scan
+                        nuit_field_based_flag: U1(1), // one frame per two ticks
+                        counting_type: U5(match timecode.mode {
+                            VideoTimecodeMode::Normal => 0,
+                            VideoTimecodeMode::DropFrame => 4,
+                        }),
+                        full_timestamp_flag: U1(1),
+                        discontinuity_flag: U1(if timecode.discontinuity { 1 } else { 0 }),
+                        cnt_dropped_flag: U1(match timecode.mode {
+                            VideoTimecodeMode::Normal => 0,
+                            VideoTimecodeMode::DropFrame => {
+                                if timecode.frames == 2 && timecode.seconds == 0 && timecode.minutes % 10 != 0 {
+                                    1
+                                } else {
+                                    0
+                                }
+                            }
+                        }),
+                        n_frames: U8(timecode.frames as _),
+                        seconds: U6(timecode.seconds as _),
+                        minutes: U6(timecode.minutes as _),
+                        hours: U5(timecode.hours as _),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                };
+                let mut encoded_payload = vec![];
+                payload
+                    .encode(
+                        &mut BitstreamWriter::new(&mut encoded_payload),
+                        &h264::VUIParameters {
+                            pic_struct_present_flag: U1(1),
+                            ..Default::default()
+                        },
+                    )
+                    .expect("encoding the payload to a vec should never fail");
+
+                let sei = SEI {
+                    sei_message: vec![SEIMessage {
+                        payload_type: SEI_PAYLOAD_TYPE_PIC_TIMING,
+                        payload: encoded_payload,
+                    }],
+                };
+                let mut encoded_sei = vec![];
+                sei.encode(&mut BitstreamWriter::new(&mut encoded_sei))
+                    .expect("encoding the sei to a vec should never fail");
+
+                let nalu = NALUnit {
+                    forbidden_zero_bit: F1(0),
+                    nal_ref_idc: U2(0),
+                    nal_unit_type: U5(NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION),
+                    rbsp_byte: RBSP::new(encoded_sei.into_iter()),
+                };
+                let mut encoded_nalu = vec![];
+                nalu.encode(&mut BitstreamWriter::new(&mut encoded_nalu))
+                    .expect("encoding the nalu to a vec should never fail");
+                Some(encoded_nalu)
+            }
+            XcoderEncoderCodec::H265 => None,
+        }
+    }
+
+    fn assemble_access_unit<'a, I, II>(&self, nalus: II, timecode: Option<&VideoTimecode>) -> Vec<u8>
+    where
+        II: IntoIterator<IntoIter = I>,
+        I: Iterator<Item = &'a [u8]>,
+    {
+        let mut nalus: Vec<&[u8]> = nalus.into_iter().collect();
+
+        // Insert SEI NALU if necessary.
+        let sei = timecode.and_then(|tc| self.sei_nalu(tc));
+        if let Some(sei) = &sei {
+            for (i, nalu) in nalus.iter().enumerate() {
+                if !nalu.is_empty() {
+                    let nal_unit_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
+                    if nal_unit_type <= h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE {
+                        // Insert the SEI before this NALU.
+                        nalus.insert(i, &sei);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut ret = Vec::with_capacity(nalus.iter().map(|nalu| 4 + nalu.len()).sum());
+        for nalu in nalus {
+            ret.extend_from_slice(&[0, 0, 0, 1]);
+            ret.extend_from_slice(nalu);
+        }
+        ret
+    }
 }
 
 // Encodes video using NETINT hardware. Only YUV 420 inputs are supported.
@@ -257,6 +360,7 @@ mod test {
         assert_eq!(encoded_frames, 30);
 
         let mut vui_parameters = None;
+        let mut sei_count = 0;
         for nalu in h264::iterate_annex_b(&encoded) {
             let nalu = h264::NALUnit::decode(h264::Bitstream::new(nalu.iter().copied())).unwrap();
             match nalu.nal_unit_type.0 {
@@ -276,6 +380,8 @@ mod test {
                     vui_parameters = Some(sps.vui_parameters);
                 }
                 h264::NAL_UNIT_TYPE_SUPPLEMENTAL_ENHANCEMENT_INFORMATION => {
+                    sei_count += 1;
+
                     let vui_parameters = vui_parameters.as_ref().unwrap();
 
                     let sei = h264::SEI::decode(&mut h264::Bitstream::new(nalu.rbsp_byte)).unwrap();
@@ -298,5 +404,7 @@ mod test {
                 _ => {}
             }
         }
+
+        assert_eq!(sei_count, 30);
     }
 }
