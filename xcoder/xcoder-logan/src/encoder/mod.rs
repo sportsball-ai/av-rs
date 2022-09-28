@@ -117,7 +117,7 @@ impl XcoderEncoderConfig {
                     let nal_unit_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
                     if nal_unit_type <= h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE {
                         // Insert the SEI before this NALU.
-                        nalus.insert(i, &sei);
+                        nalus.insert(i, sei);
                         break;
                     }
                 }
