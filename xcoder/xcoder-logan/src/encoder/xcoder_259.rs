@@ -308,13 +308,6 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
                 frame.ni_pict_type = 0;
             }
 
-            frame.sei_total_len = 0;
-            if let Some(sei) = f.timecode().and_then(|tc| self.config.sei_nalu(tc)) {
-                // There's no way with this version of libxcoder to make the encoder write our
-                // SEI for us, but this will make it reserve space for us to fill it in.
-                frame.sei_total_len = sei.len() as _;
-            }
-
             for i in 0..3 {
                 let subsampling = match i {
                     0 => 1,
