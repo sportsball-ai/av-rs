@@ -1,5 +1,5 @@
 [package]
-name = "xcoder-logan-sys"
+name = "xcoder-logan-259-sys"
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"

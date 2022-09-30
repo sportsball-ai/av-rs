@@ -46,7 +46,30 @@ jobs:
     name: Test xcoder-logan
     runs-on:
       - self-hosted
-      - netint-t408
+      - netint-t408-310X2013
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          lfs: true
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.63.0
+          override: true
+      - name: Initialize
+        run: |
+          init_rsrc_logan || true
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+          args: --verbose -p xcoder-logan -- --test-threads=1
+  test_xcoder_logan_v2_compat:
+    name: Test xcoder-logan v2-compat
+    runs-on:
+      - self-hosted
+      - netint-t408-251X1E09
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -64,7 +87,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose -p xcoder-logan -- --test-threads=1
+          args: --verbose -p xcoder-logan --features v2-compat -- --test-threads=1
   test_xcoder_quadra:
     name: Test xcoder-quadra
     runs-on:
