@@ -1,6 +1,6 @@
 use crate::sys::*;
 use crate::xlnx_dec_utils::*;
-use crate::XlnxError;
+use crate::{XlnxError, XlnxErrorType};
 use simple_error::{bail, SimpleError};
 
 pub struct XlnxDecoder {
@@ -49,6 +49,13 @@ impl XlnxDecoder {
     /// @buf: buffer of input data.
     /// @size: size of input data.
     pub fn xlnx_dec_send_pkt(&mut self, buf: &mut [u8], pts: i32) -> Result<(), XlnxError> {
+        if buf.len() > (self.frame_props.width * self.frame_props.height * self.frame_props.bits_per_pixel / 8) as usize {
+            return Err(XlnxError {
+                err: XlnxErrorType::XlnxErr,
+                message: "xma decoders can't handle frames larger than the size of an uncompressed plane".to_string(),
+            });
+        }
+
         let mut data_used = 0;
         let mut index = 0;
         let mut ret;
@@ -282,5 +289,50 @@ mod decoder_tests {
         let (packets_sent, frames_decoded) = decode_file(H264_TEST_FILE_PATH, 0, 100, 31);
         assert_eq!(packets_sent, 321); // there are 300 frames but 321 nal units to send to the decoder
         assert_eq!(frames_decoded, 300);
+    }
+
+    #[test]
+    fn test_large_packet() {
+        initialize();
+
+        // Some of these packet sizes used to segfault. Make sure they don't anymore.
+        for packet_len in [1280 * 720, 1280 * 720 + 1000, 1280 * 720 + 1, 1280 * 720 * 2] {
+            let dec_props = XlnxDecoderProperties {
+                width: 1280,
+                height: 720,
+                bitdepth: 8,
+                codec_type: 0,
+                low_latency: 0,
+                entropy_buffers_count: 2,
+                zero_copy: 1,
+                profile: 100,
+                level: 40,
+                chroma_mode: 420,
+                scan_type: 1,
+                latency_logging: 1,
+                splitbuff_mode: 0,
+                framerate: XmaFraction { numerator: 25, denominator: 1 },
+            };
+
+            let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
+
+            let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
+
+            let cu_list_res: xrmCuListResource = Default::default();
+
+            let mut xlnx_dec_ctx = XlnxDecoderXrmCtx {
+                xrm_reserve_id: 0,
+                device_id: -1,
+                dec_load: xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap(),
+                decode_res_in_use: false,
+                xrm_ctx,
+                cu_list_res,
+            };
+
+            let mut decoder = XlnxDecoder::new(xma_dec_props.as_mut(), &mut xlnx_dec_ctx).unwrap();
+
+            let mut data = vec![0u8; packet_len];
+            assert_eq!(decoder.xlnx_dec_send_pkt(&mut data, 0).is_ok(), packet_len <= 1280 * 720);
+        }
     }
 }
