@@ -83,7 +83,7 @@ impl XlnxScaler {
                 self.recv_frame()?;
             }
             Err(e) => match e.err {
-                XlnxErrorType::XlnxFlushAgain => {
+                XlnxErrorType::FlushAgain => {
                     self.recv_frame()?;
                 }
                 _ => return Err(e),
@@ -175,7 +175,7 @@ mod scaler_tests {
                     }
                 }
                 Err(e) => match e.err {
-                    XlnxErrorType::XlnxSendMoreData => {}
+                    XlnxErrorType::SendMoreData => {}
                     _ => panic!("scalar processing has failed with error {:?}", e),
                 },
             };
@@ -207,8 +207,8 @@ mod scaler_tests {
                         }
                     }
                     Err(e) => match e.err {
-                        XlnxErrorType::XlnxEOS => break,
-                        XlnxErrorType::XlnxFlushAgain => {}
+                        XlnxErrorType::EOS => break,
+                        XlnxErrorType::FlushAgain => {}
                         _ => panic!("error receiving flushing xilinx scaler: {:?}", e),
                     },
                 }

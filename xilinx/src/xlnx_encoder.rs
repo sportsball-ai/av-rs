@@ -183,8 +183,8 @@ mod encoder_tests {
                     }
                 }
                 Err(e) => match e.err {
-                    XlnxErrorType::XlnxSendMoreData => {}
-                    XlnxErrorType::XlnxTryAgain => {}
+                    XlnxErrorType::SendMoreData => {}
+                    XlnxErrorType::TryAgain => {}
                     _ => panic!("encoder processing has failed with error {:?}", e),
                 },
             }
@@ -205,8 +205,8 @@ mod encoder_tests {
                     break;
                 } // if flush was successful the first time, break
                 Err(e) => match e.err {
-                    XlnxErrorType::XlnxFlushAgain => {}
-                    XlnxErrorType::XlnxEOS => break,
+                    XlnxErrorType::FlushAgain => {}
+                    XlnxErrorType::EOS => break,
                     _ => panic!("error sending flush frame to encoder {:?}", e),
                 },
             }
@@ -221,8 +221,8 @@ mod encoder_tests {
                     processed_frame_count += 1;
                 }
                 Err(e) => match e.err {
-                    XlnxErrorType::XlnxEOS => break, //we have hit the end of the stream,
-                    XlnxErrorType::XlnxTryAgain => {}
+                    XlnxErrorType::EOS => break, //we have hit the end of the stream,
+                    XlnxErrorType::TryAgain => {}
                     _ => panic!("error receiving frame while flushing {:?}", e),
                 },
             }

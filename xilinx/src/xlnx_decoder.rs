@@ -51,7 +51,7 @@ impl XlnxDecoder {
     pub fn xlnx_dec_send_pkt(&mut self, buf: &mut [u8], pts: i32) -> Result<(), XlnxError> {
         if buf.len() > (self.frame_props.width * self.frame_props.height * self.frame_props.bits_per_pixel / 8) as usize {
             return Err(XlnxError {
-                err: XlnxErrorType::XlnxErr,
+                err: XlnxErrorType::ErrorInvalid,
                 message: "xma decoders can't handle frames larger than the size of an uncompressed plane".to_string(),
             });
         }
@@ -215,7 +215,7 @@ mod decoder_tests {
                         packet_send_success = true;
                     }
                     Err(e) => {
-                        if let XlnxErrorType::XlnxErr = e.err {
+                        if !matches!(e.err, XlnxErrorType::SendMoreData | XlnxErrorType::TryAgain) {
                             panic!("error sending packet to xilinx decoder: {}", e.message)
                         }
                     }
@@ -233,7 +233,7 @@ mod decoder_tests {
                         }
                         Err(e) => {
                             match e.err {
-                                XlnxErrorType::XlnxTryAgain => break,
+                                XlnxErrorType::TryAgain => break,
                                 _ => panic!("error receiving frame from decoder"),
                             };
                         }
@@ -258,11 +258,11 @@ mod decoder_tests {
                         // the frame was successfully decoded.
                     }
                     Err(e) => match e.err {
-                        XlnxErrorType::XlnxEOS => {
+                        XlnxErrorType::EOS => {
                             finished = true;
                             break;
                         }
-                        XlnxErrorType::XlnxTryAgain => break,
+                        XlnxErrorType::TryAgain => break,
                         _ => panic!("error receiving frame from decoder while flushing. Got error"),
                     },
                 }
@@ -332,7 +332,11 @@ mod decoder_tests {
             let mut decoder = XlnxDecoder::new(xma_dec_props.as_mut(), &mut xlnx_dec_ctx).unwrap();
 
             let mut data = vec![0u8; packet_len];
-            assert_eq!(decoder.xlnx_dec_send_pkt(&mut data, 0).is_ok(), packet_len <= 1280 * 720);
+            if packet_len <= 1280 * 720 {
+                assert!(decoder.xlnx_dec_send_pkt(&mut data, 0).is_ok());
+            } else {
+                assert_eq!(decoder.xlnx_dec_send_pkt(&mut data, 0).err().unwrap().err, XlnxErrorType::ErrorInvalid);
+            }
         }
     }
 }
