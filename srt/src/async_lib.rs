@@ -40,7 +40,7 @@ impl AsyncListener<'static> {
         for addr in addr.to_socket_addrs()? {
             let (addr, len) = to_sockaddr(&addr);
             unsafe {
-                check_code("srt_bind", sys::srt_bind(socket.raw(), addr, len as _))?;
+                check_code("srt_bind", sys::srt_bind(socket.raw(), &addr as *const _ as _, len as _))?;
             }
         }
         unsafe {
@@ -178,7 +178,7 @@ impl Future for Connect {
                     let socket = Socket::new()?;
                     socket.set_connect_options(&options)?;
                     unsafe {
-                        check_code("srt_connect", sys::srt_connect(socket.raw(), addr, len as _))?;
+                        check_code("srt_connect", sys::srt_connect(socket.raw(), &addr as *const _ as _, len as _))?;
                     }
                     AsyncStream::new(options.stream_id, socket)
                 });

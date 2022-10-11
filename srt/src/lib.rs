@@ -288,11 +288,26 @@ fn sockaddr_from_storage(storage: &sys::sockaddr_storage, len: sys::socklen_t) -
     }
 }
 
-fn to_sockaddr(addr: &SocketAddr) -> (*const sys::sockaddr, sys::socklen_t) {
-    match addr {
-        SocketAddr::V4(ref a) => (a as *const _ as *const _, mem::size_of_val(a) as _),
-        SocketAddr::V6(ref a) => (a as *const _ as *const _, mem::size_of_val(a) as _),
-    }
+fn to_sockaddr(addr: &SocketAddr) -> (sys::sockaddr_storage, sys::socklen_t) {
+    use libc::{sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
+    let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
+    let socklen = match addr {
+        SocketAddr::V4(ref a) => {
+            let mut storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in) };
+            storage.sin_family = AF_INET as _;
+            storage.sin_port = u16::to_be(a.port());
+            storage.sin_addr.s_addr = u32::from_ne_bytes(a.ip().octets());
+            mem::size_of::<sockaddr_in>()
+        }
+        SocketAddr::V6(ref a) => {
+            let mut storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in6) };
+            storage.sin6_family = AF_INET6 as _;
+            storage.sin6_port = u16::to_be(a.port());
+            storage.sin6_addr.s6_addr.copy_from_slice(&a.ip().octets());
+            mem::size_of::<sockaddr_in6>()
+        }
+    };
+    (storage, socklen as _)
 }
 
 pub trait ListenerCallback {
@@ -375,7 +390,7 @@ impl Listener<'static> {
         for addr in addr.to_socket_addrs()? {
             let (addr, len) = to_sockaddr(&addr);
             unsafe {
-                check_code("srt_bind", sys::srt_bind(socket.raw(), addr, len as _))?;
+                check_code("srt_bind", sys::srt_bind(socket.raw(), &addr as *const _ as _, len as _))?;
             }
         }
         unsafe {
@@ -441,7 +456,7 @@ impl Stream {
             let socket = Socket::new()?;
             socket.set_connect_options(options)?;
             unsafe {
-                match check_code("srt_connect", sys::srt_connect(socket.raw(), addr, len as _)) {
+                match check_code("srt_connect", sys::srt_connect(socket.raw(), &addr as *const _ as _, len as _)) {
                     Err(e) => last_err = e,
                     Ok(_) => {
                         return Ok(Self {
@@ -545,5 +560,13 @@ mod test {
         assert_eq!(conn.id(), options.stream_id.as_ref());
 
         server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn test_to_sockaddr() {
+        let addr: SocketAddr = "127.0.0.1:8080".parse().unwrap();
+        let (sockaddr, socklen) = to_sockaddr(&addr);
+        let round_tripped = sockaddr_from_storage(&sockaddr, socklen).unwrap();
+        assert_eq!(addr, round_tripped);
     }
 }
