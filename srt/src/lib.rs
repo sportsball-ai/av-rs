@@ -448,6 +448,10 @@ pub struct ConnectOptions {
     pub send_buffer_size: Option<i32>,
 }
 
+pub unsafe fn set_log_level(level: i32) {
+    sys::srt_setloglevel(level)
+}
+
 impl Stream {
     pub fn connect<A: ToSocketAddrs>(addr: A, options: &ConnectOptions) -> Result<Self> {
         let mut last_err = Error::InvalidAddress;
