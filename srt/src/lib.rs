@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 
-use srt_sys as sys;
+pub use srt_sys as sys;
 use std::{
     ffi::CStr,
     fmt,
@@ -446,10 +446,6 @@ pub struct ConnectOptions {
     pub too_late_packet_drop: Option<bool>,
     pub receive_buffer_size: Option<i32>,
     pub send_buffer_size: Option<i32>,
-}
-
-pub unsafe fn set_log_level(level: i32) {
-    sys::srt_setloglevel(level)
 }
 
 impl Stream {
