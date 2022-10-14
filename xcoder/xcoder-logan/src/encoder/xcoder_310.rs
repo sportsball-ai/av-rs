@@ -307,7 +307,7 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             frame.dts = frame.pts;
             if force_key_frame {
                 frame.force_key_frame = 1;
-                frame.ni_logan_pict_type = sys::ni_logan_pic_type_t_LOGAN_PIC_TYPE_IDR;
+                frame.ni_logan_pict_type = sys::ni_logan_pic_type_t_LOGAN_PIC_TYPE_FORCE_IDR;
             } else {
                 frame.force_key_frame = 0;
                 frame.ni_logan_pict_type = 0;
