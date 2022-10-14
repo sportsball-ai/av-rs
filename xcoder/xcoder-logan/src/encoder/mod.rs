@@ -252,6 +252,76 @@ mod test {
         //std::fs::File::create("tmp.h264").unwrap().write_all(&encoded).unwrap();
     }
 
+    #[test]
+    fn test_video_encoder_forced_key_frames() {
+        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 29.97,
+            bitrate: None,
+            codec: XcoderEncoderCodec::H264,
+        })
+        .unwrap();
+
+        let mut encoded = vec![];
+        let mut encoded_frames = 0;
+
+        let u = vec![200u8; 1920 * 1080 / 4];
+        let v = vec![128u8; 1920 * 1080 / 4];
+        for i in 0..20 {
+            let mut y = Vec::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    16
+                } else {
+                    (16.0 + (line as f64 / 1080.0) * 219.0).round() as u8
+                };
+                y.resize(y.len() + 1920, sample);
+            }
+            let frame = TestFrame {
+                samples: Arc::new(vec![y, u.clone(), v.clone()]),
+                ..Default::default()
+            };
+            if let Some(mut output) = encoder
+                .encode(frame, if i % 5 == 0 { EncodedFrameType::Key } else { EncodedFrameType::Auto })
+                .unwrap()
+            {
+                encoded.append(&mut output.encoded_frame.data);
+                encoded_frames += 1;
+            }
+        }
+        while let Some(mut output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.data);
+            encoded_frames += 1;
+        }
+
+        assert_eq!(encoded_frames, 20);
+
+        let mut slices = 0;
+        for nalu in h264::iterate_annex_b(&encoded) {
+            let nalu = h264::NALUnit::decode(h264::Bitstream::new(nalu.iter().copied())).unwrap();
+            match nalu.nal_unit_type.0 {
+                1 => {
+                    // non-idr slice
+                    assert_ne!(slices % 5, 0);
+                    slices += 1;
+                }
+                h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE => {
+                    // key frame
+                    assert_eq!(slices % 5, 0);
+                    slices += 1;
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(slices, 20);
+
+        // To inspect the output, uncomment these lines:
+        //use std::io::Write;
+        //std::fs::File::create("tmp.h264").unwrap().write_all(&encoded).unwrap();
+    }
+
     /// This is a regression test. In the past, it would abort before completing due to a resource
     /// leak.
     #[test]
