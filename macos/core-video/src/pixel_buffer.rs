@@ -1,7 +1,6 @@
 use super::{sys, ImageBuffer};
 use core_foundation::{result, CFType, OSStatus};
 use std::ffi::c_void;
-use sys::size_t;
 
 pub struct PixelBuffer(sys::CVPixelBufferRef);
 core_foundation::trait_impls!(PixelBuffer);
@@ -28,9 +27,9 @@ impl PixelBuffer {
         let mut plane_bytes_per_row = vec![];
         for p in planes.into_iter() {
             plane_ptrs.push(p.data as *mut c_void);
-            plane_widths.push(p.width as size_t);
-            plane_heights.push(p.height as size_t);
-            plane_bytes_per_row.push(p.bytes_per_row as size_t);
+            plane_widths.push(p.width as usize);
+            plane_heights.push(p.height as usize);
+            plane_bytes_per_row.push(p.bytes_per_row as usize);
         }
 
         let mut ret = std::ptr::null_mut();
@@ -61,11 +60,11 @@ impl PixelBuffer {
         unsafe { sys::CVPixelBufferGetPixelFormatType(self.0) }
     }
 
-    pub fn width(&self) -> size_t {
+    pub fn width(&self) -> usize {
         unsafe { sys::CVPixelBufferGetWidth(self.0) }
     }
 
-    pub fn height(&self) -> size_t {
+    pub fn height(&self) -> usize {
         unsafe { sys::CVPixelBufferGetHeight(self.0) }
     }
 
