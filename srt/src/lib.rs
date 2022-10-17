@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 
-use srt_sys as sys;
+pub use srt_sys as sys;
 use std::{
     ffi::CStr,
     fmt,
