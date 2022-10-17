@@ -133,6 +133,12 @@ impl Drop for XlnxDecoder {
                 xma_dec_session_destroy(self.dec_session);
             }
             if !self.out_frame.is_null() {
+                // when the decoder is dropped ensure that the xvbm_buffer_pool_entry has been freed
+                // there is no problem if xvbm_buffer_pool_entry_free is called more than once for
+                // an entry as long as the xframe exists
+                let handle: XvbmBufferHandle = (*self.out_frame).data[0].buffer;
+                xvbm_buffer_pool_entry_free(handle);
+
                 xma_frame_free(self.out_frame);
             }
         }
