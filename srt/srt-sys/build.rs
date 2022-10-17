@@ -1,11 +1,9 @@
 fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS must be set");
     let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH must be set");
-    let profile: String = std::env::var("PROFILE").expect("PROFILE must be set");
 
     let mut build = cmake::Config::new("vendor/srt-1.4.4");
     build.define("ENABLE_APPS", "OFF").define("ENABLE_SHARED", "OFF");
-    build.define("ENABLE_DEBUG", if profile == "release" { "OFF" } else { "ON" });
 
     if target_os == "macos" {
         build.define(
