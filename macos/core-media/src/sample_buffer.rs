@@ -12,7 +12,6 @@ impl SampleBuffer {
         sample_sizes: Option<&[usize]>,
     ) -> Result<Self, OSStatus> {
         let mut ret = std::ptr::null_mut();
-        let sample_sizes = sample_sizes.map(|v| v.iter().map(|&ss| ss as u64).collect::<Vec<_>>());
         result(
             unsafe {
                 sys::CMSampleBufferCreate(

@@ -17,6 +17,8 @@ fn main() {
             .whitelist_function("CVImageBuffer.+")
             .whitelist_function("CVPixelBuffer.+")
             .whitelist_var("kCVPixelBufferLock_ReadOnly")
+            // See: https://github.com/rust-lang/rust-bindgen/issues/1671
+            .size_t_is_usize(true)
             .generate()
             .expect("unable to generate bindings");
 

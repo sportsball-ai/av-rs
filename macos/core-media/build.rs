@@ -19,6 +19,8 @@ fn main() {
             .whitelist_function("CMSampleBuffer.+")
             .whitelist_var("kCFAllocator.+")
             .whitelist_var("kCMVideoCodecType_.+")
+            // See: https://github.com/rust-lang/rust-bindgen/issues/1671
+            .size_t_is_usize(true)
             .generate()
             .expect("unable to generate bindings");
 

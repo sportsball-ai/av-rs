@@ -27,9 +27,9 @@ impl PixelBuffer {
         let mut plane_bytes_per_row = vec![];
         for p in planes.into_iter() {
             plane_ptrs.push(p.data as *mut c_void);
-            plane_widths.push(p.width as u64);
-            plane_heights.push(p.height as u64);
-            plane_bytes_per_row.push(p.bytes_per_row as u64);
+            plane_widths.push(p.width as usize);
+            plane_heights.push(p.height as usize);
+            plane_bytes_per_row.push(p.bytes_per_row as usize);
         }
 
         let mut ret = std::ptr::null_mut();
@@ -60,11 +60,11 @@ impl PixelBuffer {
         unsafe { sys::CVPixelBufferGetPixelFormatType(self.0) }
     }
 
-    pub fn width(&self) -> u64 {
+    pub fn width(&self) -> usize {
         unsafe { sys::CVPixelBufferGetWidth(self.0) }
     }
 
-    pub fn height(&self) -> u64 {
+    pub fn height(&self) -> usize {
         unsafe { sys::CVPixelBufferGetHeight(self.0) }
     }
 

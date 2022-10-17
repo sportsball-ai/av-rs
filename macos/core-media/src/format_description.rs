@@ -74,7 +74,7 @@ impl VideoFormatDescription {
         unsafe {
             let mut ret = std::ptr::null();
             let pointers: Vec<_> = parameter_sets.iter().map(|&ps| ps.as_ptr()).collect();
-            let sizes: Vec<_> = parameter_sets.iter().map(|ps| ps.len() as u64).collect();
+            let sizes: Vec<_> = parameter_sets.iter().map(|ps| ps.len()).collect();
             result(
                 sys::CMVideoFormatDescriptionCreateFromH264ParameterSets(
                     std::ptr::null_mut(),
