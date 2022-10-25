@@ -600,7 +600,7 @@ mod test {
     }
 
     #[test]
-    fn test_audio_video_pts_from_wall_clock() {
+    fn test_oversized_presentation_times() {
         let w = TestWriter::new();
         let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
         add_streams(&mut muxer, 2);
