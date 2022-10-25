@@ -45,7 +45,8 @@ impl<W: Write> InterleavingMuxer<W> {
 
     /// This function returns a timestamp with high bits added in order to keep it as close as possible to `last_fixed_timestamp`.
     /// To correctly track overflows, `last_fixed_timestamp` should be the timestamp that was previously returned by this function.
-    fn fixed_timestamp(&mut self, ts: u64) -> u64 {
+    fn fixed_timestamp(&mut self, mut ts: u64) -> u64 {
+        ts &= TS_33BIT_MASK;
         self.last_fixed_timestamp = if (self.last_fixed_timestamp & TS_33BIT_MASK) > 0x180000000 && ts < 0x80000000 {
             // It looks like ts rolled over. This must be the first timestamp of a new epoch.
             ts | ((self.last_fixed_timestamp >> 33) + 1) << 33
@@ -60,14 +61,8 @@ impl<W: Write> InterleavingMuxer<W> {
 
     pub fn write(&mut self, stream_index: usize, mut p: Packet) -> Result<(), EncodeError> {
         if let Some(ref mut dts) = p.dts_90khz {
-            if *dts > TS_33BIT_MASK {
-                *dts &= TS_33BIT_MASK;
-            }
             *dts = self.fixed_timestamp(*dts);
         } else if let Some(ref mut pts) = p.pts_90khz {
-            if *pts > TS_33BIT_MASK {
-                *pts &= TS_33BIT_MASK;
-            }
             *pts = self.fixed_timestamp(*pts);
         }
 
