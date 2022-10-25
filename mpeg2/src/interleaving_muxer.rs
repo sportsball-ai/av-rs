@@ -220,6 +220,7 @@ impl<W: Write> Drop for InterleavingMuxer<W> {
 mod test {
     use super::*;
     use crate::{pes, ts};
+    use std::io::BufRead;
     use std::{
         cell::{Ref, RefCell},
         fs::File,
@@ -595,5 +596,31 @@ mod test {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn test_audio_video_pts_from_wall_clock() {
+        let w = TestWriter::new();
+        let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
+        add_streams(&mut muxer, 2);
+
+        let buf = std::io::BufReader::new(File::open("src/testdata/audio_video_pts.txt").unwrap());
+        for line in buf.lines() {
+            let line = line.unwrap();
+            let mut iter = line.split(", ");
+            let stream_index = iter.next().unwrap().parse::<usize>().unwrap();
+            let pts = iter.next().unwrap().parse::<u64>().unwrap();
+            muxer.write(stream_index, simple_packet(pts)).unwrap();
+        }
+
+        let mut last_pts = None;
+        for packet in &*w.packets() {
+            if packet.stream_index == 0 {
+                if let Some(last_pts) = last_pts {
+                    assert!(last_pts < packet.pts_90khz.unwrap());
+                }
+                last_pts = Some(packet.pts_90khz.unwrap());
+            }
+        }
     }
 }
