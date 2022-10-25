@@ -59,14 +59,15 @@ impl<W: Write> InterleavingMuxer<W> {
     }
 
     pub fn write(&mut self, stream_index: usize, mut p: Packet) -> Result<(), EncodeError> {
-        if let Some(pts_90khz) = p.pts_90khz {
-            if pts_90khz > TS_33BIT_MASK {
-                p.pts_90khz = Some(pts_90khz & TS_33BIT_MASK);
-            }
-        }
         if let Some(ref mut dts) = p.dts_90khz {
+            if *dts > TS_33BIT_MASK {
+                *dts &= TS_33BIT_MASK;
+            }
             *dts = self.fixed_timestamp(*dts);
         } else if let Some(ref mut pts) = p.pts_90khz {
+            if *pts > TS_33BIT_MASK {
+                *pts &= TS_33BIT_MASK;
+            }
             *pts = self.fixed_timestamp(*pts);
         }
 
