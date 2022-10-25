@@ -59,6 +59,11 @@ impl<W: Write> InterleavingMuxer<W> {
     }
 
     pub fn write(&mut self, stream_index: usize, mut p: Packet) -> Result<(), EncodeError> {
+        if let Some(pts_90khz) = p.pts_90khz {
+            if pts_90khz > TS_33BIT_MASK {
+                p.pts_90khz = Some(pts_90khz & TS_33BIT_MASK);
+            }
+        }
         if let Some(ref mut dts) = p.dts_90khz {
             *dts = self.fixed_timestamp(*dts);
         } else if let Some(ref mut pts) = p.pts_90khz {
@@ -613,13 +618,21 @@ mod test {
             muxer.write(stream_index, simple_packet(pts)).unwrap();
         }
 
-        let mut last_pts = None;
+        let mut last_video_pts = None;
+        let mut last_audio_pts = None;
         for packet in &*w.packets() {
+            let packet_pts = packet.pts_90khz.unwrap();
             if packet.stream_index == 0 {
-                if let Some(last_pts) = last_pts {
-                    assert!(last_pts < packet.pts_90khz.unwrap());
+                if let Some(last_pts) = last_video_pts {
+                    assert!(last_pts < packet_pts);
                 }
-                last_pts = Some(packet.pts_90khz.unwrap());
+                last_video_pts = Some(packet_pts);
+            }
+            if packet.stream_index == 1 {
+                if let Some(last_pts) = last_audio_pts {
+                    assert!(last_pts < packet_pts);
+                }
+                last_audio_pts = Some(packet_pts);
             }
         }
     }
