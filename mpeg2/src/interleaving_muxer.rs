@@ -45,7 +45,8 @@ impl<W: Write> InterleavingMuxer<W> {
 
     /// This function returns a timestamp with high bits added in order to keep it as close as possible to `last_fixed_timestamp`.
     /// To correctly track overflows, `last_fixed_timestamp` should be the timestamp that was previously returned by this function.
-    fn fixed_timestamp(&mut self, ts: u64) -> u64 {
+    fn fixed_timestamp(&mut self, mut ts: u64) -> u64 {
+        ts &= TS_33BIT_MASK;
         self.last_fixed_timestamp = if (self.last_fixed_timestamp & TS_33BIT_MASK) > 0x180000000 && ts < 0x80000000 {
             // It looks like ts rolled over. This must be the first timestamp of a new epoch.
             ts | ((self.last_fixed_timestamp >> 33) + 1) << 33
@@ -220,6 +221,7 @@ impl<W: Write> Drop for InterleavingMuxer<W> {
 mod test {
     use super::*;
     use crate::{pes, ts};
+    use std::io::BufRead;
     use std::{
         cell::{Ref, RefCell},
         fs::File,
@@ -595,5 +597,39 @@ mod test {
                 }
             ]
         );
+    }
+
+    #[test]
+    fn test_oversized_presentation_times() {
+        let w = TestWriter::new();
+        let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
+        add_streams(&mut muxer, 2);
+
+        let buf = std::io::BufReader::new(File::open("src/testdata/audio_video_pts.txt").unwrap());
+        for line in buf.lines() {
+            let line = line.unwrap();
+            let mut iter = line.split(", ");
+            let stream_index = iter.next().unwrap().parse::<usize>().unwrap();
+            let pts = iter.next().unwrap().parse::<u64>().unwrap();
+            muxer.write(stream_index, simple_packet(pts)).unwrap();
+        }
+
+        let mut last_video_pts = None;
+        let mut last_audio_pts = None;
+        for packet in &*w.packets() {
+            let packet_pts = packet.pts_90khz.unwrap();
+            if packet.stream_index == 0 {
+                if let Some(last_pts) = last_video_pts {
+                    assert!(last_pts < packet_pts);
+                }
+                last_video_pts = Some(packet_pts);
+            }
+            if packet.stream_index == 1 {
+                if let Some(last_pts) = last_audio_pts {
+                    assert!(last_pts < packet_pts);
+                }
+                last_audio_pts = Some(packet_pts);
+            }
+        }
     }
 }
