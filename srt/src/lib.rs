@@ -10,7 +10,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
     pin::Pin,
     str,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, atomic::AtomicUsize},
 };
 
 #[cfg(feature = "async")]
@@ -86,18 +86,24 @@ fn check_code(fn_name: &'static str, code: sys::int) -> Result<()> {
 
 #[derive(Default)]
 struct Api {
+    state: Arc<ApiState>,
+}
+
+#[derive(Default)]
+struct ApiState {
     #[cfg(feature = "async")]
     epoll_reactor: Mutex<Option<Arc<epoll_reactor::EpollReactor>>>,
+    ref_count: AtomicUsize,
 }
 
 lazy_static! {
-    static ref GLOBAL_API: Mutex<Option<Weak<Api>>> = Mutex::new(None);
+    static ref GLOBAL_API_STATE: Mutex<Arc<ApiState>> = Mutex::new(Arc::new(ApiState::default()));
 }
 
 impl Api {
     #[cfg(feature = "async")]
     fn get_epoll_reactor(&self) -> Result<Arc<epoll_reactor::EpollReactor>> {
-        let mut api_reactor = self.epoll_reactor.lock().expect("the lock should not be poisoned");
+        let mut api_reactor = self.state.epoll_reactor.lock().expect("the lock should not be poisoned");
         match &*api_reactor {
             Some(api_reactor) => Ok(api_reactor.clone()),
             None => {
@@ -109,33 +115,34 @@ impl Api {
     }
 
     fn get() -> Result<Arc<Api>> {
-        let mut api = GLOBAL_API.lock().unwrap();
-        let existing = (*api).as_ref().and_then(|api| api.upgrade());
-        match existing {
-            Some(api) => Ok(api),
-            None => {
-                unsafe {
-                    check_code("srt_startup", sys::srt_startup())?;
-                }
-                let new_api = Arc::new(Self::default());
-                *api = Some(Arc::downgrade(&new_api));
-                Ok(new_api)
+        let api_state = GLOBAL_API_STATE.lock().unwrap();
+        api_state.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if api_state.ref_count.load(std::sync::atomic::Ordering::SeqCst) == 1 {
+            unsafe {
+                check_code("srt_startup", sys::srt_startup())?;
             }
         }
+        Ok(Arc::new(Api{
+            state: api_state.clone(),
+        }))
     }
 }
 
 impl Drop for Api {
     fn drop(&mut self) {
-        #[cfg(feature = "async")]
-        if let Some(reactor) = self.epoll_reactor.lock().expect("the lock should not be poisoned").take() {
-            if Arc::try_unwrap(reactor).is_err() {
-                panic!("the api must have the last strong reference to the reactor");
+        let api_state = GLOBAL_API_STATE.lock().unwrap();
+        api_state.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        if api_state.ref_count.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            #[cfg(feature = "async")]
+            if let Some(reactor) = api_state.epoll_reactor.lock().expect("the lock should not be poisoned").take() {
+                if Arc::try_unwrap(reactor).is_err() {
+                    panic!("the api must have the last strong reference to the reactor");
+                }
             }
-        }
 
-        unsafe {
-            sys::srt_cleanup();
+            unsafe {
+                sys::srt_cleanup();
+            }
         }
     }
 }
