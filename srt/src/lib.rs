@@ -116,8 +116,7 @@ impl Api {
 
     fn get() -> Result<Arc<Api>> {
         let api_state = GLOBAL_API_STATE.lock().unwrap();
-        api_state.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        if api_state.ref_count.load(std::sync::atomic::Ordering::SeqCst) == 1 {
+        if api_state.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
             unsafe {
                 check_code("srt_startup", sys::srt_startup())?;
             }
@@ -131,8 +130,7 @@ impl Api {
 impl Drop for Api {
     fn drop(&mut self) {
         let api_state = GLOBAL_API_STATE.lock().unwrap();
-        api_state.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-        if api_state.ref_count.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+        if api_state.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) == 1 {
             #[cfg(feature = "async")]
             if let Some(reactor) = api_state.epoll_reactor.lock().expect("the lock should not be poisoned").take() {
                 if Arc::try_unwrap(reactor).is_err() {
