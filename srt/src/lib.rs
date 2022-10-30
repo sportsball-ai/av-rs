@@ -10,7 +10,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs},
     pin::Pin,
     str,
-    sync::{Arc, Mutex, atomic::AtomicUsize},
+    sync::{atomic::AtomicUsize, Arc, Mutex},
 };
 
 #[cfg(feature = "async")]
@@ -86,6 +86,7 @@ fn check_code(fn_name: &'static str, code: sys::int) -> Result<()> {
 
 #[derive(Default)]
 struct Api {
+    #[cfg(feature = "async")]
     state: Arc<ApiState>,
 }
 
@@ -121,7 +122,8 @@ impl Api {
                 check_code("srt_startup", sys::srt_startup())?;
             }
         }
-        Ok(Arc::new(Api{
+        Ok(Arc::new(Api {
+            #[cfg(feature = "async")]
             state: api_state.clone(),
         }))
     }
