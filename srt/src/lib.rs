@@ -180,6 +180,14 @@ impl ToOption for i32 {
     }
 }
 
+impl ToOption for i64 {
+    fn set(&self, sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<()> {
+        check_code("srt_setsockopt", unsafe {
+            sys::srt_setsockopt(sock, 0, opt, self as *const i64 as *const _, std::mem::size_of::<i64>() as _)
+        })
+    }
+}
+
 trait FromOption: Sized {
     fn get(sock: sys::SRTSOCKET, opt: sys::SRT_SOCKOPT) -> Result<Self>;
 }
@@ -250,6 +258,20 @@ impl Socket {
         }
         if let Some(v) = &options.send_buffer_size {
             self.set(sys::SRT_SOCKOPT_SRTO_SNDBUF, *v)?;
+        }
+        if let Some(v) = &options.max_bandwidth {
+            match v {
+                MaxBandwidth::Infinite => self.set(sys::SRT_SOCKOPT_SRTO_MAXBW, -1i64)?,
+                MaxBandwidth::Relative {
+                    input_bandwidth,
+                    overhead_bandwidth_percentage,
+                } => {
+                    self.set(sys::SRT_SOCKOPT_SRTO_MAXBW, 0i64)?;
+                    self.set(sys::SRT_SOCKOPT_SRTO_INPUTBW, *input_bandwidth as i64)?;
+                    self.set(sys::SRT_SOCKOPT_SRTO_OHEADBW, *overhead_bandwidth_percentage as i32)?;
+                }
+                MaxBandwidth::Absolute(n) => self.set(sys::SRT_SOCKOPT_SRTO_MAXBW, *n as i64)?,
+            }
         }
         Ok(())
     }
@@ -445,6 +467,13 @@ pub struct Stream {
     id: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+pub enum MaxBandwidth {
+    Infinite,
+    Relative { input_bandwidth: u64, overhead_bandwidth_percentage: u32 },
+    Absolute(u64),
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ConnectOptions {
     pub passphrase: Option<String>,
@@ -453,6 +482,7 @@ pub struct ConnectOptions {
     pub too_late_packet_drop: Option<bool>,
     pub receive_buffer_size: Option<i32>,
     pub send_buffer_size: Option<i32>,
+    pub max_bandwidth: Option<MaxBandwidth>,
 }
 
 impl Stream {
