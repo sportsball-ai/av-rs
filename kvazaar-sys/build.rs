@@ -11,8 +11,8 @@ fn main() {
     let bindings = bindings
         .clang_args(library.include_paths.iter().map(|p| format!("-I{}", p.to_str().expect("path is valid UTF-8"))))
         .header("src/lib.hpp")
-        .whitelist_function("kvz_.+")
-        .whitelist_type("kvz_.+")
+        .allowlist_function("kvz_.+")
+        .allowlist_type("kvz_.+")
         .generate()
         .expect("unable to generate bindings");
 
