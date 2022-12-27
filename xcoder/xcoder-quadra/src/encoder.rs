@@ -102,6 +102,12 @@ pub enum XcoderH264Profile {
     Baseline,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XcoderH265Profile {
+    Main,
+    Main10,
+}
+
 #[derive(Clone, Debug)]
 pub enum XcoderEncoderCodec {
     H264 {
@@ -110,6 +116,7 @@ pub enum XcoderEncoderCodec {
     },
     H265 {
         level_idc: Option<i32>,
+        profile: Option<XcoderH265Profile>,
     },
 }
 
@@ -183,9 +190,15 @@ impl<F> XcoderEncoder<F> {
                         };
                     }
                 }
-                XcoderEncoderCodec::H265 { level_idc } => {
+                XcoderEncoderCodec::H265 { level_idc, profile } => {
                     if let Some(level_idc) = level_idc {
                         cfg_enc_params.level_idc = level_idc;
+                    }
+                    if let Some(profile) = profile {
+                        cfg_enc_params.profile = match profile {
+                            XcoderH265Profile::Main => 1,
+                            XcoderH265Profile::Main10 => 2,
+                        };
                     }
                 }
             }
