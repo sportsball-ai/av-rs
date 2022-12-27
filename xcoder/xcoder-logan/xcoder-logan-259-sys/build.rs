@@ -72,9 +72,9 @@ fn main() {
         let bindings = bindings
             .generate_comments(false)
             .header("src/lib.hpp")
-            .whitelist_function("ni_.+")
-            .whitelist_type("ni_.+")
-            .whitelist_var("NI_.+")
+            .allowlist_function("ni_.+")
+            .allowlist_type("ni_.+")
+            .allowlist_var("NI_.+")
             // bindgen 0.60.0 broke layout tests: https://github.com/rust-lang/rust-bindgen/issues/2218
             // 0.60.1 claims to have fixed the issue, but does not.
             .layout_tests(false)
