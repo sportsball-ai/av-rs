@@ -14,10 +14,10 @@ fn main() {
         let bindings = bindgen::Builder::default()
             .clang_arg(format!("-isysroot{}", sdk_root))
             .header("src/lib.hpp")
-            .whitelist_var("kAudioFormat.+")
-            .whitelist_var("k.+FormatFlag.+")
-            .whitelist_type("AudioStreamBasicDescription")
-            .whitelist_type("AudioStreamPacketDescription")
+            .allowlist_var("kAudioFormat.+")
+            .allowlist_var("k.+FormatFlag.+")
+            .allowlist_type("AudioStreamBasicDescription")
+            .allowlist_type("AudioStreamPacketDescription")
             .generate()
             .expect("unable to generate bindings");
 

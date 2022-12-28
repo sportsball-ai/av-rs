@@ -14,8 +14,8 @@ fn main() {
         let bindings = bindgen::Builder::default()
             .clang_arg(format!("-isysroot{}", sdk_root))
             .header("src/lib.hpp")
-            .whitelist_function("AudioQueue.+")
-            .whitelist_var("kAudioQueueParam_.+")
+            .allowlist_function("AudioQueue.+")
+            .allowlist_var("kAudioQueueParam_.+")
             .generate()
             .expect("unable to generate bindings");
 
