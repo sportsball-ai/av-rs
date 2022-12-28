@@ -28,9 +28,9 @@ fn main() {
         // As with cc, pass along include paths to clang.
         .clang_args(lib.include_paths.iter().map(|p| format!("-I{}", p.to_str().expect("path is valid UTF-8"))))
         .header("src/lib.h")
-        .whitelist_function("x264_.+")
-        .whitelist_type("x264_.+")
-        .whitelist_var("X264_.+")
+        .allowlist_function("x264_.+")
+        .allowlist_type("x264_.+")
+        .allowlist_var("X264_.+")
         .generate()
         .expect("unable to generate bindings");
 

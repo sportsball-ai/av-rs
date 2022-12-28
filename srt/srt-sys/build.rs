@@ -49,8 +49,8 @@ fn main() {
     #[allow(deprecated)]
     let bindings = bindgen::Builder::default()
         .header(format!("{}/include/srt/srt.h", build.display()))
-        .whitelist_function("srt_.+")
-        .whitelist_type("SRT_.+")
+        .allowlist_function("srt_.+")
+        .allowlist_type("SRT_.+")
         .generate()
         .expect("unable to generate bindings");
 
