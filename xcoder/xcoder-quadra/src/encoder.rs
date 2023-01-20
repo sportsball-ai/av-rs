@@ -200,6 +200,10 @@ impl<F> XcoderEncoder<F> {
                             XcoderH265Profile::Main10 => 2,
                         };
                     }
+                    // Rate control needs to be changed to VBR mode to encode at a higher bitrate (>60mbps).
+                    if config.bitrate.filter(|bitrate| *bitrate > 60_000_000).is_some() {
+                        cfg_enc_params.rc.vbv_buffer_size = 0;
+                    }
                 }
             }
 
