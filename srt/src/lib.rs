@@ -390,6 +390,7 @@ extern "C" fn listener_callback(
 #[derive(Clone, Debug)]
 pub enum ListenerOption {
     TimestampBasedPacketDeliveryMode(bool),
+    PeerLatency(i32),
     TooLatePacketDrop(bool),
     ReceiveBufferSize(i32),
     SendBufferSize(i32),
@@ -399,6 +400,7 @@ impl ListenerOption {
     pub(crate) fn set(&self, sock: &Socket) -> Result<()> {
         match self {
             ListenerOption::TimestampBasedPacketDeliveryMode(v) => sock.set(sys::SRT_SOCKOPT_SRTO_TSBPDMODE, *v),
+            ListenerOption::PeerLatency(v) => sock.set(sys::SRT_SOCKOPT_SRTO_PEERLATENCY, *v),
             ListenerOption::TooLatePacketDrop(v) => sock.set(sys::SRT_SOCKOPT_SRTO_TLPKTDROP, *v),
             ListenerOption::ReceiveBufferSize(v) => sock.set(sys::SRT_SOCKOPT_SRTO_RCVBUF, *v),
             ListenerOption::SendBufferSize(v) => sock.set(sys::SRT_SOCKOPT_SRTO_SNDBUF, *v),
