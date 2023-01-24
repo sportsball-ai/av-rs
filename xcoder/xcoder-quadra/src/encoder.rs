@@ -201,9 +201,14 @@ impl<F> XcoderEncoder<F> {
                         };
                     }
                     // Rate control needs to be changed to VBR mode to encode at a higher bitrate (>60mbps).
-                    if config.bitrate.filter(|bitrate| *bitrate > 60_000_000).is_some() {
-                        cfg_enc_params.rc.vbv_buffer_size = 0;
-                    }
+                    if let Some(bitrate) = config.bitrate {
+                        cfg_enc_params.rc.vbv_buffer_size = match bitrate {
+                            0..=80_000_000 => 3000,
+                            80_000_001..=120_000_000 => 2000,
+                            120_000_001..=240_000_000 => 1000,
+                            _ => 0,
+                        }
+                    };
                 }
             }
 
