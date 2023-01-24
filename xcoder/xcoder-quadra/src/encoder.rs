@@ -200,8 +200,11 @@ impl<F> XcoderEncoder<F> {
                             XcoderH265Profile::Main10 => 2,
                         };
                     }
-                    // Rate control needs to be changed to VBR mode to encode at a higher bitrate (>60mbps).
                     if let Some(bitrate) = config.bitrate {
+                        // This specifies the size of the VBV (CPB) buffer in milliseconds.
+                        // The range of supported values of `vbvBufferSize` is 0, and 10 to 3000. For example 3000 should be set for 3 seconds.
+                        // The relationship between bitrate and vbvBufferSize is non-linear but unknown.
+                        // Given each bitrate range, we maximize the vbvBufferSize value while not exceeding the Quadra encoder's processing capacity.
                         cfg_enc_params.rc.vbv_buffer_size = match bitrate {
                             0..=80_000_000 => 3000,
                             80_000_001..=120_000_000 => 2000,
