@@ -590,7 +590,7 @@ impl PTSAnalyzer {
     /// have jitter, e.g. due to being set to wall-clock times, the guess may be off. For those
     /// cases, it has a bias towards returning 23.98, 29.97 or 59.94.
     pub fn guess_frame_rate(&self) -> Option<f64> {
-        const MIN_TIMESTAMP_COUNT: usize = 26;
+        const MIN_TIMESTAMP_COUNT: usize = 16;
         const MAX_B_FRAMES: usize = 3;
 
         if self.timestamps.len() < MIN_TIMESTAMP_COUNT {
