@@ -588,9 +588,9 @@ impl PTSAnalyzer {
     /// Makes a guess at a video's frame rate. This should really only be used as a last resort. If
     /// the presentation timestamps were set precisely it should be accurate, but if the timestamps
     /// have jitter, e.g. due to being set to wall-clock times, the guess may be off. For those
-    /// cases, it has a bias towards returning 23.98, 29.97 or 59.94.
+    /// cases, it has a bias towards returning 29.97 or 59.94.
     pub fn guess_frame_rate(&self) -> Option<f64> {
-        const MIN_TIMESTAMP_COUNT: usize = 16;
+        const MIN_TIMESTAMP_COUNT: usize = 18;
         const MAX_B_FRAMES: usize = 3;
 
         if self.timestamps.len() < MIN_TIMESTAMP_COUNT {
@@ -632,10 +632,8 @@ impl PTSAnalyzer {
 
         if max_delta - min_delta > 5 || (0.5 - fps.fract()).abs() < 0.48 {
             // if the deltas were inconsistent (e.g. due to wallclock timestamps) or not a round
-            // number and this was nearly 24, 30 or 60 fps, we should assume 23.98, 29.97 or 59.94
-            if (fps - 23.98).abs() < 3.0 {
-                return Some(23.98);
-            } else if (fps - 29.97).abs() < 3.0 {
+            // number and this was nearly 30 or 60 fps, we should assume 29.97 or 59.94
+            if (fps - 29.97).abs() < 3.0 {
                 return Some(29.97);
             } else if (fps - 59.94).abs() < 5.0 {
                 return Some(59.94);
@@ -963,7 +961,7 @@ mod test {
             StreamInfo::Video {
                 width: 3840,
                 height: 2160,
-                frame_rate: 23.98,
+                frame_rate: 24.1,
                 frame_count: 48,
                 rfc6381_codec: Some("hvc1.1.6.L156.B0".to_string()),
                 timecode: None,
