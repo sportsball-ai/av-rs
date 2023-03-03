@@ -117,16 +117,19 @@ pub struct AsyncStream {
     epoll_reactor: Arc<EpollReactor>, // must be dropped before socket
     socket: Socket,
     id: Option<String>,
+    payload_size: usize, // maximum payload size can be sent in one UDP packet
 }
 
 impl AsyncStream {
     fn new(id: Option<String>, socket: Socket) -> Result<Self> {
         socket.set(sys::SRT_SOCKOPT_SRTO_SNDSYN, false)?;
         socket.set(sys::SRT_SOCKOPT_SRTO_RCVSYN, false)?;
+        let payload_size = socket.get(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE).unwrap_or(1316) as _;
         Ok(Self {
             epoll_reactor: socket.api.get_epoll_reactor()?,
             socket,
             id,
+            payload_size,
         })
     }
 
@@ -224,10 +227,17 @@ impl AsyncWrite for AsyncStream {
             }
         }
         let sock = self.socket.raw();
-        match unsafe { sys::srt_send(sock, src.as_ptr() as *const sys::char, src.len() as _) } {
-            len if len >= 0 => Poll::Ready(Ok(len as _)),
-            _ => Poll::Ready(Err(new_io_error("srt_send"))),
+        let mut sent = 0;
+        while sent < src.len() {
+            let data = &src[sent..];
+            let len = self.payload_size.min(data.len());
+            sent += match unsafe { sys::srt_send(sock, data.as_ptr() as *const sys::char, len as _) } {
+                sent  if sent >= 0 => sent as usize,
+                _ => return Poll::Ready(Err(new_io_error("srt_send"))),
+            };
         }
+
+        Poll::Ready(Ok(sent))
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
