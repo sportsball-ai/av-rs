@@ -159,10 +159,6 @@ impl AsyncStream {
     pub fn raw_stats(&mut self, clear: bool, instantaneous: bool) -> Result<sys::SRT_TRACEBSTATS> {
         self.socket.raw_stats(clear, instantaneous)
     }
-
-    pub fn payload_size(&self) -> usize {
-       self.payload_size
-    }
 }
 
 struct Connect {
@@ -224,19 +220,19 @@ impl AsyncRead for AsyncStream {
 
 impl AsyncWrite for AsyncStream {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, src: &[u8]) -> Poll<io::Result<usize>> {
-        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_EVENT) {
-            if events & WRITE_EVENTS == 0 {
-                self.epoll_reactor.wake_when_write_ready(&self.socket, cx.waker().clone());
-                return Poll::Pending;
-            }
-        }
         let sock = self.socket.raw();
         let mut sent = 0;
         while sent < src.len() {
+            if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_EVENT) {
+                if events & WRITE_EVENTS == 0 {
+                    self.epoll_reactor.wake_when_write_ready(&self.socket, cx.waker().clone());
+                    return Poll::Pending;
+                }
+            }
             let data = &src[sent..];
             let len = self.payload_size.min(data.len());
             sent += match unsafe { sys::srt_send(sock, data.as_ptr() as *const sys::char, len as _) } {
-                sent  if sent >= 0 => sent as usize,
+                sent if sent >= 0 => sent as usize,
                 _ => return Poll::Ready(Err(new_io_error("srt_send"))),
             };
         }
