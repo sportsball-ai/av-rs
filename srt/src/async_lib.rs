@@ -289,7 +289,7 @@ mod test {
         let mut server_conn = accept_result.unwrap().0;
         let mut client_conn = connect_result.unwrap();
         assert_eq!(client_conn.id(), None);
-        assert_eq!(client_conn.payload_size(), 1316);
+        assert_eq!(client_conn.payload_size, 1316);
 
         let mut buf = [0; 1316];
         for i in 0..5 {
