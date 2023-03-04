@@ -606,6 +606,7 @@ mod test {
 
         options.passphrase = Some("thepassphrase".to_string());
         let mut conn = Stream::connect("127.0.0.1:1236", &options).unwrap();
+        assert_eq!(conn.write(b"foo").unwrap(), 3);
         let buf = [0; 2000];
         assert_eq!(conn.write(&buf[..]).unwrap(), 1400);
         assert_eq!(conn.id(), options.stream_id.as_ref());
