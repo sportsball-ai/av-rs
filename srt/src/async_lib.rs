@@ -3,6 +3,7 @@ use super::{
     epoll_reactor::{EpollReactor, READ_EVENTS, WRITE_EVENTS},
     listener_callback, new_io_error, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result, Socket,
 };
+use crate::DEFAULT_SEND_PAYLOAD_SIZE;
 use std::{
     future::Future,
     io, mem,
@@ -117,19 +118,19 @@ pub struct AsyncStream {
     epoll_reactor: Arc<EpollReactor>, // must be dropped before socket
     socket: Socket,
     id: Option<String>,
-    payload_size: usize, // maximum payload size can be sent in one UDP packet
+    max_send_payload_size: usize, // maximum payload size can be sent in one UDP packet
 }
 
 impl AsyncStream {
     fn new(id: Option<String>, socket: Socket) -> Result<Self> {
         socket.set(sys::SRT_SOCKOPT_SRTO_SNDSYN, false)?;
         socket.set(sys::SRT_SOCKOPT_SRTO_RCVSYN, false)?;
-        let payload_size = socket.get(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE).unwrap_or(1316) as _;
+        let max_send_payload_size = socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE).unwrap_or(DEFAULT_SEND_PAYLOAD_SIZE as _) as _;
         Ok(Self {
             epoll_reactor: socket.api.get_epoll_reactor()?,
             socket,
             id,
-            payload_size,
+            max_send_payload_size,
         })
     }
 
@@ -220,24 +221,19 @@ impl AsyncRead for AsyncStream {
 
 impl AsyncWrite for AsyncStream {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, src: &[u8]) -> Poll<io::Result<usize>> {
-        let sock = self.socket.raw();
-        let mut sent = 0;
-        while sent < src.len() {
-            if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_EVENT) {
-                if events & WRITE_EVENTS == 0 {
-                    self.epoll_reactor.wake_when_write_ready(&self.socket, cx.waker().clone());
-                    return Poll::Pending;
-                }
+        if let Ok(events) = self.socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_EVENT) {
+            if events & WRITE_EVENTS == 0 {
+                self.epoll_reactor.wake_when_write_ready(&self.socket, cx.waker().clone());
+                return Poll::Pending;
             }
-            let data = &src[sent..];
-            let len = self.payload_size.min(data.len());
-            sent += match unsafe { sys::srt_send(sock, data.as_ptr() as *const sys::char, len as _) } {
-                sent if sent >= 0 => sent as usize,
-                _ => return Poll::Ready(Err(new_io_error("srt_send"))),
-            };
         }
+        let sock = self.socket.raw();
+        let data_size = self.max_send_payload_size.min(src.len());
 
-        Poll::Ready(Ok(sent))
+        match unsafe { sys::srt_send(sock, src.as_ptr() as *const sys::char, data_size as _) } {
+            len if len >= 0 => Poll::Ready(Ok(len as _)),
+            _ => Poll::Ready(Err(new_io_error("srt_send"))),
+        }
     }
 
     fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
@@ -283,13 +279,14 @@ mod test {
         let options = ConnectOptions {
             timestamp_based_packet_delivery_mode: Some(false),
             too_late_packet_drop: Some(false),
+            max_send_payload_size: Some(1400),
             ..Default::default()
         };
         let (accept_result, connect_result) = join!(listener.accept(), AsyncStream::connect("127.0.0.1:1235", &options));
         let mut server_conn = accept_result.unwrap().0;
         let mut client_conn = connect_result.unwrap();
         assert_eq!(client_conn.id(), None);
-        assert_eq!(client_conn.payload_size, 1316);
+        assert_eq!(client_conn.max_send_payload_size, 1400);
 
         let mut buf = [0; 1316];
         for i in 0..5 {
@@ -305,6 +302,9 @@ mod test {
             }
         }
 
+        let buf = [0; 1500];
+        assert_eq!(client_conn.write(&buf[..]).await.unwrap(), 1400);
+
         assert!(server_conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
     }
 
@@ -319,7 +319,7 @@ mod test {
         assert_eq!(client_conn.id(), None);
 
         // Drop the client.
-        mem::drop(client_conn);
+        drop(client_conn);
 
         // This read should return an error immediately.
         let mut buf = [0; 1316];
