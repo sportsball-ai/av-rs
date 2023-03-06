@@ -20,8 +20,6 @@ mod epoll_reactor;
 #[cfg(feature = "async")]
 pub use async_lib::*;
 
-const DEFAULT_SEND_PAYLOAD_SIZE: usize = 1316;
-
 #[derive(Debug)]
 pub enum Error {
     InvalidAddress,
@@ -457,7 +455,9 @@ impl<'c> Listener<'c> {
             sock,
         };
         let addr = sockaddr_from_storage(&storage, len)?;
-        let max_send_payload_size = socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE).unwrap_or(DEFAULT_SEND_PAYLOAD_SIZE as _) as _;
+        let max_send_payload_size = socket
+            .get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE)
+            .expect("SRT should have a default payload size if not set") as _;
         Ok((
             Stream {
                 id: socket.get(sys::SRT_SOCKOPT_SRTO_STREAMID)?,
@@ -501,16 +501,18 @@ impl Stream {
             let (addr, len) = to_sockaddr(&addr);
             let socket = Socket::new()?;
             socket.set_connect_options(options)?;
-            let max_send_payload_size = options.max_send_payload_size.unwrap_or(DEFAULT_SEND_PAYLOAD_SIZE as _) as _;
             unsafe {
                 match check_code("srt_connect", sys::srt_connect(socket.raw(), &addr as *const _ as _, len as _)) {
                     Err(e) => last_err = e,
                     Ok(_) => {
+                        let max_send_payload_size = socket
+                            .get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE)
+                            .expect("SRT should have a default payload size if not set") as _;
                         return Ok(Self {
                             socket,
                             id: options.stream_id.clone(),
                             max_send_payload_size,
-                        })
+                        });
                     }
                 }
             }

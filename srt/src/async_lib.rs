@@ -125,7 +125,9 @@ impl AsyncStream {
     fn new(id: Option<String>, socket: Socket) -> Result<Self> {
         socket.set(sys::SRT_SOCKOPT_SRTO_SNDSYN, false)?;
         socket.set(sys::SRT_SOCKOPT_SRTO_RCVSYN, false)?;
-        let max_send_payload_size = socket.get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE).unwrap_or(DEFAULT_SEND_PAYLOAD_SIZE as _) as _;
+        let max_send_payload_size = socket
+            .get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE)
+            .expect("SRT should have a default payload size if not set") as _;
         Ok(Self {
             epoll_reactor: socket.api.get_epoll_reactor()?,
             socket,
