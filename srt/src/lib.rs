@@ -543,7 +543,13 @@ impl Read for Stream {
 
 impl Write for Stream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let data_size = self.max_send_payload_size.min(buf.len());
+        let data_size = if self.max_send_payload_size == 0 {
+            // When set to 0, there's no limit for a single sending call.
+            // https://github.com/Haivision/srt/blob/master/docs/API/API-socket-options.md#SRTO_PAYLOADSIZE
+            buf.len()
+        } else {
+            self.max_send_payload_size.min(buf.len())
+        };
         match unsafe { sys::srt_send(self.socket.raw(), buf.as_ptr() as *const sys::char, data_size as _) } {
             len if len >= 0 => Ok(len as usize),
             _ => Err(new_io_error("srt_send")),
