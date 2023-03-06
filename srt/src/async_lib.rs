@@ -3,7 +3,6 @@ use super::{
     epoll_reactor::{EpollReactor, READ_EVENTS, WRITE_EVENTS},
     listener_callback, new_io_error, sockaddr_from_storage, sys, to_sockaddr, ConnectOptions, Error, ListenerCallback, ListenerOption, Result, Socket,
 };
-use crate::DEFAULT_SEND_PAYLOAD_SIZE;
 use std::{
     future::Future,
     io, mem,
