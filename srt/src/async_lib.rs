@@ -229,7 +229,13 @@ impl AsyncWrite for AsyncStream {
             }
         }
         let sock = self.socket.raw();
-        let data_size = self.max_send_payload_size.min(src.len());
+        let data_size = if self.max_send_payload_size == 0 {
+            // When set to 0, there's no limit for a single sending call.
+            // https://github.com/Haivision/srt/blob/master/docs/API/API-socket-options.md#SRTO_PAYLOADSIZE
+            src.len()
+        } else {
+            self.max_send_payload_size.min(src.len())
+        };
 
         match unsafe { sys::srt_send(sock, src.as_ptr() as *const sys::char, data_size as _) } {
             len if len >= 0 => Poll::Ready(Ok(len as _)),
