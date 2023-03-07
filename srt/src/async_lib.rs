@@ -117,16 +117,21 @@ pub struct AsyncStream {
     epoll_reactor: Arc<EpollReactor>, // must be dropped before socket
     socket: Socket,
     id: Option<String>,
+    max_send_payload_size: usize, // maximum payload size can be sent in one UDP packet
 }
 
 impl AsyncStream {
     fn new(id: Option<String>, socket: Socket) -> Result<Self> {
         socket.set(sys::SRT_SOCKOPT_SRTO_SNDSYN, false)?;
         socket.set(sys::SRT_SOCKOPT_SRTO_RCVSYN, false)?;
+        let max_send_payload_size = socket
+            .get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE)
+            .expect("SRT should have a default payload size if not set") as _;
         Ok(Self {
             epoll_reactor: socket.api.get_epoll_reactor()?,
             socket,
             id,
+            max_send_payload_size,
         })
     }
 
@@ -224,7 +229,15 @@ impl AsyncWrite for AsyncStream {
             }
         }
         let sock = self.socket.raw();
-        match unsafe { sys::srt_send(sock, src.as_ptr() as *const sys::char, src.len() as _) } {
+        let data_size = if self.max_send_payload_size == 0 {
+            // When set to 0, there's no limit for a single sending call.
+            // https://github.com/Haivision/srt/blob/master/docs/API/API-socket-options.md#SRTO_PAYLOADSIZE
+            src.len()
+        } else {
+            self.max_send_payload_size.min(src.len())
+        };
+
+        match unsafe { sys::srt_send(sock, src.as_ptr() as *const sys::char, data_size as _) } {
             len if len >= 0 => Poll::Ready(Ok(len as _)),
             _ => Poll::Ready(Err(new_io_error("srt_send"))),
         }
@@ -273,12 +286,14 @@ mod test {
         let options = ConnectOptions {
             timestamp_based_packet_delivery_mode: Some(false),
             too_late_packet_drop: Some(false),
+            max_send_payload_size: Some(1400),
             ..Default::default()
         };
         let (accept_result, connect_result) = join!(listener.accept(), AsyncStream::connect("127.0.0.1:1235", &options));
         let mut server_conn = accept_result.unwrap().0;
         let mut client_conn = connect_result.unwrap();
         assert_eq!(client_conn.id(), None);
+        assert_eq!(client_conn.max_send_payload_size, 1400);
 
         let mut buf = [0; 1316];
         for i in 0..5 {
@@ -294,6 +309,9 @@ mod test {
             }
         }
 
+        let buf = [0; 1500];
+        assert_eq!(client_conn.write(&buf[..]).await.unwrap(), 1400);
+
         assert!(server_conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
     }
 
@@ -308,7 +326,7 @@ mod test {
         assert_eq!(client_conn.id(), None);
 
         // Drop the client.
-        mem::drop(client_conn);
+        drop(client_conn);
 
         // This read should return an error immediately.
         let mut buf = [0; 1316];

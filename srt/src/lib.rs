@@ -273,6 +273,9 @@ impl Socket {
                 MaxBandwidth::Absolute(n) => self.set(sys::SRT_SOCKOPT_SRTO_MAXBW, *n as i64)?,
             }
         }
+        if let Some(v) = &options.max_send_payload_size {
+            self.set(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE, *v)?;
+        }
         Ok(())
     }
 
@@ -452,10 +455,14 @@ impl<'c> Listener<'c> {
             sock,
         };
         let addr = sockaddr_from_storage(&storage, len)?;
+        let max_send_payload_size = socket
+            .get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE)
+            .expect("SRT should have a default payload size if not set") as _;
         Ok((
             Stream {
                 id: socket.get(sys::SRT_SOCKOPT_SRTO_STREAMID)?,
                 socket,
+                max_send_payload_size,
             },
             addr,
         ))
@@ -465,6 +472,7 @@ impl<'c> Listener<'c> {
 pub struct Stream {
     socket: Socket,
     id: Option<String>,
+    max_send_payload_size: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -483,6 +491,7 @@ pub struct ConnectOptions {
     pub receive_buffer_size: Option<i32>,
     pub send_buffer_size: Option<i32>,
     pub max_bandwidth: Option<MaxBandwidth>,
+    pub max_send_payload_size: Option<i32>,
 }
 
 impl Stream {
@@ -496,10 +505,14 @@ impl Stream {
                 match check_code("srt_connect", sys::srt_connect(socket.raw(), &addr as *const _ as _, len as _)) {
                     Err(e) => last_err = e,
                     Ok(_) => {
+                        let max_send_payload_size = socket
+                            .get::<i32>(sys::SRT_SOCKOPT_SRTO_PAYLOADSIZE)
+                            .expect("SRT should have a default payload size if not set") as _;
                         return Ok(Self {
                             socket,
                             id: options.stream_id.clone(),
-                        })
+                            max_send_payload_size,
+                        });
                     }
                 }
             }
@@ -530,7 +543,14 @@ impl Read for Stream {
 
 impl Write for Stream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match unsafe { sys::srt_send(self.socket.raw(), buf.as_ptr() as *const sys::char, buf.len() as _) } {
+        let data_size = if self.max_send_payload_size == 0 {
+            // When set to 0, there's no limit for a single sending call.
+            // https://github.com/Haivision/srt/blob/master/docs/API/API-socket-options.md#SRTO_PAYLOADSIZE
+            buf.len()
+        } else {
+            self.max_send_payload_size.min(buf.len())
+        };
+        match unsafe { sys::srt_send(self.socket.raw(), buf.as_ptr() as *const sys::char, data_size as _) } {
             len if len >= 0 => Ok(len as usize),
             _ => Err(new_io_error("srt_send")),
         }
@@ -586,6 +606,7 @@ mod test {
         let mut options = ConnectOptions {
             stream_id: Some("mystreamid".to_string()),
             passphrase: Some("notthepassphrase".to_string()),
+            max_send_payload_size: Some(1400),
             ..Default::default()
         };
 
@@ -594,6 +615,8 @@ mod test {
         options.passphrase = Some("thepassphrase".to_string());
         let mut conn = Stream::connect("127.0.0.1:1236", &options).unwrap();
         assert_eq!(conn.write(b"foo").unwrap(), 3);
+        let buf = [0; 2000];
+        assert_eq!(conn.write(&buf[..]).unwrap(), 1400);
         assert_eq!(conn.id(), options.stream_id.as_ref());
 
         server_thread.join().unwrap();
