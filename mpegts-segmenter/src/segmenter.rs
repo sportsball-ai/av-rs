@@ -669,7 +669,7 @@ mod test {
         let segments = storage.segments();
         assert!(segments
             .iter()
-            .all(|(_, s)| s.streams.len() == 1 && if let StreamInfo::Audio { .. } = s.streams[0] { true } else { false }));
+            .all(|(_, s)| s.streams.len() == 1 && matches!(s.streams[0], StreamInfo::Audio { .. })));
 
         assert_eq!(segments.len(), 7);
         assert_eq!(
