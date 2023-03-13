@@ -143,6 +143,9 @@ impl<S: SegmentStorage> Segmenter<S> {
                                                 }
                                             }
                                         }
+                                        Some(analyzer::Stream::ADTSAudio { .. }) => {
+                                            is_keyframe = elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64();
+                                        }
                                         _ => {}
                                     }
                                     is_keyframe
@@ -643,5 +646,35 @@ mod test {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_segmenter_audio_only() {
+        let mut storage = MemorySegmentStorage::new();
+        {
+            let mut f = File::open("src/testdata/audio-only.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(3),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert!(segments
+            .iter()
+            .all(|(_, s)| s.streams.len() == 1 && if let StreamInfo::Audio { .. } = s.streams[0] { true } else { false }));
+
+        assert_eq!(segments.len(), 7);
+        assert_eq!(
+            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![77774.269144, 77777.277144, 77780.285144, 77783.293144, 77786.301144, 77789.309144, 77792.317144]
+        );
     }
 }
