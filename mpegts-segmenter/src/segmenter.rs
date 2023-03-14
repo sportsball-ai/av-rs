@@ -144,6 +144,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                             }
                                         }
                                         Some(analyzer::Stream::ADTSAudio { .. }) => {
+                                            // note this is only reachable if this is an audio-only stream
                                             is_keyframe = elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64().max(3.0);
                                         }
                                         _ => {}
