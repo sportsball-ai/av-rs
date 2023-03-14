@@ -144,7 +144,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                             }
                                         }
                                         Some(analyzer::Stream::ADTSAudio { .. }) => {
-                                            is_keyframe = elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64();
+                                            is_keyframe = elapsed_seconds < -1.0 || elapsed_seconds >= self.config.min_segment_duration.as_secs_f64().max(3.0);
                                         }
                                         _ => {}
                                     }
@@ -658,7 +658,7 @@ mod test {
             segment(
                 buf.as_slice(),
                 SegmenterConfig {
-                    min_segment_duration: Duration::from_secs(3),
+                    min_segment_duration: Duration::from_millis(2500),
                 },
                 &mut storage,
             )
