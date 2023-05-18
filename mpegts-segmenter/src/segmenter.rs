@@ -7,12 +7,16 @@ use mpeg2::{
 use std::{fmt, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+pub const CROPPING_SIZE_IN_BYTES: usize = 156;
+pub const CROPPING_FLAG: [u8; 4] = [b't', b'x', b'm', b'0'];
+
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
     pcr: u64,
     pts: Option<Duration>,
     bytes_written: usize,
     temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
+    cropping: Vec<Vec<u8>>,
 }
 
 pub struct SegmenterConfig {
@@ -176,6 +180,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     pts: None,
                     bytes_written: 0,
                     temi_timeline_descriptor: None,
+                    cropping: vec![],
                 });
 
                 self.analyzer.reset_timecodes();
@@ -190,9 +195,12 @@ impl<S: SegmentStorage> Segmenter<S> {
                     }
                 }
 
-                if segment.temi_timeline_descriptor.is_none() {
-                    if let Some(af) = p.adaptation_field {
+                if let Some(af) = p.adaptation_field {
+                    if segment.temi_timeline_descriptor.is_none() {
                         segment.temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
+                    }
+                    if af.private_data_bytes.len() == CROPPING_SIZE_IN_BYTES && &af.private_data_bytes[..4] == CROPPING_FLAG {
+                        segment.cropping.push(af.private_data_bytes);
                     }
                 }
 
@@ -237,6 +245,7 @@ pub struct SegmentInfo {
     pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
     pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
+    pub cropping: Vec<Vec<u8>>,
 }
 
 impl SegmentInfo {
@@ -300,6 +309,7 @@ impl SegmentInfo {
                     .collect()
             },
             temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
+            cropping: segment.cropping.clone(),
         }
     }
 }
@@ -677,5 +687,33 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![77774.269144, 77777.277144, 77780.285144, 77783.293144, 77786.301144, 77789.309144, 77792.317144]
         );
+    }
+
+    #[tokio::test]
+    async fn test_segmenter_video_cropping() {
+        let mut storage = MemorySegmentStorage::new();
+        {
+            let mut f = File::open("src/testdata/segment-with-cropping.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_millis(2500),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert!(segments
+            .iter()
+            .all(|(_, s)| s.streams.len() == 1 && matches!(s.streams[0], StreamInfo::Video { .. })));
+
+        assert_eq!(segments.len(), 1);
+        let cropping = &segments[0].1.cropping;
+        assert_eq!(cropping.len(), 72);
     }
 }
