@@ -27,7 +27,7 @@ jobs:
     - name: Install Rust
       uses: actions-rs/toolchain@v1
       with:
-        toolchain: 1.69.0
+        toolchain: 1.63.0
         components: clippy
         override: true
     - name: Build
@@ -55,7 +55,7 @@ jobs:
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.69.0
+          toolchain: 1.63.0
           override: true
       - name: Initialize
         run: |
@@ -78,7 +78,7 @@ jobs:
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.69.0
+          toolchain: 1.63.0
           override: true
       - name: Initialize
         run: |
@@ -101,7 +101,7 @@ jobs:
       - name: Install Rust
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.69.0
+          toolchain: 1.63.0
           override: true
       - name: Initialize
         run: |
