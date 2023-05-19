@@ -7,16 +7,12 @@ use mpeg2::{
 use std::{fmt, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-pub const CROPPING_SIZE_IN_BYTES: usize = 156;
-pub const CROPPING_FLAG: [u8; 4] = [b't', b'x', b'm', b'0'];
-
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
     pcr: u64,
     pts: Option<Duration>,
     bytes_written: usize,
     temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
-    cropping: Vec<Vec<u8>>,
 }
 
 pub struct SegmenterConfig {
@@ -166,6 +162,16 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
             }
 
+            if let Some(af) = p.adaptation_field.as_ref() {
+                if !af.private_data_bytes.is_empty() {
+                    match self.analyzer.stream(p.packet_id) {
+                        Some(analyzer::Stream::AVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.clone()),
+                        Some(analyzer::Stream::HEVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.clone()),
+                        _ => {}
+                    }
+                }
+            }
+
             if should_start_new_segment {
                 if let Some(prev) = self.current_segment.take() {
                     let info = SegmentInfo::compile(&prev, self.analyzer.streams(), &self.streams_before_segment);
@@ -180,7 +186,6 @@ impl<S: SegmentStorage> Segmenter<S> {
                     pts: None,
                     bytes_written: 0,
                     temi_timeline_descriptor: None,
-                    cropping: vec![],
                 });
 
                 self.analyzer.reset_timecodes();
@@ -195,12 +200,9 @@ impl<S: SegmentStorage> Segmenter<S> {
                     }
                 }
 
-                if let Some(af) = p.adaptation_field {
-                    if segment.temi_timeline_descriptor.is_none() {
+                if segment.temi_timeline_descriptor.is_none() {
+                    if let Some(af) = p.adaptation_field {
                         segment.temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
-                    }
-                    if af.private_data_bytes.len() == CROPPING_SIZE_IN_BYTES && &af.private_data_bytes[..4] == CROPPING_FLAG {
-                        segment.cropping.push(af.private_data_bytes);
                     }
                 }
 
@@ -245,7 +247,6 @@ pub struct SegmentInfo {
     pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
     pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
-    pub cropping: Vec<Vec<u8>>,
 }
 
 impl SegmentInfo {
@@ -293,6 +294,8 @@ impl SegmentInfo {
                                 rfc6381_codec,
                                 timecode,
                                 is_interlaced,
+                                private_data,
+                                ..
                             },
                         ) => Some(StreamInfo::Video {
                             width: *width,
@@ -302,6 +305,7 @@ impl SegmentInfo {
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
+                            private_data: private_data.clone(),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -309,7 +313,6 @@ impl SegmentInfo {
                     .collect()
             },
             temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
-            cropping: segment.cropping.clone(),
         }
     }
 }
@@ -713,7 +716,12 @@ mod test {
             .all(|(_, s)| s.streams.len() == 1 && matches!(s.streams[0], StreamInfo::Video { .. })));
 
         assert_eq!(segments.len(), 1);
-        let cropping = &segments[0].1.cropping;
-        assert_eq!(cropping.len(), 72);
+        match &segments[0].1.streams[0] {
+            StreamInfo::Video { private_data, .. } => {
+                private_data.iter().all(|data| data.len() == 156 && &data[..4] == [b't', b'x', b'm', b'0']);
+                assert_eq!(private_data.len(), 72);
+            }
+            _ => assert!(false),
+        }
     }
 }
