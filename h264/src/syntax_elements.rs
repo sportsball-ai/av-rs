@@ -53,7 +53,7 @@ impl Decode for UE {
 
 impl Encode for UE {
     fn encode<T: io::Write>(&self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
-        let leading_zero_bits = 63 - (self.0 as u64 + 1).leading_zeros() as usize;
+        let leading_zero_bits = 63 - (self.0 + 1).leading_zeros() as usize;
         bs.write_bits(self.0 + 1, 1 | (leading_zero_bits << 1))
     }
 }
