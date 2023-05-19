@@ -718,10 +718,10 @@ mod test {
         assert_eq!(segments.len(), 1);
         match &segments[0].1.streams[0] {
             StreamInfo::Video { private_data, .. } => {
-                private_data.iter().all(|data| data.len() == 156 && &data[..4] == [b't', b'x', b'm', b'0']);
+                private_data.iter().all(|data| data.len() == 156 && data[..4] == [b't', b'x', b'm', b'0']);
                 assert_eq!(private_data.len(), 72);
             }
-            _ => assert!(false),
+            _ => unreachable!(),
         }
     }
 }
