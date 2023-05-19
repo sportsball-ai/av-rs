@@ -71,6 +71,7 @@ impl<W: Write> Muxer<W> {
             continuity_counter: stream.continuity_counter,
             random_access_indicator: p.random_access_indicator,
             temi_timeline_descriptors: p.temi_timeline_descriptors,
+            private_data_bytes: &p.private_data_bytes,
         }) {
             if ts_packet.payload.is_some() {
                 stream.continuity_counter = (stream.continuity_counter + 1) % 16;
@@ -191,6 +192,7 @@ pub struct Packet<'a> {
     pub pts_90khz: Option<u64>,
     pub dts_90khz: Option<u64>,
     pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
+    pub private_data_bytes: Cow<'a, [u8]>,
 }
 
 impl<'a> Packet<'a> {
@@ -201,6 +203,7 @@ impl<'a> Packet<'a> {
             pts_90khz: self.pts_90khz,
             dts_90khz: self.dts_90khz,
             temi_timeline_descriptors: self.temi_timeline_descriptors,
+            private_data_bytes: Cow::Owned(self.private_data_bytes.into_owned()),
         }
     }
 }
@@ -268,6 +271,7 @@ mod test {
                                 pts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.pts),
                                 dts_90khz: frame.header.optional_header.as_ref().and_then(|h| h.dts),
                                 temi_timeline_descriptors: vec![],
+                                private_data_bytes: Cow::Borrowed(&[]),
                             },
                         )
                         .unwrap();

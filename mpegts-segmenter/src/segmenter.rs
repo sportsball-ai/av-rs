@@ -162,14 +162,18 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
             }
 
-            if let Some(af) = p.adaptation_field.as_ref() {
+            let first_temi_timeline_descriptor;
+            if let Some(af) = p.adaptation_field {
+                first_temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
                 if !af.private_data_bytes.is_empty() {
                     match self.analyzer.stream(p.packet_id) {
-                        Some(analyzer::Stream::AVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.clone()),
-                        Some(analyzer::Stream::HEVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.clone()),
+                        Some(analyzer::Stream::AVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.into_owned()),
+                        Some(analyzer::Stream::HEVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.into_owned()),
                         _ => {}
                     }
                 }
+            } else {
+                first_temi_timeline_descriptor = None;
             }
 
             if should_start_new_segment {
@@ -201,9 +205,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
 
                 if segment.temi_timeline_descriptor.is_none() {
-                    if let Some(af) = p.adaptation_field {
-                        segment.temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
-                    }
+                    segment.temi_timeline_descriptor = first_temi_timeline_descriptor;
                 }
 
                 segment.segment.write_all(buf).await?;
