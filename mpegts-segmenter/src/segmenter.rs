@@ -162,6 +162,16 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
             }
 
+            if let Some(af) = p.adaptation_field.as_ref() {
+                if !af.private_data_bytes.is_empty() {
+                    match self.analyzer.stream(p.packet_id) {
+                        Some(analyzer::Stream::AVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.clone()),
+                        Some(analyzer::Stream::HEVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.clone()),
+                        _ => {}
+                    }
+                }
+            }
+
             if should_start_new_segment {
                 if let Some(prev) = self.current_segment.take() {
                     let info = SegmentInfo::compile(&prev, self.analyzer.streams(), &self.streams_before_segment);
@@ -284,6 +294,8 @@ impl SegmentInfo {
                                 rfc6381_codec,
                                 timecode,
                                 is_interlaced,
+                                private_data,
+                                ..
                             },
                         ) => Some(StreamInfo::Video {
                             width: *width,
@@ -293,6 +305,7 @@ impl SegmentInfo {
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
+                            private_data: private_data.clone(),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -677,5 +690,38 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![77774.269144, 77777.277144, 77780.285144, 77783.293144, 77786.301144, 77789.309144, 77792.317144]
         );
+    }
+
+    #[tokio::test]
+    async fn test_segmenter_video_cropping() {
+        let mut storage = MemorySegmentStorage::new();
+        {
+            let mut f = File::open("src/testdata/segment-with-cropping.ts").unwrap();
+            let mut buf = Vec::new();
+            f.read_to_end(&mut buf).unwrap();
+            segment(
+                buf.as_slice(),
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_millis(2500),
+                },
+                &mut storage,
+            )
+            .await
+            .unwrap();
+        }
+
+        let segments = storage.segments();
+        assert!(segments
+            .iter()
+            .all(|(_, s)| s.streams.len() == 1 && matches!(s.streams[0], StreamInfo::Video { .. })));
+
+        assert_eq!(segments.len(), 1);
+        match &segments[0].1.streams[0] {
+            StreamInfo::Video { private_data, .. } => {
+                private_data.iter().all(|data| data.len() == 156 && data[..4] == [b't', b'x', b'm', b'0']);
+                assert_eq!(private_data.len(), 72);
+            }
+            _ => unreachable!(),
+        }
     }
 }
