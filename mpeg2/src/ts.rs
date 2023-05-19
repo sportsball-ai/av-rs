@@ -11,20 +11,20 @@ pub struct Packet<'a> {
     pub packet_id: u16,
     pub payload_unit_start_indicator: bool,
     pub continuity_counter: u8,
-    pub adaptation_field: Option<AdaptationField>,
+    pub adaptation_field: Option<AdaptationField<'a>>,
     pub payload: Option<Cow<'a, [u8]>>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub struct AdaptationField {
+pub struct AdaptationField<'a> {
     pub discontinuity_indicator: Option<bool>,
     pub random_access_indicator: Option<bool>,
     pub program_clock_reference_27mhz: Option<u64>,
-    pub private_data_bytes: Vec<u8>,
+    pub private_data_bytes: Cow<'a, [u8]>,
     pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
 }
 
-impl AdaptationField {
+impl AdaptationField<'static> {
     pub fn decode(buf: &[u8]) -> Result<Self, DecodeError> {
         let mut bs = Bitstream::new(buf);
         let mut af = Self::default();
@@ -59,7 +59,7 @@ impl AdaptationField {
             }
             if transport_private_data_flag {
                 let transport_private_data_length = bs.read_u8("transport_private_data_length")?;
-                af.private_data_bytes = bs.read_n_bytes(transport_private_data_length as usize, "private_data_bytes")?.to_vec();
+                af.private_data_bytes = Cow::Owned(bs.read_n_bytes(transport_private_data_length as usize, "private_data_bytes")?.to_vec());
             }
 
             if adaptation_extension_flag {
@@ -102,7 +102,9 @@ impl AdaptationField {
         }
         Ok(af)
     }
+}
 
+impl AdaptationField<'_> {
     pub fn encoded_len(&self) -> usize {
         let mut len = 1;
         if self.discontinuity_indicator.is_some() || self.random_access_indicator.is_some() || self.program_clock_reference_27mhz.is_some() {
@@ -177,7 +179,7 @@ impl AdaptationField {
 
         if !self.private_data_bytes.is_empty() {
             bs.write_u8(self.private_data_bytes.len() as u8);
-            for data_type in &self.private_data_bytes {
+            for data_type in &*self.private_data_bytes {
                 bs.write_u8(*data_type);
             }
         }
@@ -603,7 +605,7 @@ mod test {
                 discontinuity_indicator: Some(false),
                 random_access_indicator: Some(true),
                 program_clock_reference_27mhz: Some(18_900_000),
-                private_data_bytes: vec![],
+                private_data_bytes: Cow::Borrowed(&[]),
                 temi_timeline_descriptors: vec![],
             })
         );
@@ -824,7 +826,7 @@ mod test {
             ..TEMITimelineDescriptor::default()
         };
         assert_eq!(decoded_temi, &temi);
-        assert_eq!(&af.private_data_bytes, &[2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0]);
+        assert_eq!(&*af.private_data_bytes, &[2, 11, 19, 14, 17, 173, 40, 201, 3, 4, 0, 8, 0]);
     }
 
     #[test]

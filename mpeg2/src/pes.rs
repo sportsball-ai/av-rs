@@ -12,15 +12,16 @@ pub struct Packet<'a> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct PacketizationConfig {
+pub struct PacketizationConfig<'a> {
     pub packet_id: u16,
     pub random_access_indicator: bool,
     pub continuity_counter: u8,
     pub temi_timeline_descriptors: Vec<TEMITimelineDescriptor>,
+    pub private_data_bytes: &'a [u8],
 }
 
 impl<'a> Packet<'a> {
-    pub fn packetize(&self, config: PacketizationConfig) -> Packetize {
+    pub fn packetize(&self, config: PacketizationConfig<'a>) -> Packetize {
         Packetize {
             header: Some(&self.header),
             data: &self.data,
@@ -32,7 +33,7 @@ impl<'a> Packet<'a> {
 pub struct Packetize<'a> {
     header: Option<&'a PacketHeader>,
     data: &'a [u8],
-    config: PacketizationConfig,
+    config: PacketizationConfig<'a>,
 }
 
 impl<'a> Iterator for Packetize<'a> {
@@ -43,6 +44,7 @@ impl<'a> Iterator for Packetize<'a> {
             let mut af = ts::AdaptationField {
                 random_access_indicator: if self.config.random_access_indicator { Some(true) } else { None },
                 temi_timeline_descriptors: mem::take(&mut self.config.temi_timeline_descriptors),
+                private_data_bytes: Cow::Borrowed(self.config.private_data_bytes),
                 ..Default::default()
             };
             if let Some(dts) = header.optional_header.as_ref().and_then(|h| h.dts.or(h.pts)) {

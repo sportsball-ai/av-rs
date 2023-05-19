@@ -223,6 +223,7 @@ mod test {
     use crate::{pes, ts};
     use std::io::BufRead;
     use std::{
+        borrow::Cow,
         cell::{Ref, RefCell},
         fs::File,
         io::{self, Read},
@@ -268,6 +269,7 @@ mod test {
             pts_90khz: Some(pts_90khz),
             dts_90khz: None,
             temi_timeline_descriptors: vec![],
+            private_data_bytes: Cow::Borrowed(&[]),
         }
     }
 
@@ -337,6 +339,7 @@ mod test {
             pts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.pts),
             dts_90khz: pes_packet.header.optional_header.as_ref().and_then(|h| h.dts),
             temi_timeline_descriptors: vec![],
+            private_data_bytes: Cow::Borrowed(&[]),
         }
     }
 
