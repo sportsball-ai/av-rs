@@ -1,4 +1,5 @@
 use super::{analyzer, Analyzer, SegmentStorage, StreamInfo};
+use crate::VideoMetadata;
 use mpeg2::{
     pes,
     temi::TEMITimelineDescriptor,
@@ -162,14 +163,27 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
             }
 
+            let mut pes_packet_header = None;
             let first_temi_timeline_descriptor;
             if let Some(af) = p.adaptation_field {
                 first_temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
                 if !af.private_data_bytes.is_empty() {
-                    match self.analyzer.stream(p.packet_id) {
-                        Some(analyzer::Stream::AVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.into_owned()),
-                        Some(analyzer::Stream::HEVCVideo { private_data, .. }) => private_data.push(af.private_data_bytes.into_owned()),
-                        _ => {}
+                    if let Some(payload) = p.payload.as_ref() {
+                        let (header, _) = pes::PacketHeader::decode(payload)?;
+                        if let Some(pts) = header.optional_header.as_ref().and_then(|h| h.pts) {
+                            match self.analyzer.stream(p.packet_id) {
+                                Some(analyzer::Stream::AVCVideo { video_metadata, .. }) => video_metadata.push(VideoMetadata {
+                                    pts,
+                                    private_data: af.private_data_bytes.into_owned(),
+                                }),
+                                Some(analyzer::Stream::HEVCVideo { video_metadata, .. }) => video_metadata.push(VideoMetadata {
+                                    pts,
+                                    private_data: af.private_data_bytes.into_owned(),
+                                }),
+                                _ => {}
+                            }
+                        }
+                        pes_packet_header = Some(header);
                     }
                 }
             } else {
@@ -198,7 +212,9 @@ impl<S: SegmentStorage> Segmenter<S> {
             if let Some(segment) = &mut self.current_segment {
                 // set the segment's pts if necessary
                 if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
-                    if let Some(payload) = p.payload {
+                    if let Some(header) = pes_packet_header {
+                        segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
+                    } else if let Some(payload) = p.payload {
                         let (header, _) = pes::PacketHeader::decode(&payload)?;
                         segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
                     }
@@ -296,7 +312,7 @@ impl SegmentInfo {
                                 rfc6381_codec,
                                 timecode,
                                 is_interlaced,
-                                private_data,
+                                video_metadata,
                                 ..
                             },
                         ) => Some(StreamInfo::Video {
@@ -307,7 +323,7 @@ impl SegmentInfo {
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
-                            private_data: private_data.clone(),
+                            video_metadata: video_metadata.clone(),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -719,9 +735,11 @@ mod test {
 
         assert_eq!(segments.len(), 1);
         match &segments[0].1.streams[0] {
-            StreamInfo::Video { private_data, .. } => {
-                private_data.iter().all(|data| data.len() == 156 && data[..4] == [b't', b'x', b'm', b'0']);
-                assert_eq!(private_data.len(), 72);
+            StreamInfo::Video { video_metadata, .. } => {
+                video_metadata
+                    .iter()
+                    .all(|data| data.private_data.len() == 156 && data.private_data[..4] == [b't', b'x', b'm', b'0']);
+                assert_eq!(video_metadata.len(), 72);
             }
             _ => unreachable!(),
         }

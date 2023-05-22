@@ -13,6 +13,12 @@ pub struct Timecode {
     pub frames: u8,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VideoMetadata {
+    pub pts: u64,
+    pub private_data: Vec<u8>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum Stream {
@@ -36,7 +42,7 @@ pub enum Stream {
         last_timecode: Option<Timecode>,
         last_vui_parameters: Option<h264::VUIParameters>,
         pts_analyzer: PTSAnalyzer,
-        private_data: Vec<Vec<u8>>,
+        video_metadata: Vec<VideoMetadata>,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -46,7 +52,7 @@ pub enum Stream {
         rfc6381_codec: Option<String>,
         access_unit_counter: h265::AccessUnitCounter,
         pts_analyzer: PTSAnalyzer,
-        private_data: Vec<Vec<u8>>,
+        video_metadata: Vec<VideoMetadata>,
     },
     Other(u8),
 }
@@ -79,7 +85,7 @@ impl Stream {
                 rfc6381_codec,
                 timecode,
                 pts_analyzer,
-                private_data,
+                video_metadata,
                 ..
             } => StreamInfo::Video {
                 width: *width,
@@ -97,7 +103,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: timecode.clone(),
                 is_interlaced: *is_interlaced,
-                private_data: private_data.clone(),
+                video_metadata: video_metadata.clone(),
             },
             Self::HEVCVideo {
                 width,
@@ -106,7 +112,7 @@ impl Stream {
                 access_unit_counter,
                 rfc6381_codec,
                 pts_analyzer,
-                private_data,
+                video_metadata,
                 ..
             } => StreamInfo::Video {
                 width: *width,
@@ -120,7 +126,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
                 is_interlaced: false,
-                private_data: private_data.clone(),
+                video_metadata: video_metadata.clone(),
             },
             Self::Other(_) => StreamInfo::Other,
         }
@@ -368,7 +374,7 @@ pub enum StreamInfo {
         rfc6381_codec: Option<String>,
         timecode: Option<Timecode>,
         is_interlaced: bool,
-        private_data: Vec<Vec<u8>>,
+        video_metadata: Vec<VideoMetadata>,
     },
     Other,
 }
@@ -486,7 +492,7 @@ impl Analyzer {
                                     last_timecode: None,
                                     timecode: None,
                                     pts_analyzer: PTSAnalyzer::new(),
-                                    private_data: vec![],
+                                    video_metadata: vec![],
                                 },
                                 0x24 => Stream::HEVCVideo {
                                     pes: pes::Stream::new(),
@@ -496,7 +502,7 @@ impl Analyzer {
                                     access_unit_counter: h265::AccessUnitCounter::new(),
                                     rfc6381_codec: None,
                                     pts_analyzer: PTSAnalyzer::new(),
-                                    private_data: vec![],
+                                    video_metadata: vec![],
                                 },
                                 t => Stream::Other(t),
                             };
@@ -683,7 +689,7 @@ mod test {
                     rfc6381_codec: Some("avc1.7a0020".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -720,7 +726,7 @@ mod test {
                     rfc6381_codec: Some("avc1.42003c".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -757,7 +763,7 @@ mod test {
                     rfc6381_codec: Some("hvc1.4.10.L120.9D.08".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -794,7 +800,7 @@ mod test {
                     rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -830,7 +836,7 @@ mod test {
                 rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                 timecode: None,
                 is_interlaced: false,
-                private_data: vec![],
+                video_metadata: vec![],
             },]
         );
     }
@@ -860,7 +866,7 @@ mod test {
                     rfc6381_codec: Some("hvc1.1.6.L153.B0".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -896,7 +902,7 @@ mod test {
                 rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                 timecode: None,
                 is_interlaced: false,
-                private_data: vec![],
+                video_metadata: vec![],
             },]
         );
     }
@@ -931,7 +937,7 @@ mod test {
                         frames: 2
                     }),
                     is_interlaced: true,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -983,7 +989,7 @@ mod test {
                 rfc6381_codec: Some("hvc1.1.6.L156.B0".to_string()),
                 timecode: None,
                 is_interlaced: false,
-                private_data: vec![],
+                video_metadata: vec![],
             },
         );
     }
