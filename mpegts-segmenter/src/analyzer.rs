@@ -15,7 +15,7 @@ pub struct Timecode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoMetadata {
-    // Video presentation time in 33-bit resolution at a 90KHz frequency
+    // relative to start of segment, in units of video presentation time in 33-bit resolution at a 90KHz frequency
     pub pts: u64,
     pub private_data: Vec<u8>,
 }
@@ -56,6 +56,22 @@ pub enum Stream {
         video_metadata: Vec<VideoMetadata>,
     },
     Other(u8),
+}
+
+fn convert_to_relative_pts(video_metadata: &[VideoMetadata]) -> Vec<VideoMetadata> {
+    const PTS_MOD: u64 = 1 << 33;
+    if video_metadata.is_empty() {
+        vec![]
+    } else {
+        let pts0 = video_metadata[0].pts;
+        video_metadata
+            .iter()
+            .map(|m| VideoMetadata {
+                pts: (m.pts + PTS_MOD - pts0) % PTS_MOD,
+                private_data: m.private_data.clone(),
+            })
+            .collect()
+    }
 }
 
 impl Stream {
@@ -127,7 +143,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
                 is_interlaced: false,
-                video_metadata: video_metadata.clone(),
+                video_metadata: convert_to_relative_pts(video_metadata),
             },
             Self::Other(_) => StreamInfo::Other,
         }
