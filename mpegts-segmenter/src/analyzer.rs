@@ -13,6 +13,13 @@ pub struct Timecode {
     pub frames: u8,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VideoMetadata {
+    // relative to start of segment, in units of video presentation time in 33-bit resolution at a 90KHz frequency
+    pub pts: u64,
+    pub private_data: Vec<u8>,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 pub enum Stream {
@@ -36,7 +43,7 @@ pub enum Stream {
         last_timecode: Option<Timecode>,
         last_vui_parameters: Option<h264::VUIParameters>,
         pts_analyzer: PTSAnalyzer,
-        private_data: Vec<Vec<u8>>,
+        video_metadata: Vec<VideoMetadata>,
     },
     HEVCVideo {
         pes: pes::Stream,
@@ -46,9 +53,25 @@ pub enum Stream {
         rfc6381_codec: Option<String>,
         access_unit_counter: h265::AccessUnitCounter,
         pts_analyzer: PTSAnalyzer,
-        private_data: Vec<Vec<u8>>,
+        video_metadata: Vec<VideoMetadata>,
     },
     Other(u8),
+}
+
+fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u64>) -> Vec<VideoMetadata> {
+    const PTS_MOD: u64 = 1 << 33;
+    if video_metadata.is_empty() {
+        vec![]
+    } else {
+        let pts0 = first_pts.unwrap_or(video_metadata[0].pts);
+        video_metadata
+            .iter()
+            .map(|m| VideoMetadata {
+                pts: (m.pts + PTS_MOD - pts0) % PTS_MOD,
+                private_data: m.private_data.clone(),
+            })
+            .collect()
+    }
 }
 
 impl Stream {
@@ -79,7 +102,7 @@ impl Stream {
                 rfc6381_codec,
                 timecode,
                 pts_analyzer,
-                private_data,
+                video_metadata,
                 ..
             } => StreamInfo::Video {
                 width: *width,
@@ -97,7 +120,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: timecode.clone(),
                 is_interlaced: *is_interlaced,
-                private_data: private_data.clone(),
+                video_metadata: convert_to_relative_pts(&video_metadata[..], pts_analyzer.first_pts()),
             },
             Self::HEVCVideo {
                 width,
@@ -106,7 +129,7 @@ impl Stream {
                 access_unit_counter,
                 rfc6381_codec,
                 pts_analyzer,
-                private_data,
+                video_metadata,
                 ..
             } => StreamInfo::Video {
                 width: *width,
@@ -120,7 +143,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
                 is_interlaced: false,
-                private_data: private_data.clone(),
+                video_metadata: convert_to_relative_pts(&video_metadata[..], pts_analyzer.first_pts()),
             },
             Self::Other(_) => StreamInfo::Other,
         }
@@ -368,7 +391,7 @@ pub enum StreamInfo {
         rfc6381_codec: Option<String>,
         timecode: Option<Timecode>,
         is_interlaced: bool,
-        private_data: Vec<Vec<u8>>,
+        video_metadata: Vec<VideoMetadata>,
     },
     Other,
 }
@@ -486,7 +509,7 @@ impl Analyzer {
                                     last_timecode: None,
                                     timecode: None,
                                     pts_analyzer: PTSAnalyzer::new(),
-                                    private_data: vec![],
+                                    video_metadata: vec![],
                                 },
                                 0x24 => Stream::HEVCVideo {
                                     pes: pes::Stream::new(),
@@ -496,7 +519,7 @@ impl Analyzer {
                                     access_unit_counter: h265::AccessUnitCounter::new(),
                                     rfc6381_codec: None,
                                     pts_analyzer: PTSAnalyzer::new(),
-                                    private_data: vec![],
+                                    video_metadata: vec![],
                                 },
                                 t => Stream::Other(t),
                             };
@@ -556,6 +579,10 @@ impl PTSAnalyzer {
         Self {
             timestamps: VecDeque::with_capacity(PTS_ANALYZER_MAX_TIMESTAMPS),
         }
+    }
+
+    pub fn first_pts(&self) -> Option<u64> {
+        self.timestamps.front().cloned()
     }
 
     pub fn write_pts(&mut self, mut pts: u64) {
@@ -683,7 +710,7 @@ mod test {
                     rfc6381_codec: Some("avc1.7a0020".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -720,7 +747,7 @@ mod test {
                     rfc6381_codec: Some("avc1.42003c".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -757,7 +784,7 @@ mod test {
                     rfc6381_codec: Some("hvc1.4.10.L120.9D.08".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -794,7 +821,7 @@ mod test {
                     rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -830,7 +857,7 @@ mod test {
                 rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                 timecode: None,
                 is_interlaced: false,
-                private_data: vec![],
+                video_metadata: vec![],
             },]
         );
     }
@@ -860,7 +887,7 @@ mod test {
                     rfc6381_codec: Some("hvc1.1.6.L153.B0".to_string()),
                     timecode: None,
                     is_interlaced: false,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -896,7 +923,7 @@ mod test {
                 rfc6381_codec: Some("hvc1.2.6.L180.B0".to_string()),
                 timecode: None,
                 is_interlaced: false,
-                private_data: vec![],
+                video_metadata: vec![],
             },]
         );
     }
@@ -931,7 +958,7 @@ mod test {
                         frames: 2
                     }),
                     is_interlaced: true,
-                    private_data: vec![],
+                    video_metadata: vec![],
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -983,7 +1010,7 @@ mod test {
                 rfc6381_codec: Some("hvc1.1.6.L156.B0".to_string()),
                 timecode: None,
                 is_interlaced: false,
-                private_data: vec![],
+                video_metadata: vec![],
             },
         );
     }
