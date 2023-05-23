@@ -120,7 +120,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: timecode.clone(),
                 is_interlaced: *is_interlaced,
-                video_metadata: convert_to_relative_pts(&video_metadata, pts_analyzer.first_pts()),
+                video_metadata: convert_to_relative_pts(&video_metadata[..], pts_analyzer.first_pts()),
             },
             Self::HEVCVideo {
                 width,
@@ -143,7 +143,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
                 is_interlaced: false,
-                video_metadata: convert_to_relative_pts(&video_metadata, pts_analyzer.first_pts()),
+                video_metadata: convert_to_relative_pts(&video_metadata[..], pts_analyzer.first_pts()),
             },
             Self::Other(_) => StreamInfo::Other,
         }
