@@ -170,7 +170,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                 if !af.private_data_bytes.is_empty() {
                     // error out if the private data in a MPEG-TS packet is not in the beginning of PES
                     if self.analyzer.is_pes(p.packet_id) && !p.payload_unit_start_indicator {
-                        return Err(Error::Mpeg2Decode(mpeg2::DecodeError::new("private data in the beginning of PES.")));
+                        return Err(Error::Mpeg2Decode(mpeg2::DecodeError::new("private data is not in the beginning of PES.")));
                     }
                     if let Some(payload) = p.payload.as_ref() {
                         let (header, _) = pes::PacketHeader::decode(payload)?;
@@ -746,10 +746,15 @@ mod test {
         assert_eq!(segments.len(), 1);
         match &segments[0].1.streams[0] {
             StreamInfo::Video { video_metadata, .. } => {
-                video_metadata
+                assert!(video_metadata
                     .iter()
-                    .all(|data| data.private_data.len() == 156 && data.private_data[..4] == [b't', b'x', b'm', b'0']);
+                    .all(|data| data.private_data.len() == 156 && data.private_data[..4] == [b't', b'x', b'm', b'0']));
                 assert_eq!(video_metadata.len(), 72);
+                let ptses = video_metadata.iter().map(|data| data.pts).collect::<Vec<u64>>();
+                assert_eq!(ptses.len(), 72);
+                for i in 1..ptses.len() {
+                    assert!(ptses[i] > ptses[i - 1]);
+                }
             }
             _ => unreachable!(),
         }

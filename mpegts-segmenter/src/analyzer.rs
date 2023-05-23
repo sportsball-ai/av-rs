@@ -58,12 +58,12 @@ pub enum Stream {
     Other(u8),
 }
 
-fn convert_to_relative_pts(video_metadata: &[VideoMetadata]) -> Vec<VideoMetadata> {
+fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u64>) -> Vec<VideoMetadata> {
     const PTS_MOD: u64 = 1 << 33;
     if video_metadata.is_empty() {
         vec![]
     } else {
-        let pts0 = video_metadata[0].pts;
+        let pts0 = first_pts.unwrap_or(video_metadata[0].pts);
         video_metadata
             .iter()
             .map(|m| VideoMetadata {
@@ -120,7 +120,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: timecode.clone(),
                 is_interlaced: *is_interlaced,
-                video_metadata: video_metadata.clone(),
+                video_metadata: convert_to_relative_pts(&video_metadata, pts_analyzer.first_pts()),
             },
             Self::HEVCVideo {
                 width,
@@ -143,7 +143,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
                 is_interlaced: false,
-                video_metadata: convert_to_relative_pts(video_metadata),
+                video_metadata: convert_to_relative_pts(&video_metadata, pts_analyzer.first_pts()),
             },
             Self::Other(_) => StreamInfo::Other,
         }
@@ -579,6 +579,10 @@ impl PTSAnalyzer {
         Self {
             timestamps: VecDeque::with_capacity(PTS_ANALYZER_MAX_TIMESTAMPS),
         }
+    }
+
+    pub fn first_pts(&self) -> Option<u64> {
+        self.timestamps.front().cloned()
     }
 
     pub fn write_pts(&mut self, mut pts: u64) {
