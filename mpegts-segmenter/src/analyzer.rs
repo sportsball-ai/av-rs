@@ -15,6 +15,7 @@ pub struct Timecode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VideoMetadata {
+    // Video presentation time in 33-bit resolution at a 90KHz frequency
     pub pts: u64,
     pub private_data: Vec<u8>,
 }

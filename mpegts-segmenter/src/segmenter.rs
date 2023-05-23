@@ -163,11 +163,15 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
             }
 
-            let mut packet_pts: Option<u64> = None;
+            let mut pes_packet_header = None;
             let first_temi_timeline_descriptor;
             if let Some(af) = p.adaptation_field {
                 first_temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
                 if !af.private_data_bytes.is_empty() {
+                    // error out if the private data in a MPEG-TS packet is not in the beginning of PES
+                    if self.analyzer.is_pes(p.packet_id) && !p.payload_unit_start_indicator {
+                        return Err(Error::Mpeg2Decode(mpeg2::DecodeError::new("private data in the beginning of PES.")));
+                    }
                     if let Some(payload) = p.payload.as_ref() {
                         let (header, _) = pes::PacketHeader::decode(payload)?;
                         if let Some(pts) = header.optional_header.as_ref().and_then(|h| h.pts) {
@@ -182,8 +186,8 @@ impl<S: SegmentStorage> Segmenter<S> {
                                 }),
                                 _ => {}
                             }
-                            packet_pts = Some(pts);
                         }
+                        pes_packet_header = Some(header);
                     }
                 }
             } else {
@@ -212,12 +216,18 @@ impl<S: SegmentStorage> Segmenter<S> {
             if let Some(segment) = &mut self.current_segment {
                 // set the segment's pts if necessary
                 if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
-                    if let Some(pts) = packet_pts {
-                        segment.pts = Some(Duration::from_micros((pts * 300) / 27));
-                    } else if let Some(payload) = p.payload {
-                        let (header, _) = pes::PacketHeader::decode(&payload)?;
-                        segment.pts = header.optional_header.and_then(|h| h.pts).map(|pts| Duration::from_micros((pts * 300) / 27));
+                    if pes_packet_header.is_none() {
+                        pes_packet_header = if let Some(payload) = p.payload {
+                            let (header, _) = pes::PacketHeader::decode(&payload)?;
+                            Some(header)
+                        } else {
+                            None
+                        }
                     }
+                    segment.pts = pes_packet_header
+                        .and_then(|h| h.optional_header)
+                        .and_then(|h| h.pts)
+                        .map(|pts| Duration::from_micros((pts * 300) / 27));
                 }
 
                 if segment.temi_timeline_descriptor.is_none() {
