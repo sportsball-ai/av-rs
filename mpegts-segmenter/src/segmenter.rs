@@ -744,14 +744,14 @@ mod test {
         }
 
         let segments = storage.segments();
+        assert_eq!(segments.len(), 3);
         assert!(segments
             .iter()
-            .all(|(_, s)| s.streams.len() == 1 && matches!(s.streams[0], StreamInfo::Video { .. })));
+            .all(|(_, segment_info)| segment_info.streams.len() == 1 && matches!(segment_info.streams[0], StreamInfo::Video { .. })));
 
-        assert_eq!(segments.len(), 3);
         let expected_video_metadata_len = [72, 72, 72];
         for i in 0..3 {
-            match &segments[0].1.streams[0] {
+            match &segments[i].1.streams[0] {
                 StreamInfo::Video { video_metadata, .. } => {
                     assert_eq!(video_metadata.len(), expected_video_metadata_len[i]);
                     assert!(video_metadata
