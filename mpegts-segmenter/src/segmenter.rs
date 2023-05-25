@@ -210,9 +210,11 @@ impl<S: SegmentStorage> Segmenter<S> {
                     temi_timeline_descriptor: None,
                 });
 
-                self.analyzer.reset_stream_metadata(packet_id, video_metadata);
+                self.analyzer.reset_stream_metadata();
                 self.analyzer.reset_timecodes();
-            } else if let Some(video_metadata) = video_metadata {
+            }
+
+            if let Some(video_metadata) = video_metadata {
                 self.analyzer.add_stream_metadata(packet_id, video_metadata);
             }
 
@@ -727,13 +729,13 @@ mod test {
     async fn test_segmenter_video_cropping() {
         let mut storage = MemorySegmentStorage::new();
         {
-            let mut f = File::open("src/testdata/segment-with-cropping.ts").unwrap();
+            let mut f = File::open("src/testdata/with-cropping.ts").unwrap();
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
             segment(
                 buf.as_slice(),
                 SegmenterConfig {
-                    min_segment_duration: Duration::from_millis(2500),
+                    min_segment_duration: Duration::from_millis(2900),
                 },
                 &mut storage,
             )
@@ -746,20 +748,23 @@ mod test {
             .iter()
             .all(|(_, s)| s.streams.len() == 1 && matches!(s.streams[0], StreamInfo::Video { .. })));
 
-        assert_eq!(segments.len(), 1);
-        match &segments[0].1.streams[0] {
-            StreamInfo::Video { video_metadata, .. } => {
-                assert!(video_metadata
-                    .iter()
-                    .all(|data| data.private_data.len() == 156 && data.private_data[..4] == [b't', b'x', b'm', b'0']));
-                assert_eq!(video_metadata.len(), 72);
-                let ptses = video_metadata.iter().map(|data| data.pts).collect::<Vec<u64>>();
-                assert_eq!(ptses.len(), 72);
-                for i in 1..ptses.len() {
-                    assert!(ptses[i] > ptses[i - 1]);
+        assert_eq!(segments.len(), 3);
+        let expected_video_metadata_len = [72, 72, 72];
+        for i in 0..3 {
+            match &segments[0].1.streams[0] {
+                StreamInfo::Video { video_metadata, .. } => {
+                    assert_eq!(video_metadata.len(), expected_video_metadata_len[i]);
+                    assert!(video_metadata
+                        .iter()
+                        .all(|data| data.private_data.len() == 80 && data.private_data[..4] == [b't', b'x', b'm', b'0']));
+
+                    let ptses = video_metadata.iter().map(|data| data.pts).collect::<Vec<u64>>();
+                    for i in 1..ptses.len() {
+                        assert!(ptses[i] > ptses[i - 1]);
+                    }
                 }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
     }
 }

@@ -480,14 +480,11 @@ impl Analyzer {
             .collect()
     }
 
-    pub fn reset_stream_metadata(&mut self, packet_id: u16, video_metadata: Option<VideoMetadata>) {
+    pub fn reset_stream_metadata(&mut self) {
         for pid in &mut self.pids {
             if let PidState::Pes { stream } = pid {
                 stream.reset_stream_metadata();
             }
-        }
-        if let Some(video_metadata) = video_metadata {
-            self.add_stream_metadata(packet_id, video_metadata);
         }
     }
 
