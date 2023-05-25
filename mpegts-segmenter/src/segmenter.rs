@@ -274,6 +274,22 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
     Ok(())
 }
 
+fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u64>) -> Vec<VideoMetadata> {
+    const PTS_MOD: u64 = 1 << 33;
+    if video_metadata.is_empty() {
+        vec![]
+    } else {
+        let pts0 = first_pts.unwrap_or(video_metadata[0].pts);
+        video_metadata
+            .iter()
+            .map(|m| VideoMetadata {
+                pts: (m.pts + PTS_MOD - pts0) % PTS_MOD,
+                private_data: m.private_data.clone(),
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SegmentInfo {
     pub size: usize,
@@ -338,7 +354,7 @@ impl SegmentInfo {
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
-                            video_metadata: video_metadata.clone(),
+                            video_metadata: convert_to_relative_pts(video_metadata, segment.pts.map(|t| (t.as_micros() as f64 * 27.0 / 300.0).round() as u64)),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -749,16 +765,16 @@ mod test {
             .iter()
             .all(|(_, segment_info)| segment_info.streams.len() == 1 && matches!(segment_info.streams[0], StreamInfo::Video { .. })));
 
-        let expected_video_metadata_len = [72, 72, 72];
-        for i in 0..3 {
-            match &segments[i].1.streams[0] {
+        for segment in segments {
+            match &segment.1.streams[0] {
                 StreamInfo::Video { video_metadata, .. } => {
-                    assert_eq!(video_metadata.len(), expected_video_metadata_len[i]);
+                    assert_eq!(video_metadata.len(), 72);
                     assert!(video_metadata
                         .iter()
                         .all(|data| data.private_data.len() == 80 && data.private_data[..4] == [b't', b'x', b'm', b'0']));
 
                     let ptses = video_metadata.iter().map(|data| data.pts).collect::<Vec<u64>>();
+                    assert_eq!(ptses[0], 0);
                     for i in 1..ptses.len() {
                         assert!(ptses[i] > ptses[i - 1]);
                     }

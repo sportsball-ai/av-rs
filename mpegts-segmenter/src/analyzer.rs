@@ -58,22 +58,6 @@ pub enum Stream {
     Other(u8),
 }
 
-fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u64>) -> Vec<VideoMetadata> {
-    const PTS_MOD: u64 = 1 << 33;
-    if video_metadata.is_empty() {
-        vec![]
-    } else {
-        let pts0 = first_pts.unwrap_or(video_metadata[0].pts);
-        video_metadata
-            .iter()
-            .map(|m| VideoMetadata {
-                pts: (m.pts + PTS_MOD - pts0) % PTS_MOD,
-                private_data: m.private_data.clone(),
-            })
-            .collect()
-    }
-}
-
 impl Stream {
     pub fn is_video(&self) -> bool {
         matches!(*self, Stream::AVCVideo { .. } | Stream::HEVCVideo { .. })
@@ -120,7 +104,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: timecode.clone(),
                 is_interlaced: *is_interlaced,
-                video_metadata: convert_to_relative_pts(&video_metadata[..], pts_analyzer.first_pts()),
+                video_metadata: video_metadata.clone(),
             },
             Self::HEVCVideo {
                 width,
@@ -143,7 +127,7 @@ impl Stream {
                 rfc6381_codec: rfc6381_codec.clone(),
                 timecode: None,
                 is_interlaced: false,
-                video_metadata: convert_to_relative_pts(&video_metadata[..], pts_analyzer.first_pts()),
+                video_metadata: video_metadata.clone(),
             },
             Self::Other(_) => StreamInfo::Other,
         }
