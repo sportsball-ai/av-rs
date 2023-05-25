@@ -209,7 +209,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     bytes_written: 0,
                     temi_timeline_descriptor: None,
                 });
-
+                self.analyzer.reset_stream_metadata();
                 self.analyzer.reset_timecodes();
             }
 

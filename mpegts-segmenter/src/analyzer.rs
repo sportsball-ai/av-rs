@@ -462,6 +462,14 @@ impl Analyzer {
             .collect()
     }
 
+    pub fn reset_stream_metadata(&mut self) {
+        self.streams().iter_mut().for_each(|stream_info| {
+            if let StreamInfo::Video { video_metadata, .. } = stream_info {
+                video_metadata.clear()
+            }
+        });
+    }
+
     pub fn reset_timecodes(&mut self) {
         for pid in &mut self.pids {
             if let PidState::Pes { stream } = pid {
