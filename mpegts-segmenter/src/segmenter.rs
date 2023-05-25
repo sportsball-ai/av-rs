@@ -165,6 +165,7 @@ impl<S: SegmentStorage> Segmenter<S> {
 
             let mut pes_packet_header = None;
             let first_temi_timeline_descriptor;
+            let (mut packet_id, mut video_metadata) = (0, None);
             if let Some(af) = p.adaptation_field {
                 first_temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
                 if !af.private_data_bytes.is_empty() {
@@ -176,14 +177,13 @@ impl<S: SegmentStorage> Segmenter<S> {
                         let (header, _) = pes::PacketHeader::decode(payload)?;
                         if let Some(pts) = header.optional_header.as_ref().and_then(|h| h.pts) {
                             match self.analyzer.stream(p.packet_id) {
-                                Some(analyzer::Stream::AVCVideo { video_metadata, .. }) => video_metadata.push(VideoMetadata {
-                                    pts,
-                                    private_data: af.private_data_bytes.into_owned(),
-                                }),
-                                Some(analyzer::Stream::HEVCVideo { video_metadata, .. }) => video_metadata.push(VideoMetadata {
-                                    pts,
-                                    private_data: af.private_data_bytes.into_owned(),
-                                }),
+                                Some(analyzer::Stream::AVCVideo { .. }) | Some(analyzer::Stream::HEVCVideo { .. }) => {
+                                    packet_id = p.packet_id;
+                                    video_metadata = Some(VideoMetadata {
+                                        pts,
+                                        private_data: af.private_data_bytes.into_owned(),
+                                    })
+                                }
                                 _ => {}
                             }
                         }
@@ -209,8 +209,11 @@ impl<S: SegmentStorage> Segmenter<S> {
                     bytes_written: 0,
                     temi_timeline_descriptor: None,
                 });
-                self.analyzer.reset_stream_metadata();
+
+                self.analyzer.reset_stream_metadata(packet_id, video_metadata);
                 self.analyzer.reset_timecodes();
+            } else if let Some(video_metadata) = video_metadata {
+                self.analyzer.add_stream_metadata(packet_id, video_metadata);
             }
 
             if let Some(segment) = &mut self.current_segment {
