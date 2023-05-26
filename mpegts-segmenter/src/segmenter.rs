@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
     pcr: u64,
-    pts: Option<Duration>,
+    pts: Option<u64>,
     bytes_written: usize,
     temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
 }
@@ -229,10 +229,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                             None
                         }
                     }
-                    segment.pts = pes_packet_header
-                        .and_then(|h| h.optional_header)
-                        .and_then(|h| h.pts)
-                        .map(|pts| Duration::from_micros((pts * 300) / 27));
+                    segment.pts = pes_packet_header.and_then(|h| h.optional_header).and_then(|h| h.pts);
                 }
 
                 if segment.temi_timeline_descriptor.is_none() {
@@ -302,7 +299,7 @@ impl SegmentInfo {
     fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, streams: Vec<StreamInfo>, prev_streams: &[StreamInfo]) -> Self {
         Self {
             size: segment.bytes_written,
-            presentation_time: segment.pts,
+            presentation_time: segment.pts.map(|pts| Duration::from_micros((pts * 300) / 27)),
             streams: if streams.len() != prev_streams.len() {
                 streams
             } else {
@@ -354,7 +351,7 @@ impl SegmentInfo {
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
-                            video_metadata: convert_to_relative_pts(video_metadata, segment.pts.map(|t| (t.as_micros() as f64 * 27.0 / 300.0).round() as u64)),
+                            video_metadata: convert_to_relative_pts(video_metadata, segment.pts),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
