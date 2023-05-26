@@ -11,7 +11,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
     pcr: u64,
-    pts: Option<Duration>,
+    pts: Option<u64>,
     bytes_written: usize,
     temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
 }
@@ -165,6 +165,7 @@ impl<S: SegmentStorage> Segmenter<S> {
 
             let mut pes_packet_header = None;
             let first_temi_timeline_descriptor;
+            let (mut packet_id, mut video_metadata) = (0, None);
             if let Some(af) = p.adaptation_field {
                 first_temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
                 if !af.private_data_bytes.is_empty() {
@@ -176,14 +177,13 @@ impl<S: SegmentStorage> Segmenter<S> {
                         let (header, _) = pes::PacketHeader::decode(payload)?;
                         if let Some(pts) = header.optional_header.as_ref().and_then(|h| h.pts) {
                             match self.analyzer.stream(p.packet_id) {
-                                Some(analyzer::Stream::AVCVideo { video_metadata, .. }) => video_metadata.push(VideoMetadata {
-                                    pts,
-                                    private_data: af.private_data_bytes.into_owned(),
-                                }),
-                                Some(analyzer::Stream::HEVCVideo { video_metadata, .. }) => video_metadata.push(VideoMetadata {
-                                    pts,
-                                    private_data: af.private_data_bytes.into_owned(),
-                                }),
+                                Some(analyzer::Stream::AVCVideo { .. }) | Some(analyzer::Stream::HEVCVideo { .. }) => {
+                                    packet_id = p.packet_id;
+                                    video_metadata = Some(VideoMetadata {
+                                        pts,
+                                        private_data: af.private_data_bytes.into_owned(),
+                                    })
+                                }
                                 _ => {}
                             }
                         }
@@ -210,7 +210,12 @@ impl<S: SegmentStorage> Segmenter<S> {
                     temi_timeline_descriptor: None,
                 });
 
+                self.analyzer.reset_stream_metadata();
                 self.analyzer.reset_timecodes();
+            }
+
+            if let Some(video_metadata) = video_metadata {
+                self.analyzer.add_stream_metadata(packet_id, video_metadata);
             }
 
             if let Some(segment) = &mut self.current_segment {
@@ -224,10 +229,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                             None
                         }
                     }
-                    segment.pts = pes_packet_header
-                        .and_then(|h| h.optional_header)
-                        .and_then(|h| h.pts)
-                        .map(|pts| Duration::from_micros((pts * 300) / 27));
+                    segment.pts = pes_packet_header.and_then(|h| h.optional_header).and_then(|h| h.pts);
                 }
 
                 if segment.temi_timeline_descriptor.is_none() {
@@ -269,6 +271,22 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
     Ok(())
 }
 
+fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u64>) -> Vec<VideoMetadata> {
+    const PTS_MOD: u64 = 1 << 33;
+    if video_metadata.is_empty() {
+        vec![]
+    } else {
+        let pts0 = first_pts.unwrap_or(video_metadata[0].pts);
+        video_metadata
+            .iter()
+            .map(|m| VideoMetadata {
+                pts: (m.pts + PTS_MOD - pts0) % PTS_MOD,
+                private_data: m.private_data.clone(),
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SegmentInfo {
     pub size: usize,
@@ -281,7 +299,7 @@ impl SegmentInfo {
     fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, streams: Vec<StreamInfo>, prev_streams: &[StreamInfo]) -> Self {
         Self {
             size: segment.bytes_written,
-            presentation_time: segment.pts,
+            presentation_time: segment.pts.map(|pts| Duration::from_micros((pts * 300) / 27)),
             streams: if streams.len() != prev_streams.len() {
                 streams
             } else {
@@ -333,7 +351,7 @@ impl SegmentInfo {
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
-                            video_metadata: video_metadata.clone(),
+                            video_metadata: convert_to_relative_pts(video_metadata, segment.pts),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -724,13 +742,13 @@ mod test {
     async fn test_segmenter_video_cropping() {
         let mut storage = MemorySegmentStorage::new();
         {
-            let mut f = File::open("src/testdata/segment-with-cropping.ts").unwrap();
+            let mut f = File::open("src/testdata/with-cropping.ts").unwrap();
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
             segment(
                 buf.as_slice(),
                 SegmenterConfig {
-                    min_segment_duration: Duration::from_millis(2500),
+                    min_segment_duration: Duration::from_millis(2900),
                 },
                 &mut storage,
             )
@@ -739,24 +757,27 @@ mod test {
         }
 
         let segments = storage.segments();
+        assert_eq!(segments.len(), 3);
         assert!(segments
             .iter()
-            .all(|(_, s)| s.streams.len() == 1 && matches!(s.streams[0], StreamInfo::Video { .. })));
+            .all(|(_, segment_info)| segment_info.streams.len() == 1 && matches!(segment_info.streams[0], StreamInfo::Video { .. })));
 
-        assert_eq!(segments.len(), 1);
-        match &segments[0].1.streams[0] {
-            StreamInfo::Video { video_metadata, .. } => {
-                assert!(video_metadata
-                    .iter()
-                    .all(|data| data.private_data.len() == 156 && data.private_data[..4] == [b't', b'x', b'm', b'0']));
-                assert_eq!(video_metadata.len(), 72);
-                let ptses = video_metadata.iter().map(|data| data.pts).collect::<Vec<u64>>();
-                assert_eq!(ptses.len(), 72);
-                for i in 1..ptses.len() {
-                    assert!(ptses[i] > ptses[i - 1]);
+        for segment in segments {
+            match &segment.1.streams[0] {
+                StreamInfo::Video { video_metadata, .. } => {
+                    assert_eq!(video_metadata.len(), 72);
+                    assert!(video_metadata
+                        .iter()
+                        .all(|data| data.private_data.len() == 80 && data.private_data[..4] == [b't', b'x', b'm', b'0']));
+
+                    let ptses = video_metadata.iter().map(|data| data.pts).collect::<Vec<u64>>();
+                    assert_eq!(ptses[0], 0);
+                    for i in 1..ptses.len() {
+                        assert!(ptses[i] > ptses[i - 1]);
+                    }
                 }
+                _ => unreachable!(),
             }
-            _ => unreachable!(),
         }
     }
 }
