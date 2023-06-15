@@ -673,7 +673,7 @@ mod tests {
 
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("tmp.mov");
-        let mut f_out = std::fs::File::create(&path).unwrap();
+        let mut f_out = std::fs::File::create(path).unwrap();
         f.trim_frames(&mut f_out, 0, 4).unwrap();
     }
 
