@@ -342,7 +342,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
                         operation: "reading decoded frame",
                     });
                 }
-                self.eos_received = (*self.next_decoded_frame).end_of_stream != 0;
+                self.eos_received = self.next_decoded_frame.end_of_stream != 0;
                 if code > 0 {
                     let frame = mem::replace(
                         &mut self.next_decoded_frame,
