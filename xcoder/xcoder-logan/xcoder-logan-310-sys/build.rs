@@ -7,7 +7,7 @@ fn main() {
 
         let libxcoder_path = out_path.join("libxcoder_logan");
         Command::new("cp")
-            .args(&["-r", "vendor/libxcoder_logan", libxcoder_path.to_str().unwrap()])
+            .args(["-r", "vendor/libxcoder_logan", libxcoder_path.to_str().unwrap()])
             .status()
             .unwrap();
 
@@ -34,7 +34,7 @@ fn main() {
             .env("XCODER_BINDIR", "NO")
             .env("XCODER_INCLUDEDIR", "NO")
             .env("XCODER_SHAREDDIR", "NO")
-            .args(&["vendor/libxcoder_logan/auto/auto_headers.sh"])
+            .args(["vendor/libxcoder_logan/auto/auto_headers.sh"])
             .status()
             .unwrap();
 
