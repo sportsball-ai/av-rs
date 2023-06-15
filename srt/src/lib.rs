@@ -303,7 +303,7 @@ fn sockaddr_from_storage(storage: &sys::sockaddr_storage, len: sys::socklen_t) -
         AF_INET => {
             assert!(len as usize >= mem::size_of::<sockaddr_in>());
             Ok(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::from(unsafe { u32::from_be((*(storage as *const _ as *const sockaddr_in)).sin_addr.s_addr as u32) }),
+                Ipv4Addr::from(unsafe { u32::from_be((*(storage as *const _ as *const sockaddr_in)).sin_addr.s_addr) }),
                 unsafe { u16::from_be((*(storage as *const _ as *const sockaddr_in)).sin_port) },
             )))
         }

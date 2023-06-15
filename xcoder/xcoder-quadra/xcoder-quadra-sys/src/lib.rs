@@ -4,7 +4,6 @@
     non_upper_case_globals,
     non_snake_case,
     non_camel_case_types,
-    unaligned_references,
     clippy::redundant_static_lifetimes,
     clippy::too_many_arguments,
     clippy::useless_transmute
