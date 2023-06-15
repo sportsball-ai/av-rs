@@ -403,7 +403,7 @@ mod test {
 
         let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
         for (i, pes_packet) in pes_packets.into_iter().enumerate() {
-            pes_packets_array[i % num_of_streams as usize].push_back(pes_packet);
+            pes_packets_array[i % num_of_streams].push_back(pes_packet);
         }
 
         let mut data_out = Vec::new();

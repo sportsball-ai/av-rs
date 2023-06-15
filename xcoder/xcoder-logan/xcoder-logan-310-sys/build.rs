@@ -38,7 +38,13 @@ fn main() {
             .status()
             .unwrap();
 
-        let c_source_files = vec!["ni_log_logan.c", "ni_nvme_logan.c", "ni_device_api_priv_logan.c", "ni_device_api_logan.c", "ni_util_logan.c"];
+        let c_source_files = vec![
+            "ni_log_logan.c",
+            "ni_nvme_logan.c",
+            "ni_device_api_priv_logan.c",
+            "ni_device_api_logan.c",
+            "ni_util_logan.c",
+        ];
 
         cc::Build::new()
             .files(c_source_files.iter().map(|name| source_path.join(name)))

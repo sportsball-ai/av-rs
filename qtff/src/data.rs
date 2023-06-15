@@ -237,10 +237,7 @@ impl ReadData for MediaData {
         Ok(Self {
             header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media header"))?,
             information: {
-                let component_subtype = handler_reference
-                    .as_ref()
-                    .and_then(|v| v.component_subtype.to_string())
-                    .unwrap_or_default();
+                let component_subtype = handler_reference.as_ref().and_then(|v| v.component_subtype.to_string()).unwrap_or_default();
                 match component_subtype.as_str() {
                     "vide" => Some(MediaInformationData::Video(
                         read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media video information"))?,
@@ -939,7 +936,7 @@ impl ReadData for SoundSampleDescriptionDataEntryV1 {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct SoundSampleDescriptionDataEntryV2 {
     // TODO: add v2 fields. the docs i'm looking at right now seem to be confused about whether v2
-// appends new fields to v1 or replaces fields in v1 :-/
+    // appends new fields to v1 or replaces fields in v1 :-/
 }
 
 #[derive(Clone, Debug, PartialEq)]
