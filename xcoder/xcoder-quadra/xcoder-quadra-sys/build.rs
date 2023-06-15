@@ -7,7 +7,7 @@ fn main() {
 
         let libxcoder_path = out_path.join("libxcoder");
         Command::new("cp")
-            .args(&["-r", "vendor/libxcoder", libxcoder_path.to_str().unwrap()])
+            .args(["-r", "vendor/libxcoder", libxcoder_path.to_str().unwrap()])
             .status()
             .unwrap();
 
@@ -23,7 +23,7 @@ fn main() {
             .env("XCODER_WIN_NVME_CUSTOM", "NO")
             .env("XCODER_SELF_KILL_ERR", "NO")
             .env("XCODER_LATENCY_DISPLAY", "NO")
-            .args(&["vendor/libxcoder/auto/auto_headers.sh"])
+            .args(["vendor/libxcoder/auto/auto_headers.sh"])
             .status()
             .unwrap();
 

@@ -18,6 +18,7 @@ where
     let mut inputs = inputs.into_iter().map(|input| Input::new(input.into_iter())).collect::<Result<Vec<_>, E>>()?;
 
     let input_0_sps = inputs[0].sps.clone();
+    #[allow(clippy::redundant_clone)] // erroneous suggestion.
     let mut sps = input_0_sps.clone();
     sps.pic_width_in_luma_samples.0 = 0;
     for input in &inputs {
@@ -25,6 +26,7 @@ where
     }
 
     let input_0_pps = inputs[0].pps.clone();
+    #[allow(clippy::redundant_clone)] // erroneous suggestion.
     let mut pps = input_0_pps.clone();
     pps.tiles_enabled_flag.0 = 1;
     pps.num_tile_columns_minus1.0 = inputs.len() as u64 - 1;

@@ -41,11 +41,11 @@ mod linux_impl {
         }
 
         pub fn surface(&self) -> &sys::niFrameSurface1_t {
-            unsafe { &*((*self).p_data[3] as *const sys::niFrameSurface1_t) }
+            unsafe { &*(self.p_data[3] as *const sys::niFrameSurface1_t) }
         }
 
         unsafe fn surface_mut(&mut self) -> &mut sys::niFrameSurface1_t {
-            &mut *((*self).p_data[3] as *mut sys::niFrameSurface1_t)
+            &mut *(self.p_data[3] as *mut sys::niFrameSurface1_t)
         }
     }
 

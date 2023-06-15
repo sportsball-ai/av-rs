@@ -193,7 +193,7 @@ impl<'a> BitstreamWriter<'a> {
     pub fn skip_n_bits(&mut self, mut n: u8) {
         n += self.next_bit;
         self.next_byte += (n as usize) >> 3;
-        self.next_bit = n as u8 & 0x7;
+        self.next_bit = n & 0x7;
     }
 
     pub fn skip_n_bytes(&mut self, n: usize) {

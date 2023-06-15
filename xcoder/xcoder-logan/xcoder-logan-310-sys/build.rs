@@ -7,7 +7,7 @@ fn main() {
 
         let libxcoder_path = out_path.join("libxcoder_logan");
         Command::new("cp")
-            .args(&["-r", "vendor/libxcoder_logan", libxcoder_path.to_str().unwrap()])
+            .args(["-r", "vendor/libxcoder_logan", libxcoder_path.to_str().unwrap()])
             .status()
             .unwrap();
 
@@ -34,11 +34,17 @@ fn main() {
             .env("XCODER_BINDIR", "NO")
             .env("XCODER_INCLUDEDIR", "NO")
             .env("XCODER_SHAREDDIR", "NO")
-            .args(&["vendor/libxcoder_logan/auto/auto_headers.sh"])
+            .args(["vendor/libxcoder_logan/auto/auto_headers.sh"])
             .status()
             .unwrap();
 
-        let c_source_files = vec!["ni_log_logan.c", "ni_nvme_logan.c", "ni_device_api_priv_logan.c", "ni_device_api_logan.c", "ni_util_logan.c"];
+        let c_source_files = vec![
+            "ni_log_logan.c",
+            "ni_nvme_logan.c",
+            "ni_device_api_priv_logan.c",
+            "ni_device_api_logan.c",
+            "ni_util_logan.c",
+        ];
 
         cc::Build::new()
             .files(c_source_files.iter().map(|name| source_path.join(name)))

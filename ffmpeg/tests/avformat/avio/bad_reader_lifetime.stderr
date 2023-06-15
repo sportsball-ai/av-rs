@@ -1,6 +1,8 @@
 error[E0505]: cannot move out of `buf` because it is borrowed
   --> tests/avformat/avio/bad_reader_lifetime.rs:10:10
    |
+5  |     let buf = vec![];
+   |         --- binding `buf` declared here
 6  |     let r = Reader::new(&*buf).unwrap();
    |                           --- borrow of `buf` occurs here
 ...

@@ -29,7 +29,7 @@ impl PixelBuffer {
             plane_ptrs.push(p.data as *mut c_void);
             plane_widths.push(p.width as usize);
             plane_heights.push(p.height as usize);
-            plane_bytes_per_row.push(p.bytes_per_row as usize);
+            plane_bytes_per_row.push(p.bytes_per_row);
         }
 
         let mut ret = std::ptr::null_mut();
@@ -85,7 +85,7 @@ impl PixelBuffer {
     }
 
     pub fn data_size(&self) -> usize {
-        unsafe { sys::CVPixelBufferGetDataSize(self.0) as usize }
+        unsafe { sys::CVPixelBufferGetDataSize(self.0) }
     }
 }
 

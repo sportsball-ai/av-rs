@@ -180,7 +180,7 @@ impl Stream {
                         continue;
                     }
 
-                    access_unit_counter.count_nalu(&nalu)?;
+                    access_unit_counter.count_nalu(nalu)?;
 
                     let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
                     match nalu_type {
@@ -279,7 +279,7 @@ impl Stream {
                         continue;
                     }
 
-                    access_unit_counter.count_nalu(&nalu)?;
+                    access_unit_counter.count_nalu(nalu)?;
 
                     let mut bs = h265::Bitstream::new(nalu.iter().copied());
                     let header = h265::NALUnitHeader::decode(&mut bs)?;

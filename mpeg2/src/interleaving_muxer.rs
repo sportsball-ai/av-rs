@@ -237,25 +237,18 @@ mod test {
     }
 
     /// TestWriter is a writer that records the timestamps of all of the PES packets written to it.
+    #[derive(Default)]
     struct TestWriter {
         state: RefCell<TestWriterState>,
     }
 
+    #[derive(Default)]
     struct TestWriterState {
         buffer: Vec<u8>,
         packets: Vec<WrittenPacket>,
     }
 
     impl TestWriter {
-        pub fn new() -> Self {
-            Self {
-                state: RefCell::new(TestWriterState {
-                    buffer: vec![],
-                    packets: vec![],
-                }),
-            }
-        }
-
         pub fn packets(&self) -> Ref<'_, Vec<WrittenPacket>> {
             Ref::map(self.state.borrow(), |s| &s.packets)
         }
@@ -403,7 +396,7 @@ mod test {
 
         let mut pes_packets_array = [VecDeque::new(), VecDeque::new()];
         for (i, pes_packet) in pes_packets.into_iter().enumerate() {
-            pes_packets_array[i % num_of_streams as usize].push_back(pes_packet);
+            pes_packets_array[i % num_of_streams].push_back(pes_packet);
         }
 
         let mut data_out = Vec::new();
@@ -539,7 +532,7 @@ mod test {
     /// With only one stream, all packets should simply be written immediately, with no buffering.
     #[test]
     fn test_single_stream_latency() {
-        let w = TestWriter::new();
+        let w = TestWriter::default();
 
         let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
         add_streams(&mut muxer, 1);
@@ -558,7 +551,7 @@ mod test {
     /// packets should always be written through immediately, without buffering.
     #[test]
     fn test_multiple_stream_latency() {
-        let w = TestWriter::new();
+        let w = TestWriter::default();
 
         let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
         add_streams(&mut muxer, 2);
@@ -604,7 +597,7 @@ mod test {
 
     #[test]
     fn test_oversized_presentation_times() {
-        let w = TestWriter::new();
+        let w = TestWriter::default();
         let mut muxer = InterleavingMuxer::new(&w, Duration::from_millis(500));
         add_streams(&mut muxer, 2);
 

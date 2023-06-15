@@ -329,7 +329,7 @@ impl File {
                                             Data::SourceFile(source_offset, source_size) => {
                                                 self.f.seek(SeekFrom::Start(*source_offset))?;
                                                 let mut buf = Vec::new();
-                                                buf.resize(*source_size as usize, 0);
+                                                buf.resize(*source_size, 0);
                                                 self.f.read_exact(&mut buf)?;
                                                 buf
                                             }
@@ -673,7 +673,7 @@ mod tests {
 
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("tmp.mov");
-        let mut f_out = std::fs::File::create(&path).unwrap();
+        let mut f_out = std::fs::File::create(path).unwrap();
         f.trim_frames(&mut f_out, 0, 4).unwrap();
     }
 

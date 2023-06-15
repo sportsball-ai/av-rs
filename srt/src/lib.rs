@@ -303,7 +303,7 @@ fn sockaddr_from_storage(storage: &sys::sockaddr_storage, len: sys::socklen_t) -
         AF_INET => {
             assert!(len as usize >= mem::size_of::<sockaddr_in>());
             Ok(SocketAddr::V4(SocketAddrV4::new(
-                Ipv4Addr::from(unsafe { u32::from_be((*(storage as *const _ as *const sockaddr_in)).sin_addr.s_addr as u32) }),
+                Ipv4Addr::from(unsafe { u32::from_be((*(storage as *const _ as *const sockaddr_in)).sin_addr.s_addr) }),
                 unsafe { u16::from_be((*(storage as *const _ as *const sockaddr_in)).sin_port) },
             )))
         }
@@ -325,14 +325,14 @@ fn to_sockaddr(addr: &SocketAddr) -> (sys::sockaddr_storage, sys::socklen_t) {
     let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
     let socklen = match addr {
         SocketAddr::V4(ref a) => {
-            let mut storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in) };
+            let storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in) };
             storage.sin_family = AF_INET as _;
             storage.sin_port = u16::to_be(a.port());
             storage.sin_addr.s_addr = u32::from_ne_bytes(a.ip().octets());
             mem::size_of::<sockaddr_in>()
         }
         SocketAddr::V6(ref a) => {
-            let mut storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in6) };
+            let storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in6) };
             storage.sin6_family = AF_INET6 as _;
             storage.sin6_port = u16::to_be(a.port());
             storage.sin6_addr.s6_addr.copy_from_slice(&a.ip().octets());

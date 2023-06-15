@@ -237,10 +237,7 @@ impl ReadData for MediaData {
         Ok(Self {
             header: read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media header"))?,
             information: {
-                let component_subtype = handler_reference
-                    .as_ref()
-                    .and_then(|v| v.component_subtype.to_string())
-                    .unwrap_or_else(|| "".to_string());
+                let component_subtype = handler_reference.as_ref().and_then(|v| v.component_subtype.to_string()).unwrap_or_default();
                 match component_subtype.as_str() {
                     "vide" => Some(MediaInformationData::Video(
                         read_one(&mut reader)?.ok_or(Error::MalformedFile("missing media video information"))?,
@@ -555,11 +552,11 @@ impl SampleToChunkData {
             };
         }
         let mut sample_offset: u64 = prev.as_ref().map(|prev| prev.entry_first_sample).unwrap_or(0);
-        for i in prev.map(|prev| prev.entry + 1).unwrap_or(1) as usize..self.entries.len() {
+        for i in prev.map(|prev| prev.entry + 1).unwrap_or(1)..self.entries.len() {
             let e = &self.entries[i];
             let prev = &self.entries[i - 1];
             let new_sample_offset = sample_offset + ((e.first_chunk - prev.first_chunk) as u64) * (prev.samples_per_chunk as u64);
-            if new_sample_offset as u64 > n {
+            if new_sample_offset > n {
                 let relative = ((n - sample_offset) / (prev.samples_per_chunk as u64)) as u32;
                 return SampleChunkInfo {
                     number: prev.first_chunk - 1 + relative,
@@ -736,7 +733,7 @@ impl ReadData for VideoSampleDescriptionDataEntry {
             depth: read(&mut reader)?,
             color_table_id: read(&mut reader)?,
             extensions: {
-                let begin = reader.seek(SeekFrom::Current(0))? as usize;
+                let begin = reader.stream_position()? as usize;
                 let end = reader.seek(SeekFrom::End(0))? as usize;
                 read(SectionReader::new(&mut reader, begin, end - begin))?
             },
@@ -888,7 +885,7 @@ impl ReadData for SoundSampleDescriptionDataEntryV0 {
             packet_size: read(&mut reader)?,
             sample_rate: read(&mut reader)?,
             extensions: {
-                let begin = reader.seek(SeekFrom::Current(0))? as usize;
+                let begin = reader.stream_position()? as usize;
                 let end = reader.seek(SeekFrom::End(0))? as usize;
                 read(SectionReader::new(&mut reader, begin, end - begin))?
             },
@@ -928,7 +925,7 @@ impl ReadData for SoundSampleDescriptionDataEntryV1 {
             bytes_per_frame: read(&mut reader)?,
             bytes_per_sample: read(&mut reader)?,
             extensions: {
-                let begin = reader.seek(SeekFrom::Current(0))? as usize;
+                let begin = reader.stream_position()? as usize;
                 let end = reader.seek(SeekFrom::End(0))? as usize;
                 read(SectionReader::new(&mut reader, begin, end - begin))?
             },
@@ -939,7 +936,7 @@ impl ReadData for SoundSampleDescriptionDataEntryV1 {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 pub struct SoundSampleDescriptionDataEntryV2 {
     // TODO: add v2 fields. the docs i'm looking at right now seem to be confused about whether v2
-// appends new fields to v1 or replaces fields in v1 :-/
+    // appends new fields to v1 or replaces fields in v1 :-/
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1257,7 +1254,7 @@ impl<M: MediaType> SampleTableData<M> {
         });
         let chunk_offset_64 = self.chunk_offset_64.as_ref().and_then(|d| {
             if (chunk as usize) < d.offsets.len() {
-                Some(d.offsets[chunk as usize] as u64)
+                Some(d.offsets[chunk as usize])
             } else {
                 None
             }
