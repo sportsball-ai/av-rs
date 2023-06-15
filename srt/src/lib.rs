@@ -325,14 +325,14 @@ fn to_sockaddr(addr: &SocketAddr) -> (sys::sockaddr_storage, sys::socklen_t) {
     let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
     let socklen = match addr {
         SocketAddr::V4(ref a) => {
-            let mut storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in) };
+            let storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in) };
             storage.sin_family = AF_INET as _;
             storage.sin_port = u16::to_be(a.port());
             storage.sin_addr.s_addr = u32::from_ne_bytes(a.ip().octets());
             mem::size_of::<sockaddr_in>()
         }
         SocketAddr::V6(ref a) => {
-            let mut storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in6) };
+            let storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in6) };
             storage.sin6_family = AF_INET6 as _;
             storage.sin6_port = u16::to_be(a.port());
             storage.sin6_addr.s6_addr.copy_from_slice(&a.ip().octets());
