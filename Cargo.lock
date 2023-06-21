@@ -3,15 +3,6 @@
 version = 3
 
 [[package]]
-name = "aho-corasick"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67fc08ce920c31afb70f013dcce1bfc3a3195de6a228474e45e1f145b36f8d04"
-dependencies = [
- "memchr",
-]
-
-[[package]]
 name = "ansi_term"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -46,7 +37,7 @@ dependencies = [
 name = "audio-toolbox"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "core-audio",
  "core-foundation 0.1.0",
  "mpeg4",
@@ -89,15 +80,13 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.59.2"
+version = "0.64.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd2a9a458e8f4304c52c43ebb0cfbd520289f8379a52e329a38afda99bf8eb8"
+checksum = "c4243e6031260db77ede97ad86c27e501d646a27ab57b59a574f725d98ab1fb4"
 dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "clap",
- "env_logger",
  "lazy_static",
  "lazycell",
  "log",
@@ -107,29 +96,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "shlex",
- "which",
-]
-
-[[package]]
-name = "bindgen"
-version = "0.65.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfdf7b466f9a4903edc73f95d6d2bcd5baf8ae620638762244d3f60143643cc5"
-dependencies = [
- "bitflags",
- "cexpr",
- "clang-sys",
- "lazy_static",
- "lazycell",
- "log",
- "peeking_take_while",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash",
- "shlex",
- "syn 2.0.15",
+ "syn 1.0.109",
  "which",
 ]
 
@@ -256,7 +223,7 @@ dependencies = [
 name = "core-audio"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "bitflags",
  "core-foundation 0.1.0",
 ]
@@ -265,7 +232,7 @@ dependencies = [
 name = "core-foundation"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
 ]
 
 [[package]]
@@ -288,7 +255,7 @@ checksum = "e496a50fda8aacccc86d7529e2c1e0892dbd0f898a6b5645b5561b89c3210efa"
 name = "core-media"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "core-foundation 0.1.0",
  "core-video",
 ]
@@ -297,7 +264,7 @@ dependencies = [
 name = "core-video"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "core-foundation 0.1.0",
 ]
 
@@ -447,19 +414,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_logger"
-version = "0.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
-dependencies = [
- "atty",
- "humantime",
- "log",
- "regex",
- "termcolor",
-]
-
-[[package]]
 name = "errno"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -493,22 +447,22 @@ dependencies = [
 name = "ffmpeg"
 version = "0.1.0"
 dependencies = [
- "ffmpeg-sys",
+ "ffmpeg-sys-next",
  "thiserror",
  "trybuild",
 ]
 
 [[package]]
-name = "ffmpeg-sys"
-version = "4.3.4"
-source = "git+https://github.com/meh/rust-ffmpeg-sys?rev=8ba86ee3f9b85a3ad86002d980fb518f5e90afb1#8ba86ee3f9b85a3ad86002d980fb518f5e90afb1"
+name = "ffmpeg-sys-next"
+version = "6.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf650f461ccf130f4eef4927affed703cc387b183bfc4a7dfee86a076c131127"
 dependencies = [
- "bindgen 0.59.2",
+ "bindgen",
  "cc",
  "libc",
  "num_cpus",
  "pkg-config",
- "regex",
  "vcpkg",
 ]
 
@@ -737,12 +691,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4a1e36c821dbe04574f602848a19f742f4fb3c98d40449f11bcad18d6b17421"
 
 [[package]]
-name = "humantime"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a3a5bfb195931eeb336b2a7b4d761daec841b97f947d34394601737a7bba5e4"
-
-[[package]]
 name = "hyper"
 version = "0.14.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -864,7 +812,7 @@ dependencies = [
 name = "kvazaar_sys"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "pkg-config",
 ]
 
@@ -1150,16 +1098,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prettyplease"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ceca8aaf45b5c46ec7ed39fff75f57290368c1846d33d24a122ca81416ab058"
-dependencies = [
- "proc-macro2",
- "syn 2.0.15",
-]
-
-[[package]]
 name = "proc-macro2"
 version = "1.0.56"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1278,8 +1216,6 @@ version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af83e617f331cc6ae2da5443c602dfa5af81e517212d9d611a5b3ba1777b5370"
 dependencies = [
- "aho-corasick",
- "memchr",
  "regex-syntax",
 ]
 
@@ -1539,7 +1475,7 @@ dependencies = [
 name = "srt-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "cmake",
  "libc",
 ]
@@ -1844,7 +1780,7 @@ name = "video-toolbox"
 version = "0.1.0"
 dependencies = [
  "av-traits",
- "bindgen 0.65.1",
+ "bindgen",
  "core-foundation 0.1.0",
  "core-media",
  "core-video",
@@ -2164,7 +2100,7 @@ dependencies = [
 name = "x264-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "cc",
  "pkg-config",
 ]
@@ -2193,7 +2129,7 @@ dependencies = [
 name = "xcoder-logan-259-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "cc",
 ]
 
@@ -2201,7 +2137,7 @@ dependencies = [
 name = "xcoder-logan-310-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "cc",
 ]
 
@@ -2221,7 +2157,7 @@ dependencies = [
 name = "xcoder-quadra-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "cc",
 ]
 
@@ -2229,7 +2165,7 @@ dependencies = [
 name = "xilinx"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.65.1",
+ "bindgen",
  "h264",
  "h265",
  "libloading",

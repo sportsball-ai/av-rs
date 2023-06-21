@@ -8,9 +8,6 @@ fn main() {
 
         let sdk_root = "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk";
 
-        // the "whitelist_" functions have been renamed in newer bindgen versions, but we use the
-        // old names for wider compatibility
-        #[allow(deprecated)]
         let bindings = bindgen::Builder::default()
             .clang_arg(format!("-isysroot{}", sdk_root))
             .header("src/lib.hpp")
