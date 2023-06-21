@@ -353,7 +353,7 @@ impl SegmentInfo {
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
                             video_metadata: convert_to_relative_pts(video_metadata, segment.pts),
-                            duration: duration.clone(),
+                            duration: *duration,
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
