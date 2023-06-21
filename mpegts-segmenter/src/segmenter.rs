@@ -1,5 +1,5 @@
 use super::{analyzer, Analyzer, SegmentStorage, StreamInfo};
-use crate::{VideoMetadata, PTS_ROLLOVER_MOD};
+use crate::VideoMetadata;
 use mpeg2::{
     pes,
     temi::TEMITimelineDescriptor,
@@ -7,6 +7,8 @@ use mpeg2::{
 };
 use std::{fmt, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+pub const PTS_ROLLOVER_MOD: u64 = 1 << 33;
 
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
@@ -66,6 +68,8 @@ pub struct Segmenter<S: SegmentStorage> {
     analyzer: Analyzer,
     pcr: Option<u64>,
     streams_before_segment: Vec<StreamInfo>,
+    previous_segment: Option<CurrentSegment<S::Segment>>,
+    previous_segment_info: Option<SegmentInfo>,
 }
 
 impl<S: SegmentStorage> Segmenter<S> {
@@ -77,6 +81,8 @@ impl<S: SegmentStorage> Segmenter<S> {
             analyzer: Analyzer::new(),
             pcr: None,
             streams_before_segment: Vec::new(),
+            previous_segment: None,
+            previous_segment_info: None,
         }
     }
 
@@ -195,9 +201,9 @@ impl<S: SegmentStorage> Segmenter<S> {
             }
 
             if should_start_new_segment {
-                if let Some(prev) = self.current_segment.take() {
-                    let info = SegmentInfo::compile(&prev, self.analyzer.streams(), &self.streams_before_segment);
-                    self.storage.finalize_segment(prev.segment, info).await?;
+                if let Some(curr) = self.current_segment.take() {
+                    self.previous_segment_info = Some(SegmentInfo::compile(&curr, self.analyzer.streams(), &self.streams_before_segment));
+                    self.previous_segment = Some(curr);
                 }
 
                 self.streams_before_segment = self.analyzer.streams();
@@ -212,7 +218,6 @@ impl<S: SegmentStorage> Segmenter<S> {
 
                 self.analyzer.reset_stream_metadata();
                 self.analyzer.reset_timecodes();
-                self.analyzer.reset_segment_time(p.packet_id);
             }
 
             if let Some(video_metadata) = video_metadata {
@@ -231,6 +236,12 @@ impl<S: SegmentStorage> Segmenter<S> {
                         }
                     }
                     segment.pts = pes_packet_header.and_then(|h| h.optional_header).and_then(|h| h.pts);
+                    if let Some((previous_segment, mut previous_segment_info)) = self.previous_segment.take().zip(self.previous_segment_info.take()) {
+                        if let Some((prev_pts, curr_pts)) = previous_segment.pts.zip(segment.pts) {
+                            previous_segment_info.duration = Some((curr_pts + PTS_ROLLOVER_MOD - prev_pts) % PTS_ROLLOVER_MOD);
+                        }
+                        self.storage.finalize_segment(previous_segment.segment, previous_segment_info).await?;
+                    }
                 }
 
                 if segment.temi_timeline_descriptor.is_none() {
@@ -293,6 +304,8 @@ pub struct SegmentInfo {
     pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
     pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
+    // in presentation time units of 90_000.
+    pub duration: Option<u64>,
 }
 
 impl SegmentInfo {
@@ -341,7 +354,6 @@ impl SegmentInfo {
                                 timecode,
                                 is_interlaced,
                                 video_metadata,
-                                duration,
                                 ..
                             },
                         ) => Some(StreamInfo::Video {
@@ -353,7 +365,6 @@ impl SegmentInfo {
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
                             video_metadata: convert_to_relative_pts(video_metadata, segment.pts),
-                            duration: *duration,
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -361,6 +372,7 @@ impl SegmentInfo {
                     .collect()
             },
             temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
+            duration: None,
         }
     }
 }
@@ -410,29 +422,20 @@ mod test {
                         width,
                         height,
                         frame_count,
-                        duration,
                         ..
                     } => {
                         assert!(*frame_count > 0);
                         assert!((*frame_rate - 59.94).abs() < std::f64::EPSILON);
                         assert_eq!(*width, 1280);
                         assert_eq!(*height, 720);
-                        assert!((duration.unwrap().as_secs_f64() - *frame_count as f64 / *frame_rate).abs() < 1.0 / *frame_rate);
                     }
                     _ => panic!("unexpected stream type"),
                 }
             }
         }
-        let durations = segments
-            .iter()
-            .flat_map(|(_, info)| {
-                info.streams.iter().filter_map(|s| match s {
-                    StreamInfo::Video { duration, .. } => duration.map(|d| (d.as_secs_f64() * 1000000.0).round() / 1000000.0),
-                    _ => None,
-                })
-            })
-            .collect::<Vec<f64>>();
-        assert_eq!(durations, [4.170839, 4.187517, 1.651650]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [375375, 375375]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -460,6 +463,9 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![924.279_588, 925.280_344]
         );
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [90068]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -487,6 +493,9 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![731.629_855, 732.631]
         );
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [90103]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -542,6 +551,16 @@ mod test {
                 11.423_221_999_999_999,
             ]
         );
+
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(
+            durations,
+            [
+                90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 8588764592, 90000, 90000, 90000, 90000, 90000,
+                90000, 90000, 90000, 90000, 90000
+            ]
+        );
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -604,6 +623,9 @@ mod test {
                 }
             ]
         );
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [142643, 180180]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -660,6 +682,9 @@ mod test {
                 }
             ]
         );
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [180000]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -690,6 +715,10 @@ mod test {
             ntp_timestamps,
             &[Some(16592063487166754097), Some(16592063487167157824), Some(16592063487167574436)]
         );
+        // Sine there are missing pts in PES optional header in the synthetic test video clip,
+        // we will be unable to infer the durations of the segments in this case.
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, []);
     }
 
     // This is a regression test to ensure that if the first packet of a keyframe ends with the
@@ -750,6 +779,9 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![77774.269144, 77777.277144, 77780.285144, 77783.293144, 77786.301144, 77789.309144, 77792.317144]
         );
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [270720, 270720, 270720, 270720, 270720, 270720]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -793,5 +825,8 @@ mod test {
                 _ => unreachable!(),
             }
         }
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [267001, 271500]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 }
