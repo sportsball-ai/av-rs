@@ -1,9 +1,13 @@
 use mpeg2::{pes, ts};
 use mpeg4::AudioDataTransportStream;
 
+use std::time::Duration;
 use std::{collections::VecDeque, error::Error};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
+
+pub const PTS_ROLLOVER_MOD: u64 = 1 << 33;
+pub const VIDEO_PTS_BASE: i64 = 90_000;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Timecode {
@@ -105,6 +109,7 @@ impl Stream {
                 timecode: timecode.clone(),
                 is_interlaced: *is_interlaced,
                 video_metadata: video_metadata.clone(),
+                duration: pts_analyzer.segment_duration(*frame_rate),
             },
             Self::HEVCVideo {
                 width,
@@ -128,6 +133,7 @@ impl Stream {
                 timecode: None,
                 is_interlaced: false,
                 video_metadata: video_metadata.clone(),
+                duration: pts_analyzer.segment_duration(*frame_rate),
             },
             Self::Other(_) => StreamInfo::Other,
         }
@@ -334,6 +340,15 @@ impl Stream {
         }
     }
 
+    pub fn reset_segment_time(&mut self, keep_last_pts: bool) {
+        if let Some(pts_analyzer) = match self {
+            Self::AVCVideo { pts_analyzer, .. } | Self::HEVCVideo { pts_analyzer, .. } => Some(pts_analyzer),
+            _ => None,
+        } {
+            pts_analyzer.reset_segment_time(keep_last_pts);
+        }
+    }
+
     pub fn add_stream_metadata(&mut self, video_metadata_item: VideoMetadata) {
         match self {
             Self::AVCVideo { video_metadata, .. } | Self::HEVCVideo { video_metadata, .. } => {
@@ -394,6 +409,7 @@ pub enum StreamInfo {
         timecode: Option<Timecode>,
         is_interlaced: bool,
         video_metadata: Vec<VideoMetadata>,
+        duration: Option<Duration>,
     },
     Other,
 }
@@ -482,6 +498,14 @@ impl Analyzer {
         for pid in &mut self.pids {
             if let PidState::Pes { stream } = pid {
                 stream.reset_timecode();
+            }
+        }
+    }
+
+    pub fn reset_segment_time(&mut self, packet_id: u16) {
+        for (id, pid_state) in &mut self.pids.iter_mut().enumerate() {
+            if let PidState::Pes { stream } = pid_state {
+                stream.reset_segment_time(id == packet_id as usize);
             }
         }
     }
@@ -580,6 +604,8 @@ impl Default for Analyzer {
 pub struct PTSAnalyzer {
     /// PES presentation timestamps: 90kHz, with no rollovers.
     timestamps: VecDeque<u64>,
+    segment_first_pts: Option<u64>,
+    segment_last_pts: Option<u64>,
 }
 
 impl Default for PTSAnalyzer {
@@ -594,6 +620,8 @@ impl PTSAnalyzer {
     pub fn new() -> Self {
         Self {
             timestamps: VecDeque::with_capacity(PTS_ANALYZER_MAX_TIMESTAMPS),
+            segment_first_pts: None,
+            segment_last_pts: None,
         }
     }
 
@@ -631,10 +659,25 @@ impl PTSAnalyzer {
             self.timestamps.pop_front();
         }
         self.timestamps.push_back(pts);
+        if self.segment_first_pts.is_none() {
+            self.segment_first_pts = Some(pts);
+        }
+        self.segment_last_pts = Some(pts);
     }
 
     pub fn reset(&mut self) {
+        self.segment_first_pts = None;
+        self.segment_last_pts = None;
         self.timestamps.clear()
+    }
+
+    pub fn reset_segment_time(&mut self, keep_last_pts: bool) {
+        if keep_last_pts {
+            self.segment_first_pts = self.segment_last_pts;
+        } else {
+            self.segment_first_pts = None;
+            self.segment_last_pts = None;
+        }
     }
 
     /// Makes a guess at a video's frame rate. This should really only be used as a last resort. If
@@ -694,6 +737,22 @@ impl PTSAnalyzer {
 
         Some((fps * 100.0).round() / 100.0)
     }
+
+    pub fn segment_duration(&self, frame_rate: f64) -> Option<Duration> {
+        match self.segment_first_pts.zip(self.segment_last_pts) {
+            None => None,
+            Some((first_pts, last_pts)) => {
+                let frame_duration = if frame_rate == 0.0 {
+                    self.guess_frame_rate().unwrap_or(0.0)
+                } else {
+                    frame_rate
+                };
+                Some(Duration::from_secs_f64(
+                    ((last_pts + PTS_ROLLOVER_MOD - first_pts) % PTS_ROLLOVER_MOD) as f64 / VIDEO_PTS_BASE as f64 + 1.0 / frame_duration,
+                ))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -727,6 +786,7 @@ mod test {
                     timecode: None,
                     is_interlaced: false,
                     video_metadata: vec![],
+                    duration: Some(Duration::from_secs_f64(9.993316683)),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -764,6 +824,7 @@ mod test {
                     timecode: None,
                     is_interlaced: false,
                     video_metadata: vec![],
+                    duration: Some(Duration::from_secs_f64(1.100700033)),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -801,6 +862,7 @@ mod test {
                     timecode: None,
                     is_interlaced: false,
                     video_metadata: vec![],
+                    duration: Some(Duration::from_secs_f64(9.976627794)),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -838,6 +900,7 @@ mod test {
                     timecode: None,
                     is_interlaced: false,
                     video_metadata: vec![],
+                    duration: Some(Duration::from_secs_f64(1.017827794)),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -874,6 +937,7 @@ mod test {
                 timecode: None,
                 is_interlaced: false,
                 video_metadata: vec![],
+                duration: Some(Duration::from_secs_f64(1.001011144)),
             },]
         );
     }
@@ -904,6 +968,7 @@ mod test {
                     timecode: None,
                     is_interlaced: false,
                     video_metadata: vec![],
+                    duration: Some(Duration::from_secs_f64(0.650661128)),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -940,6 +1005,7 @@ mod test {
                 timecode: None,
                 is_interlaced: false,
                 video_metadata: vec![],
+                duration: Some(Duration::from_secs_f64(1.026344478)),
             },]
         );
     }
@@ -975,6 +1041,7 @@ mod test {
                     }),
                     is_interlaced: true,
                     video_metadata: vec![],
+                    duration: Some(Duration::from_secs_f64(5.105100033)),
                 },
                 StreamInfo::Audio {
                     channel_count: 2,
@@ -1027,6 +1094,7 @@ mod test {
                 timecode: None,
                 is_interlaced: false,
                 video_metadata: vec![],
+                duration: Some(Duration::from_secs_f64(2.010127109)),
             },
         );
     }

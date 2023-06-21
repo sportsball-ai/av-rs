@@ -1,5 +1,5 @@
 use super::{analyzer, Analyzer, SegmentStorage, StreamInfo};
-use crate::VideoMetadata;
+use crate::{VideoMetadata, PTS_ROLLOVER_MOD};
 use mpeg2::{
     pes,
     temi::TEMITimelineDescriptor,
@@ -212,6 +212,7 @@ impl<S: SegmentStorage> Segmenter<S> {
 
                 self.analyzer.reset_stream_metadata();
                 self.analyzer.reset_timecodes();
+                self.analyzer.reset_segment_time(p.packet_id);
             }
 
             if let Some(video_metadata) = video_metadata {
@@ -272,7 +273,6 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
 }
 
 fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u64>) -> Vec<VideoMetadata> {
-    const PTS_MOD: u64 = 1 << 33;
     if video_metadata.is_empty() {
         vec![]
     } else {
@@ -280,7 +280,7 @@ fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u
         video_metadata
             .iter()
             .map(|m| VideoMetadata {
-                pts: (m.pts + PTS_MOD - pts0) % PTS_MOD,
+                pts: (m.pts + PTS_ROLLOVER_MOD - pts0) % PTS_ROLLOVER_MOD,
                 private_data: m.private_data.clone(),
             })
             .collect()
@@ -341,6 +341,7 @@ impl SegmentInfo {
                                 timecode,
                                 is_interlaced,
                                 video_metadata,
+                                duration,
                                 ..
                             },
                         ) => Some(StreamInfo::Video {
@@ -352,6 +353,7 @@ impl SegmentInfo {
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
                             video_metadata: convert_to_relative_pts(video_metadata, segment.pts),
+                            duration: duration.clone(),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -408,17 +410,29 @@ mod test {
                         width,
                         height,
                         frame_count,
+                        duration,
                         ..
                     } => {
                         assert!(*frame_count > 0);
                         assert!((*frame_rate - 59.94).abs() < std::f64::EPSILON);
                         assert_eq!(*width, 1280);
                         assert_eq!(*height, 720);
+                        assert!((duration.unwrap().as_secs_f64() - *frame_count as f64 / *frame_rate).abs() < 1.0 / *frame_rate);
                     }
                     _ => panic!("unexpected stream type"),
                 }
             }
         }
+        let durations = segments
+            .iter()
+            .flat_map(|(_, info)| {
+                info.streams.iter().filter_map(|s| match s {
+                    StreamInfo::Video { duration, .. } => duration.map(|d| (d.as_secs_f64() * 1000000.0).round() / 1000000.0),
+                    _ => None,
+                })
+            })
+            .collect::<Vec<f64>>();
+        assert_eq!(durations, [4.170839, 4.187517, 1.651650]);
     }
 
     #[tokio::test]
