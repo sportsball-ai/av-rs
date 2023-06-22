@@ -12,7 +12,7 @@ impl XlnxEncoder {
         let enc_session = xlnx_create_enc_session(xma_enc_props, xlnx_enc_ctx)?;
 
         let buffer_size = xma_enc_props.height * xma_enc_props.width * xma_enc_props.bits_per_pixel;
-        let out_buffer = unsafe { xma_data_buffer_alloc(buffer_size as u64, false) };
+        let out_buffer = unsafe { xma_data_buffer_alloc(buffer_size as usize, false) };
 
         Ok(Self {
             enc_session,

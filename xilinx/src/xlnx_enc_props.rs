@@ -355,7 +355,7 @@ impl XlnxXmaEncoderProperties {
     ) {
         enc_params[0].name = ENC_OPTIONS_PARAM_NAME.as_ptr() as *mut i8;
         enc_params[0].type_ = XmaDataType_XMA_STRING;
-        enc_params[0].length = enc_options.len() as u64;
+        enc_params[0].length = enc_options.len();
         enc_params[0].value = enc_options_ptr_ptr as *mut std::ffi::c_void;
 
         enc_params[1].name = LATENCY_LOGGING_PARAM_NAME.as_ptr() as *mut i8;
