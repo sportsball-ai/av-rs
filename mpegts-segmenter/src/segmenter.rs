@@ -9,6 +9,7 @@ use std::{fmt, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PTS_ROLLOVER_MOD: u64 = 1 << 33;
+pub const VIDEO_PTS_BASE: u64 = 90_000;
 
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
@@ -238,7 +239,11 @@ impl<S: SegmentStorage> Segmenter<S> {
                     segment.pts = pes_packet_header.and_then(|h| h.optional_header).and_then(|h| h.pts);
                     if let Some((previous_segment, mut previous_segment_info)) = self.previous_segment.take().zip(self.previous_segment_info.take()) {
                         if let Some((prev_pts, curr_pts)) = previous_segment.pts.zip(segment.pts) {
-                            previous_segment_info.duration = Some((curr_pts + PTS_ROLLOVER_MOD - prev_pts) % PTS_ROLLOVER_MOD);
+                            let duration = (curr_pts + PTS_ROLLOVER_MOD - prev_pts) % PTS_ROLLOVER_MOD;
+                            // set the segment duration only if it's within a reasonable value.
+                            if duration < (self.config.min_segment_duration.as_secs_f64() * VIDEO_PTS_BASE as f64 * 3.0) as u64 {
+                                previous_segment_info.duration = Some(duration);
+                            }
                         }
                         self.storage.finalize_segment(previous_segment.segment, previous_segment_info).await?;
                     }
@@ -556,11 +561,11 @@ mod test {
         assert_eq!(
             durations,
             [
-                90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 8588764592, 90000, 90000, 90000, 90000, 90000,
+                90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000,
                 90000, 90000, 90000, 90000, 90000
             ]
         );
-        assert_eq!(segments.len(), durations.len() + 1);
+        assert_eq!(segments.len(), durations.len() + 2);
     }
 
     #[tokio::test]
