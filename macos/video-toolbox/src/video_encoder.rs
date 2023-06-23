@@ -229,6 +229,7 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
                     self.config.width as _,
                     self.config.height as _,
                     sys::kCVPixelFormatType_32BGRA,
+                    4,
                     input.samples(0).as_ptr() as _,
                 )?
             },

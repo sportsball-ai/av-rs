@@ -17,8 +17,7 @@ impl PixelBuffer {
     ///
     /// # Safety
     /// This is unsafe because the caller must ensure that the given bytes out-live the PixelBuffer.
-    pub unsafe fn with_bytes(width: u32, height: u32, pixel_format_type: u32, data_ptr: *mut u8) -> Result<Self, OSStatus>
-    {
+    pub unsafe fn with_bytes(width: u32, height: u32, pixel_format_type: u32, bytes_per_pixel: u32, data_ptr: *mut u8) -> Result<Self, OSStatus> {
         let mut ret = std::ptr::null_mut();
         result(
             sys::CVPixelBufferCreateWithBytes(
@@ -26,11 +25,11 @@ impl PixelBuffer {
                 width as _,
                 height as _,
                 pixel_format_type,
-                data_ptr as _, // dataPtr
-                (width * 4) as usize,            // dataSize
-                None,             // releaseCallback
-                std::ptr::null_mut(), // releaseRefCon
-                std::ptr::null_mut(), // pixelBufferAttributes
+                data_ptr as _,                      // dataPtr
+                (width * bytes_per_pixel) as usize, // dataSize
+                None,                               // releaseCallback
+                std::ptr::null_mut(),               // releaseRefCon
+                std::ptr::null_mut(),               // pixelBufferAttributes
                 &mut ret as _,
             )
             .into(),

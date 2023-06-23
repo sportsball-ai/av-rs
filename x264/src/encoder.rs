@@ -31,7 +31,7 @@ impl<F> Drop for X264Encoder<F> {
 pub enum X264EncoderInputFormat {
     Yuv420Planar,
     Yuv444Planar,
-    Bgra
+    Bgra,
 }
 
 impl X264EncoderInputFormat {
@@ -167,7 +167,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for X264Encoder<F> {
                     pic.img.i_stride[i] = self.config.width as _;
                 }
             }
-            X264EncoderInputFormat::Bgra =>  {    
+            X264EncoderInputFormat::Bgra => {
                 pic.img.i_plane = 1;
                 pic.img.plane[0] = input.samples(0).as_ptr() as _;
                 pic.img.i_stride[0] = (self.config.width * 4) as _;
