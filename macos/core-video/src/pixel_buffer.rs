@@ -13,6 +13,31 @@ pub struct PixelBufferPlane {
 }
 
 impl PixelBuffer {
+    /// Creates a new pixel buffer that references the bytes, without copying them.
+    ///
+    /// # Safety
+    /// This is unsafe because the caller must ensure that the given bytes out-live the PixelBuffer.
+    pub unsafe fn with_bytes(width: u32, height: u32, pixel_format_type: u32, data_ptr: *mut u8) -> Result<Self, OSStatus>
+    {
+        let mut ret = std::ptr::null_mut();
+        result(
+            sys::CVPixelBufferCreateWithBytes(
+                std::ptr::null(), // allocator
+                width as _,
+                height as _,
+                pixel_format_type,
+                data_ptr as _, // dataPtr
+                (width * 4) as usize,            // dataSize
+                None,             // releaseCallback
+                std::ptr::null_mut(), // releaseRefCon
+                std::ptr::null_mut(), // pixelBufferAttributes
+                &mut ret as _,
+            )
+            .into(),
+        )?;
+        Ok(Self(ret))
+    }
+
     /// Creates a new pixel buffer that references the given planes, without copying them.
     ///
     /// # Safety

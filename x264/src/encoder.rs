@@ -31,6 +31,7 @@ impl<F> Drop for X264Encoder<F> {
 pub enum X264EncoderInputFormat {
     Yuv420Planar,
     Yuv444Planar,
+    Bgra
 }
 
 impl X264EncoderInputFormat {
@@ -38,6 +39,7 @@ impl X264EncoderInputFormat {
         (match self {
             Self::Yuv420Planar => sys::X264_CSP_I420,
             Self::Yuv444Planar => sys::X264_CSP_I444,
+            Self::Bgra => sys::X264_CSP_BGRA,
         }) as _
     }
 }
@@ -164,6 +166,11 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for X264Encoder<F> {
                     pic.img.plane[i] = input.samples(i).as_ptr() as _;
                     pic.img.i_stride[i] = self.config.width as _;
                 }
+            }
+            X264EncoderInputFormat::Bgra =>  {    
+                pic.img.i_plane = 1;
+                pic.img.plane[0] = input.samples(0).as_ptr() as _;
+                pic.img.i_stride[0] = (self.config.width * 4) as _;
             }
         }
         pic.opaque = Box::into_raw(input) as _;
