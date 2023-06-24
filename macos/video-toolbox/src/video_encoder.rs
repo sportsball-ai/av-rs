@@ -34,6 +34,7 @@ pub struct VideoEncoderConfig {
 pub enum VideoEncoderInputFormat {
     Yuv420Planar,
     Yuv444Planar,
+    Bgra,
 }
 
 /// `VideoEncoder` is a wrapper around `CompressionSession` that implements `av_traits::VideoEncoder`.
@@ -167,16 +168,14 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
 
     fn encode(&mut self, input: Self::RawVideoFrame, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error> {
         let input = Box::pin(input);
-        let pixel_buffer = unsafe {
-            PixelBuffer::with_planar_bytes(
-                self.config.width as _,
-                self.config.height as _,
-                match self.config.input_format {
-                    VideoEncoderInputFormat::Yuv420Planar => sys::kCVPixelFormatType_420YpCbCr8Planar,
-                    VideoEncoderInputFormat::Yuv444Planar => sys::kCVPixelFormatType_444YpCbCr8,
-                },
-                match self.config.input_format {
-                    VideoEncoderInputFormat::Yuv420Planar => vec![
+
+        let pixel_buffer = match self.config.input_format {
+            VideoEncoderInputFormat::Yuv420Planar => unsafe {
+                PixelBuffer::with_planar_bytes(
+                    self.config.width as _,
+                    self.config.height as _,
+                    sys::kCVPixelFormatType_420YpCbCr8Planar,
+                    vec![
                         PixelBufferPlane {
                             width: self.config.width as _,
                             height: self.config.height as _,
@@ -196,7 +195,14 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
                             data: input.samples(2).as_ptr() as _,
                         },
                     ],
-                    VideoEncoderInputFormat::Yuv444Planar => vec![
+                )?
+            },
+            VideoEncoderInputFormat::Yuv444Planar => unsafe {
+                PixelBuffer::with_planar_bytes(
+                    self.config.width as _,
+                    self.config.height as _,
+                    sys::kCVPixelFormatType_444YpCbCr8,
+                    vec![
                         PixelBufferPlane {
                             width: self.config.width as _,
                             height: self.config.height as _,
@@ -216,8 +222,17 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
                             data: input.samples(2).as_ptr() as _,
                         },
                     ],
-                },
-            )?
+                )?
+            },
+            VideoEncoderInputFormat::Bgra => unsafe {
+                PixelBuffer::with_bytes(
+                    self.config.width as _,
+                    self.config.height as _,
+                    sys::kCVPixelFormatType_32BGRA,
+                    4,
+                    input.samples(0).as_ptr() as _,
+                )?
+            },
         };
 
         let fps_den = if self.config.fps.fract() == 0.0 { 1000 } else { 1001 };
