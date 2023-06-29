@@ -340,6 +340,14 @@ impl Stream {
         }
     }
 
+    pub fn reset_frame_counter(&mut self) {
+        match self {
+            Stream::AVCVideo { access_unit_counter, .. } => *access_unit_counter = h264::AccessUnitCounter::new(),
+            Stream::HEVCVideo { access_unit_counter, .. } => *access_unit_counter = h265::AccessUnitCounter::new(),
+            _ => {}
+        }
+    }
+
     fn pes(&mut self) -> Option<&mut pes::Stream> {
         match self {
             Self::ADTSAudio { pes, .. } => Some(pes),
@@ -460,6 +468,7 @@ impl Analyzer {
             if let PidState::Pes { stream } = pid {
                 stream.reset_stream_metadata();
                 stream.reset_timecode();
+                stream.reset_frame_counter();
             }
         }
     }

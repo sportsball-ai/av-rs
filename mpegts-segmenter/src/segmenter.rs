@@ -65,7 +65,6 @@ pub struct Segmenter<S: SegmentStorage> {
     current_segment: Option<CurrentSegment<S::Segment>>,
     analyzer: Analyzer,
     pcr: Option<u64>,
-    streams_before_segment: Vec<StreamInfo>,
 }
 
 impl<S: SegmentStorage> Segmenter<S> {
@@ -76,7 +75,6 @@ impl<S: SegmentStorage> Segmenter<S> {
             current_segment: None,
             analyzer: Analyzer::new(),
             pcr: None,
-            streams_before_segment: Vec::new(),
         }
     }
 
@@ -164,12 +162,10 @@ impl<S: SegmentStorage> Segmenter<S> {
             }
 
             if should_start_new_segment {
-                if let Some(prev) = self.current_segment.take() {
-                    let info = SegmentInfo::compile(&prev, self.analyzer.streams(), &self.streams_before_segment);
-                    self.storage.finalize_segment(prev.segment, info).await?;
+                if let Some(curr) = self.current_segment.take() {
+                    let info = SegmentInfo::compile(&curr, self.analyzer.streams());
+                    self.storage.finalize_segment(curr.segment, info).await?;
                 }
-
-                self.streams_before_segment = self.analyzer.streams();
 
                 self.current_segment = Some(CurrentSegment {
                     segment: self.storage.new_segment().await?,
@@ -225,7 +221,12 @@ impl<S: SegmentStorage> Segmenter<S> {
 
     pub async fn flush(&mut self) -> Result<(), Error> {
         if let Some(segment) = self.current_segment.take() {
-            let info = SegmentInfo::compile(&segment, self.analyzer.streams(), &self.streams_before_segment);
+            let mut info = SegmentInfo::compile(&segment, self.analyzer.streams());
+            for s in info.streams.iter_mut() {
+                if let StreamInfo::Video { frame_count, .. } = s {
+                    *frame_count += 1;
+                }
+            }
             self.storage.finalize_segment(segment.segment, info).await?;
         }
         Ok(())
@@ -259,68 +260,18 @@ pub struct SegmentInfo {
 }
 
 impl SegmentInfo {
-    fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, streams: Vec<StreamInfo>, prev_streams: &[StreamInfo]) -> Self {
+    fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, mut streams: Vec<StreamInfo>) -> Self {
+        for s in streams.iter_mut() {
+            match s {
+                StreamInfo::Audio { .. } => {}
+                StreamInfo::Video { .. } => {}
+                StreamInfo::Other => {}
+            }
+        }
         Self {
             size: segment.bytes_written,
             presentation_time: segment.pts.map(|pts| Duration::from_micros((pts * 300) / 27)),
-            streams: if streams.len() != prev_streams.len() {
-                streams
-            } else {
-                streams
-                    .iter()
-                    .zip(prev_streams)
-                    .filter_map(|(after, before)| match (before, after) {
-                        (
-                            StreamInfo::Audio {
-                                sample_count: prev_sample_count,
-                                ..
-                            },
-                            StreamInfo::Audio {
-                                channel_count,
-                                sample_rate,
-                                sample_count,
-                                rfc6381_codec,
-                            },
-                        ) => Some(StreamInfo::Audio {
-                            channel_count: *channel_count,
-                            sample_rate: *sample_rate,
-                            sample_count: if sample_count >= prev_sample_count {
-                                sample_count - prev_sample_count
-                            } else {
-                                0
-                            },
-                            rfc6381_codec: rfc6381_codec.clone(),
-                        }),
-                        (
-                            StreamInfo::Video {
-                                frame_count: prev_frame_count, ..
-                            },
-                            StreamInfo::Video {
-                                width,
-                                height,
-                                frame_rate,
-                                frame_count,
-                                rfc6381_codec,
-                                timecode,
-                                is_interlaced,
-                                video_metadata,
-                                ..
-                            },
-                        ) => Some(StreamInfo::Video {
-                            width: *width,
-                            height: *height,
-                            frame_rate: *frame_rate,
-                            frame_count: if frame_count >= prev_frame_count { frame_count - prev_frame_count } else { 0 },
-                            rfc6381_codec: rfc6381_codec.clone(),
-                            timecode: timecode.clone(),
-                            is_interlaced: *is_interlaced,
-                            video_metadata: video_metadata.clone(),
-                        }),
-                        (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
-                        _ => None,
-                    })
-                    .collect()
-            },
+            streams,
             temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
         }
     }
@@ -339,6 +290,21 @@ fn add_video_metadata(metadata_list: &mut Vec<VideoMetadata>, segment_pts: Optio
 mod test {
     use super::{super::segmentstorage::*, *};
     use std::{fs::File, io::Read};
+
+    fn get_segment_frame_counts(segments: &[(Vec<u8>, SegmentInfo)]) -> Vec<u64> {
+        let mut frame_counts = Vec::new();
+        for (_, info) in segments {
+            for stream in &info.streams {
+                match stream {
+                    StreamInfo::Video { frame_count, .. } => {
+                        frame_counts.push(*frame_count);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        frame_counts
+    }
 
     #[tokio::test]
     async fn test_segmenter() {
@@ -391,6 +357,8 @@ mod test {
                 }
             }
         }
+        let frame_counts = get_segment_frame_counts(&segments);
+        assert_eq!(&frame_counts, &[250, 250, 100]);
     }
 
     #[tokio::test]
@@ -418,6 +386,8 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![924.279_588, 925.280_344]
         );
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(&frame_counts, &[30, 3]);
     }
 
     #[tokio::test]
@@ -445,6 +415,8 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![731.629_855, 732.631]
         );
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(&frame_counts, &[30, 1]);
     }
 
     #[tokio::test]
@@ -499,6 +471,11 @@ mod test {
                 10.423_221_999_999_999,
                 11.423_221_999_999_999,
             ]
+        );
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(
+            &frame_counts,
+            &[30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 25, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 14]
         );
     }
 
@@ -562,6 +539,8 @@ mod test {
                 }
             ]
         );
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(&frame_counts, &[47, 60, 45]);
     }
 
     #[tokio::test]
@@ -618,6 +597,8 @@ mod test {
                 }
             ]
         );
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(&frame_counts, &[59, 50]);
     }
 
     #[tokio::test]
@@ -648,6 +629,8 @@ mod test {
             ntp_timestamps,
             &[Some(16592063487166754097), Some(16592063487167157824), Some(16592063487167574436)]
         );
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(&frame_counts, &[29, 29, 8]);
     }
 
     // This is a regression test to ensure that if the first packet of a keyframe ends with the
@@ -708,6 +691,8 @@ mod test {
             segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![77774.269144, 77777.277144, 77780.285144, 77783.293144, 77786.301144, 77789.309144, 77792.317144]
         );
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(&frame_counts, &[]);
     }
 
     #[tokio::test]
@@ -751,5 +736,7 @@ mod test {
                 _ => unreachable!(),
             }
         }
+        let frame_counts = get_segment_frame_counts(segments);
+        assert_eq!(&frame_counts, &[72, 72, 72]);
     }
 }
