@@ -334,15 +334,6 @@ impl Stream {
         }
     }
 
-    pub fn add_stream_metadata(&mut self, video_metadata_item: VideoMetadata) {
-        match self {
-            Self::AVCVideo { video_metadata, .. } | Self::HEVCVideo { video_metadata, .. } => {
-                video_metadata.push(video_metadata_item);
-            }
-            _ => {}
-        };
-    }
-
     pub fn reset_timecode(&mut self) {
         if let Self::AVCVideo { timecode, .. } = self {
             *timecode = None;
@@ -464,23 +455,10 @@ impl Analyzer {
             .collect()
     }
 
-    pub fn reset_stream_metadata(&mut self) {
+    pub fn reset_streams_data(&mut self) {
         for pid in &mut self.pids {
             if let PidState::Pes { stream } = pid {
                 stream.reset_stream_metadata();
-            }
-        }
-    }
-
-    pub fn add_stream_metadata(&mut self, packet_id: u16, video_metadata: VideoMetadata) {
-        if let Some(stream) = self.stream(packet_id) {
-            stream.add_stream_metadata(video_metadata);
-        }
-    }
-
-    pub fn reset_timecodes(&mut self) {
-        for pid in &mut self.pids {
-            if let PidState::Pes { stream } = pid {
                 stream.reset_timecode();
             }
         }

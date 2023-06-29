@@ -163,37 +163,6 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
             }
 
-            let mut pes_packet_header = None;
-            let first_temi_timeline_descriptor;
-            let (mut packet_id, mut video_metadata) = (0, None);
-            if let Some(af) = p.adaptation_field {
-                first_temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
-                if !af.private_data_bytes.is_empty() {
-                    // error out if the private data in a MPEG-TS packet is not in the beginning of PES
-                    if self.analyzer.is_pes(p.packet_id) && !p.payload_unit_start_indicator {
-                        return Err(Error::Mpeg2Decode(mpeg2::DecodeError::new("private data is not in the beginning of PES.")));
-                    }
-                    if let Some(payload) = p.payload.as_ref() {
-                        let (header, _) = pes::PacketHeader::decode(payload)?;
-                        if let Some(pts) = header.optional_header.as_ref().and_then(|h| h.pts) {
-                            match self.analyzer.stream(p.packet_id) {
-                                Some(analyzer::Stream::AVCVideo { .. }) | Some(analyzer::Stream::HEVCVideo { .. }) => {
-                                    packet_id = p.packet_id;
-                                    video_metadata = Some(VideoMetadata {
-                                        pts,
-                                        private_data: af.private_data_bytes.into_owned(),
-                                    })
-                                }
-                                _ => {}
-                            }
-                        }
-                        pes_packet_header = Some(header);
-                    }
-                }
-            } else {
-                first_temi_timeline_descriptor = None;
-            }
-
             if should_start_new_segment {
                 if let Some(prev) = self.current_segment.take() {
                     let info = SegmentInfo::compile(&prev, self.analyzer.streams(), &self.streams_before_segment);
@@ -210,30 +179,40 @@ impl<S: SegmentStorage> Segmenter<S> {
                     temi_timeline_descriptor: None,
                 });
 
-                self.analyzer.reset_stream_metadata();
-                self.analyzer.reset_timecodes();
-            }
-
-            if let Some(video_metadata) = video_metadata {
-                self.analyzer.add_stream_metadata(packet_id, video_metadata);
+                self.analyzer.reset_streams_data();
             }
 
             if let Some(segment) = &mut self.current_segment {
+                let mut pes_packet_header: Option<pes::PacketHeader> = None;
                 // set the segment's pts if necessary
                 if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
-                    if pes_packet_header.is_none() {
-                        pes_packet_header = if let Some(payload) = p.payload {
-                            let (header, _) = pes::PacketHeader::decode(&payload)?;
-                            Some(header)
-                        } else {
-                            None
-                        }
+                    if let Some(payload) = p.payload.as_ref() {
+                        pes_packet_header = Some(pes::PacketHeader::decode(payload)?.0);
+                        segment.pts = pes_packet_header.as_ref().and_then(|h| h.optional_header.as_ref()).and_then(|h| h.pts);
                     }
-                    segment.pts = pes_packet_header.and_then(|h| h.optional_header).and_then(|h| h.pts);
                 }
 
-                if segment.temi_timeline_descriptor.is_none() {
-                    segment.temi_timeline_descriptor = first_temi_timeline_descriptor;
+                if let Some(af) = p.adaptation_field {
+                    if segment.temi_timeline_descriptor.is_none() {
+                        segment.temi_timeline_descriptor = af.temi_timeline_descriptors.into_iter().next();
+                    }
+                    if !af.private_data_bytes.is_empty() {
+                        // error out if the private data in a MPEG-TS packet is not in the beginning of PES
+                        if self.analyzer.is_pes(p.packet_id) && !p.payload_unit_start_indicator {
+                            return Err(Error::Mpeg2Decode(mpeg2::DecodeError::new("private data is not in the beginning of PES.")));
+                        }
+                        if let Some(payload) = p.payload {
+                            let header = pes_packet_header.unwrap_or(pes::PacketHeader::decode(&payload)?.0);
+                            if let Some(pts) = header.optional_header.as_ref().and_then(|h| h.pts) {
+                                match self.analyzer.stream(p.packet_id) {
+                                    Some(analyzer::Stream::AVCVideo { video_metadata, .. }) | Some(analyzer::Stream::HEVCVideo { video_metadata, .. }) => {
+                                        add_video_metadata(video_metadata, segment.pts, pts, af.private_data_bytes.into_owned());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
                 }
 
                 segment.segment.write_all(buf).await?;
@@ -269,22 +248,6 @@ pub async fn segment<R: AsyncRead + Unpin, S: SegmentStorage>(mut r: R, config: 
     segmenter.flush().await?;
 
     Ok(())
-}
-
-fn convert_to_relative_pts(video_metadata: &[VideoMetadata], first_pts: Option<u64>) -> Vec<VideoMetadata> {
-    const PTS_MOD: u64 = 1 << 33;
-    if video_metadata.is_empty() {
-        vec![]
-    } else {
-        let pts0 = first_pts.unwrap_or(video_metadata[0].pts);
-        video_metadata
-            .iter()
-            .map(|m| VideoMetadata {
-                pts: (m.pts + PTS_MOD - pts0) % PTS_MOD,
-                private_data: m.private_data.clone(),
-            })
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -351,7 +314,7 @@ impl SegmentInfo {
                             rfc6381_codec: rfc6381_codec.clone(),
                             timecode: timecode.clone(),
                             is_interlaced: *is_interlaced,
-                            video_metadata: convert_to_relative_pts(video_metadata, segment.pts),
+                            video_metadata: video_metadata.clone(),
                         }),
                         (StreamInfo::Other, StreamInfo::Other) => Some(StreamInfo::Other),
                         _ => None,
@@ -361,6 +324,15 @@ impl SegmentInfo {
             temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
         }
     }
+}
+
+fn add_video_metadata(metadata_list: &mut Vec<VideoMetadata>, segment_pts: Option<u64>, pts: u64, private_data: Vec<u8>) {
+    const PTS_ROLLOVER_MOD: u64 = 1 << 33;
+    let pts0 = segment_pts.unwrap_or(metadata_list.first().map(|m| m.pts).unwrap_or(pts));
+    metadata_list.push(VideoMetadata {
+        pts: (pts + PTS_ROLLOVER_MOD - pts0) % PTS_ROLLOVER_MOD,
+        private_data,
+    });
 }
 
 #[cfg(test)]
