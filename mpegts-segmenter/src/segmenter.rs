@@ -288,11 +288,8 @@ mod test {
         let mut frame_counts = Vec::new();
         for (_, info) in segments {
             for stream in &info.streams {
-                match stream {
-                    StreamInfo::Video { frame_count, .. } => {
-                        frame_counts.push(*frame_count);
-                    }
-                    _ => {}
+                if let StreamInfo::Video { frame_count, .. } = stream {
+                    frame_counts.push(*frame_count);
                 }
             }
         }
@@ -350,7 +347,7 @@ mod test {
                 }
             }
         }
-        let frame_counts = get_segment_frame_counts(&segments);
+        let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[250, 250, 100]);
     }
 
