@@ -260,14 +260,7 @@ pub struct SegmentInfo {
 }
 
 impl SegmentInfo {
-    fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, mut streams: Vec<StreamInfo>) -> Self {
-        for s in streams.iter_mut() {
-            match s {
-                StreamInfo::Audio { .. } => {}
-                StreamInfo::Video { .. } => {}
-                StreamInfo::Other => {}
-            }
-        }
+    fn compile<S: AsyncWrite + Unpin>(segment: &CurrentSegment<S>, streams: Vec<StreamInfo>) -> Self {
         Self {
             size: segment.bytes_written,
             presentation_time: segment.pts.map(|pts| Duration::from_micros((pts * 300) / 27)),
