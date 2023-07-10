@@ -296,6 +296,18 @@ mod test {
         frame_counts
     }
 
+    fn get_segment_audio_sample_counts(segments: &[(Vec<u8>, SegmentInfo)]) -> Vec<u64> {
+        let mut sample_counts = Vec::new();
+        for (_, info) in segments {
+            for stream in &info.streams {
+                if let StreamInfo::Audio { sample_count, .. } = stream {
+                    sample_counts.push(*sample_count);
+                }
+            }
+        }
+        sample_counts
+    }
+
     #[tokio::test]
     async fn test_segmenter() {
         let mut storage = MemorySegmentStorage::new();
@@ -349,6 +361,8 @@ mod test {
         }
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[250, 250, 100]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(audio_sample_counts, vec![197632, 196608, 87040]);
     }
 
     #[tokio::test]
@@ -378,6 +392,8 @@ mod test {
         );
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[30, 3]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(audio_sample_counts, vec![78848, 3072]);
     }
 
     #[tokio::test]
@@ -407,6 +423,8 @@ mod test {
         );
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[30, 1]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(audio_sample_counts, vec![49152, 0]);
     }
 
     #[tokio::test]
@@ -466,6 +484,14 @@ mod test {
         assert_eq!(
             &frame_counts,
             &[30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 25, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 14]
+        );
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(
+            audio_sample_counts,
+            vec![
+                39936, 41984, 43008, 44032, 43008, 44032, 45056, 43008, 43008, 43008, 43008, 43008, 43008, 5120, 39936, 41984, 43008, 44032, 43008, 44032,
+                45056, 43008, 43008, 27648, 1024
+            ]
         );
     }
 
@@ -531,6 +557,8 @@ mod test {
         );
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[47, 60, 45]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(audio_sample_counts, vec![75776, 96256, 71680]);
     }
 
     #[tokio::test]
@@ -589,6 +617,9 @@ mod test {
         );
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[59, 50]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        // h264-SEI.ts doesn't contain audio
+        assert_eq!(audio_sample_counts, vec![]);
     }
 
     #[tokio::test]
@@ -621,6 +652,8 @@ mod test {
         );
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[29, 29, 8]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(audio_sample_counts, vec![39936, 41984, 14336]);
     }
 
     // This is a regression test to ensure that if the first packet of a keyframe ends with the
@@ -683,6 +716,8 @@ mod test {
         );
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(audio_sample_counts, vec![144384, 144384, 144384, 144384, 144384, 144384, 10240]);
     }
 
     #[tokio::test]
@@ -728,5 +763,7 @@ mod test {
         }
         let frame_counts = get_segment_frame_counts(segments);
         assert_eq!(&frame_counts, &[72, 72, 72]);
+        let audio_sample_counts = get_segment_audio_sample_counts(&segments);
+        assert_eq!(audio_sample_counts, vec![]);
     }
 }
