@@ -587,11 +587,8 @@ mod test {
             ]
         );
 
-        let durations = segments1.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
-        assert_eq!(
-            durations,
-            [90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000]
-        );
+        let durations = segments2.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000]);
     }
 
     #[tokio::test]
