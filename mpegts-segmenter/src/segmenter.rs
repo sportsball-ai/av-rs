@@ -240,12 +240,17 @@ impl<S: SegmentStorage> Segmenter<S> {
                     if let Some((previous_segment, mut previous_segment_info)) = self.previous_segment.take().zip(self.previous_segment_info.take()) {
                         if let Some((prev_pts, curr_pts)) = previous_segment.pts.zip(segment.pts) {
                             let duration = (curr_pts + PTS_ROLLOVER_MOD - prev_pts) % PTS_ROLLOVER_MOD;
+                            let max_reasonable_duration = (self.config.min_segment_duration.as_secs_f64() * VIDEO_PTS_BASE as f64 * 3.0) as u64;
                             // set the segment duration only if it's within a reasonable value.
-                            if duration < (self.config.min_segment_duration.as_secs_f64() * VIDEO_PTS_BASE as f64 * 3.0) as u64 {
+                            if duration < max_reasonable_duration {
                                 previous_segment_info.duration = Some(duration);
                             } else {
                                 return Err(Error::Other(
-                                    "The segment duration is outside the normal range, which could be due to an invalid presentation time.".into(),
+                                    format!(
+                                        "The segment duration {} exceeds maximum of {}; pts ranges from {} to {}.",
+                                        duration, max_reasonable_duration, prev_pts, curr_pts,
+                                    )
+                                    .into(),
                                 ));
                             }
                         }
@@ -528,7 +533,7 @@ mod test {
             .await;
             assert_eq!(
                 result.err().unwrap().to_string(),
-                "The segment duration is outside the normal range, which could be due to an invalid presentation time."
+                "The segment duration 8588764592 exceeds maximum of 270000; pts ranges from 1298090 to 128090."
             );
 
             segment(
