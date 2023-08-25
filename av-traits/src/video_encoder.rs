@@ -39,7 +39,9 @@ pub struct EncodedVideoFrame {
 
 pub struct VideoEncoderOutput<F> {
     pub raw_frame: F,
-    pub encoded_frame: EncodedVideoFrame,
+
+    /// The encoded frame, or `None` if it was dropped by the encoder.
+    pub encoded_frame: Option<EncodedVideoFrame>,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq)]

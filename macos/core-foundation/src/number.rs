@@ -1,5 +1,6 @@
 use super::*;
 
+#[repr(transparent)]
 pub struct Number(sys::CFNumberRef);
 crate::trait_impls!(Number);
 

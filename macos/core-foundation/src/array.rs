@@ -23,3 +23,19 @@ impl Array {
         }
     }
 }
+
+impl<T: CFType> From<&[T]> for Array {
+    fn from(value: &[T]) -> Self {
+        Self(unsafe { sys::CFArrayCreate(std::ptr::null_mut(), value.as_ptr() as _, value.len() as _, &sys::kCFTypeArrayCallBacks) })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn create() {
+        let _ = Array::from(&[Number::from(1), Number::from(2), Number::from(3)][..]);
+    }
+}

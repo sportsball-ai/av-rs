@@ -20,6 +20,7 @@ fn main() {
             .allowlist_var("kVTVideoEncoderSpecification_.+")
             .allowlist_var("kVTCompressionPropertyKey_.+")
             .allowlist_var("kVTEncodeFrameOptionKey_.+")
+            .allowlist_var("kVTProfileLevel_.+")
             .generate()
             .expect("unable to generate bindings");
 

@@ -349,13 +349,13 @@ impl<F> XcoderEncoder<F> {
                                 .input_frames
                                 .pop_front()
                                 .expect("there should never be more output frames than input frames"),
-                            encoded_frame: EncodedVideoFrame {
+                            encoded_frame: Some(EncodedVideoFrame {
                                 data: match self.encoded_frame.parameter_sets() {
                                     Some(sets) => [sets, self.encoded_frame.as_slice()].concat(),
                                     None => self.encoded_frame.as_slice().to_vec(),
                                 },
                                 is_keyframe: self.encoded_frame.is_key_frame(),
-                            },
+                            }),
                         });
                         self.encoded_frame.parameter_sets = None;
                         break;
@@ -568,13 +568,13 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
-                encoded.append(&mut output.encoded_frame.data);
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
         }
-        while let Some(mut output) = encoder.flush().unwrap() {
-            encoded.append(&mut output.encoded_frame.data);
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
             encoded_frames += 1;
         }
 

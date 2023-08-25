@@ -1,6 +1,7 @@
 use super::*;
 use std::os::raw::c_void;
 
+#[repr(transparent)]
 pub struct Dictionary(sys::CFDictionaryRef);
 crate::trait_impls!(Dictionary);
 
@@ -17,6 +18,7 @@ impl Dictionary {
     }
 }
 
+#[repr(transparent)]
 pub struct MutableDictionary(sys::CFMutableDictionaryRef);
 crate::trait_impls!(MutableDictionary);
 

@@ -27,6 +27,9 @@ pub use dictionary::*;
 pub mod number;
 pub use number::*;
 
+pub mod string;
+pub use string::*;
+
 #[macro_export]
 macro_rules! trait_impls {
     ($e:ident) => {

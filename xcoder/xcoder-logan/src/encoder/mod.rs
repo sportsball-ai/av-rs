@@ -234,13 +234,13 @@ mod test {
                 samples: Arc::new(vec![y, u.clone(), v.clone()]),
                 ..Default::default()
             };
-            if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
-                encoded.append(&mut output.encoded_frame.data);
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
         }
-        while let Some(mut output) = encoder.flush().unwrap() {
-            encoded.append(&mut output.encoded_frame.data);
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
             encoded_frames += 1;
         }
 
@@ -283,16 +283,16 @@ mod test {
                 samples: Arc::new(vec![y, u.clone(), v.clone()]),
                 ..Default::default()
             };
-            if let Some(mut output) = encoder
+            if let Some(output) = encoder
                 .encode(frame, if i % 5 == 0 { EncodedFrameType::Key } else { EncodedFrameType::Auto })
                 .unwrap()
             {
-                encoded.append(&mut output.encoded_frame.data);
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
         }
-        while let Some(mut output) = encoder.flush().unwrap() {
-            encoded.append(&mut output.encoded_frame.data);
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
             encoded_frames += 1;
         }
 
@@ -417,13 +417,13 @@ mod test {
         };
 
         for _ in 0..30 {
-            if let Some(mut output) = encoder.encode(frame.clone(), EncodedFrameType::Auto).unwrap() {
-                encoded.append(&mut output.encoded_frame.data);
+            if let Some(output) = encoder.encode(frame.clone(), EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
         }
-        while let Some(mut output) = encoder.flush().unwrap() {
-            encoded.append(&mut output.encoded_frame.data);
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
             encoded_frames += 1;
         }
 

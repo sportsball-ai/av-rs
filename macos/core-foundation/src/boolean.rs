@@ -1,5 +1,6 @@
 use super::*;
 
+#[repr(transparent)]
 pub struct Boolean(sys::CFBooleanRef);
 crate::trait_impls!(Boolean);
 
