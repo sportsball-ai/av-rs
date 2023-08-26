@@ -1,6 +1,7 @@
 use super::*;
 use std::os::raw::c_void;
 
+#[repr(transparent)]
 pub struct Dictionary(sys::CFDictionaryRef);
 crate::trait_impls!(Dictionary);
 
@@ -17,6 +18,7 @@ impl Dictionary {
     }
 }
 
+#[repr(transparent)]
 pub struct MutableDictionary(sys::CFMutableDictionaryRef);
 crate::trait_impls!(MutableDictionary);
 
@@ -30,7 +32,7 @@ impl MutableDictionary {
     pub fn cf_type_with_capacity(capacity: usize) -> Self {
         unsafe {
             Self(sys::CFDictionaryCreateMutable(
-                std::ptr::null_mut(),
+                std::ptr::null(),
                 capacity as _,
                 &sys::kCFTypeDictionaryKeyCallBacks as _,
                 &sys::kCFTypeDictionaryValueCallBacks as _,

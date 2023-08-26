@@ -15,7 +15,8 @@ struct CallbackContext<C> {
 }
 
 pub struct CompressionSessionOutputFrame<C> {
-    pub sample_buffer: SampleBuffer,
+    /// The encoded frame, or `None` if it was dropped.
+    pub sample_buffer: Option<SampleBuffer>,
     pub context: C,
 }
 
@@ -55,14 +56,14 @@ impl<C: Send> CompressionSession<C> {
         ) {
             let ctx = &*(output_callback_ref_con as *mut CallbackContext<C>);
             let frame_context = *Box::<C>::from_raw(source_frame_ref_con as *mut C);
-            let _ = ctx.frames.send(if sample_buffer.is_null() {
-                Err(status.into())
-            } else {
-                result(status.into()).map(|_| CompressionSessionOutputFrame {
-                    sample_buffer: SampleBuffer::with_cf_type_ref(sample_buffer as _),
-                    context: frame_context,
-                })
-            });
+            let _ = ctx.frames.send(result(status.into()).map(|_| CompressionSessionOutputFrame {
+                sample_buffer: if sample_buffer.is_null() {
+                    None
+                } else {
+                    Some(SampleBuffer::with_cf_type_ref(sample_buffer as _))
+                },
+                context: frame_context,
+            }));
         }
 
         let mut sess = std::ptr::null_mut();
