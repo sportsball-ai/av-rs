@@ -26,7 +26,7 @@ impl Array {
 
 impl<T: CFType> From<&[T]> for Array {
     fn from(value: &[T]) -> Self {
-        Self(unsafe { sys::CFArrayCreate(std::ptr::null_mut(), value.as_ptr() as _, value.len() as _, &sys::kCFTypeArrayCallBacks) })
+        Self(unsafe { sys::CFArrayCreate(std::ptr::null(), value.as_ptr() as _, value.len() as _, &sys::kCFTypeArrayCallBacks) })
     }
 }
 

@@ -7,7 +7,7 @@ impl StringRef {
     pub fn from_static(value: &'static str) -> Self {
         Self(unsafe {
             sys::CFStringCreateWithBytesNoCopy(
-                std::ptr::null_mut(),
+                std::ptr::null(),
                 value.as_ptr(),
                 value.len() as _,
                 sys::kCFStringEncodingUTF8,

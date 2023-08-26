@@ -32,7 +32,7 @@ impl MutableDictionary {
     pub fn cf_type_with_capacity(capacity: usize) -> Self {
         unsafe {
             Self(sys::CFDictionaryCreateMutable(
-                std::ptr::null_mut(),
+                std::ptr::null(),
                 capacity as _,
                 &sys::kCFTypeDictionaryKeyCallBacks as _,
                 &sys::kCFTypeDictionaryValueCallBacks as _,

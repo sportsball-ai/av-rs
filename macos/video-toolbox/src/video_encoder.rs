@@ -80,6 +80,16 @@ impl H265ProfileLevel {
     }
 
     pub fn as_str(self) -> &'static str {
+        // Video Toolbox doesn't expose constants for these levels, but
+        // <https://developer.apple.com/documentation/videotoolbox/kvtcompressionpropertykey_profilelevel>
+        // says the following:
+        //
+        // > Available profiles and levels vary across formats and among video
+        // > encoders. Video encoders should use standard keys where available,
+        // > and follow standard patterns when standard keys are unavailable.
+        //
+        // These appear to work and follow the form of the like H.264 constants,
+        // e.g. `kVTProfileLevel_H264_Main_5_2` resolves to `H264_Main_5_2`.
         match self {
             H265ProfileLevel::Main3_0 => "HEVC_Main_3_0",
             H265ProfileLevel::Main3_1 => "HEVC_Main_3_1",
