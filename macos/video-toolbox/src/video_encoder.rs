@@ -1,38 +1,9 @@
 use super::*;
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoderOutput};
-use core_foundation::{Array, Boolean, CFType, Dictionary, MutableDictionary, Number, OSStatus, StringRef};
+use core_foundation::{self as cf, Array, Boolean, CFType, Dictionary, MutableDictionary, Number, OSStatus};
 use core_media::{Time, VideoCodecType};
 use core_video::{PixelBuffer, PixelBufferPlane};
 use std::pin::Pin;
-
-pub struct Error {
-    context: &'static str,
-    inner: OSStatus,
-}
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.context, self.inner)
-    }
-}
-
-impl std::fmt::Debug for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(self, f)
-    }
-}
-
-impl std::error::Error for Error {}
-
-trait ResultExt<T> {
-    fn context(self, msg: &'static str) -> Result<T, Error>;
-}
-
-impl<T> ResultExt<T> for Result<T, OSStatus> {
-    fn context(self, context: &'static str) -> Result<T, Error> {
-        self.map_err(|inner| Error { context, inner })
-    }
-}
 
 #[derive(Copy, Clone, Debug)]
 pub enum H265ProfileLevel {
@@ -107,13 +78,8 @@ impl H265ProfileLevel {
 
 #[derive(Clone, Debug)]
 pub enum VideoEncoderCodec {
-    H264 {
-        avg_bitrate: Option<u32>,
-    },
-    H265 {
-        avg_bitrate: Option<u32>,
-        level: Option<H265ProfileLevel>,
-    },
+    H264 {},
+    H265 { level: Option<H265ProfileLevel> },
 }
 
 impl From<&VideoEncoderCodec> for VideoCodecType {
@@ -132,8 +98,19 @@ pub struct VideoEncoderConfig {
     pub fps: f64,
     pub codec: VideoEncoderCodec,
     pub input_format: VideoEncoderInputFormat,
+    pub properties: VideoEncoderProperties,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct VideoEncoderProperties {
     pub max_key_frame_interval: Option<i32>,
+    pub avg_bitrate: Option<u32>,
     pub max_bitrate: Option<u32>,
+    pub quality: Option<f32>,
+    pub soft_min_qp: Option<i32>,
+    pub soft_max_qp: Option<i32>,
+    pub min_qp: Option<i32>,
+    pub max_qp: Option<i32>,
 }
 
 #[derive(Clone, Debug)]
@@ -175,11 +152,15 @@ impl<F: Send> VideoEncoder<F> {
                 .context("unable to set realtime")?;
             sess.set_property(sys::kVTCompressionPropertyKey_ExpectedFrameRate, Number::from(config.fps))
                 .context("unable to set expected frame rate")?;
-            if let Some(max_key_frame_interval) = config.max_key_frame_interval {
+            if let Some(max_key_frame_interval) = config.properties.max_key_frame_interval {
                 sess.set_property(sys::kVTCompressionPropertyKey_MaxKeyFrameInterval, Number::from(max_key_frame_interval))
                     .context("unable to set max key frame interval")?;
             }
-            if let Some(max_bitrate) = config.max_bitrate {
+            if let Some(avg_bitrate) = config.properties.avg_bitrate {
+                sess.set_property(sys::kVTCompressionPropertyKey_AverageBitRate, Number::from(avg_bitrate as i64))
+                    .context("unable to set average bitrate")?;
+            }
+            if let Some(max_bitrate) = config.properties.max_bitrate {
                 let data_limits = Array::from(
                     &[
                         Number::from((max_bitrate / 8) as i64), // bytes
@@ -189,21 +170,32 @@ impl<F: Send> VideoEncoder<F> {
                 sess.set_property(sys::kVTCompressionPropertyKey_DataRateLimits, data_limits)
                     .context("unable to set data rate limits")?;
             }
+            if let Some(v) = config.properties.soft_min_qp {
+                sess.set_property_str("SoftMinQuantizationParameter", Number::from(v))
+                    .context("unable to set SoftMinQuantizationParameter")?;
+            }
+            if let Some(v) = config.properties.soft_max_qp {
+                sess.set_property_str("SoftMaxQuantizationParameter", Number::from(v))
+                    .context("unable to set SoftMaxQuantizationParameter")?;
+            }
+            if let Some(v) = config.properties.min_qp {
+                sess.set_property_str("MinQuantizationParameter", Number::from(v))
+                    .context("unable to set MinQuantizationParameter")?;
+            }
+            if let Some(v) = config.properties.max_qp {
+                sess.set_property_str("MaxQuantizationParameter", Number::from(v))
+                    .context("unable to set MaxQuantizationParameter")?;
+            }
+            if let Some(quality) = config.properties.quality {
+                sess.set_property(sys::kVTCompressionPropertyKey_Quality, Number::from(quality))
+                    .context("unable to set quality")?;
+            }
 
             match &config.codec {
-                VideoEncoderCodec::H264 { avg_bitrate } => {
-                    if let Some(avg_bitrate) = avg_bitrate {
-                        sess.set_property(sys::kVTCompressionPropertyKey_AverageBitRate, Number::from(*avg_bitrate as i64))
-                            .context("unable to set average bitrate")?;
-                    }
-                }
-                VideoEncoderCodec::H265 { avg_bitrate, level } => {
-                    if let Some(avg_bitrate) = avg_bitrate {
-                        sess.set_property(sys::kVTCompressionPropertyKey_AverageBitRate, Number::from(*avg_bitrate as i64))
-                            .context("unable to set average bitrate")?;
-                    }
+                VideoEncoderCodec::H264 {} => {}
+                VideoEncoderCodec::H265 { level } => {
                     if let Some(level) = level {
-                        sess.set_property(sys::kVTCompressionPropertyKey_ProfileLevel, StringRef::from_static(level.as_str()))
+                        sess.set_property(sys::kVTCompressionPropertyKey_ProfileLevel, cf::StringRef::from_static(level.as_str()))
                             .context("unable to set HEVC level")?;
                     }
                 }
@@ -231,10 +223,9 @@ impl<F: Send> VideoEncoder<F> {
                 unsafe {
                     if let Some(attachments) = sample_buffer.attachments_array() {
                         if !attachments.is_empty() {
-                            if let Some(dict) = attachments.cf_type_value_at_index::<Dictionary>(0) {
-                                if let Some(not_sync) = dict.cf_type_value::<Boolean>(sys::kCMSampleAttachmentKey_NotSync as _) {
-                                    is_keyframe = !not_sync.value();
-                                }
+                            let dict = attachments.cf_type_value_at_index::<Dictionary>(0);
+                            if let Some(not_sync) = dict.cf_type_value::<Boolean>(sys::kCMSampleAttachmentKey_NotSync as _) {
+                                is_keyframe = !not_sync.value();
                             }
                         }
                     }
@@ -407,8 +398,10 @@ mod test {
             fps: 29.97,
             codec,
             input_format: VideoEncoderInputFormat::Yuv420Planar,
-            max_key_frame_interval: None,
-            max_bitrate: None,
+            properties: VideoEncoderProperties {
+                avg_bitrate: Some(10_000),
+                ..Default::default()
+            },
         })
         .unwrap();
 
@@ -451,15 +444,16 @@ mod test {
 
     #[test]
     fn test_video_encoder_with_encode_frame_type() {
-        let codec = VideoEncoderCodec::H264 { avg_bitrate: Some(10000) };
         let mut encoder = VideoEncoder::new(VideoEncoderConfig {
             width: 1920,
             height: 1080,
             fps: 30.0,
-            codec,
+            codec: VideoEncoderCodec::H264 {},
             input_format: VideoEncoderInputFormat::Yuv420Planar,
-            max_key_frame_interval: None,
-            max_bitrate: None,
+            properties: VideoEncoderProperties {
+                avg_bitrate: Some(10_000),
+                ..Default::default()
+            },
         })
         .unwrap();
 
@@ -500,10 +494,13 @@ mod test {
             width: 1920,
             height: 1080,
             fps: 30.0,
-            codec: VideoEncoderCodec::H264 { avg_bitrate: Some(10000) },
+            codec: VideoEncoderCodec::H264 {},
             input_format: VideoEncoderInputFormat::Yuv420Planar,
-            max_key_frame_interval: Some(i32::MAX),
-            max_bitrate: None,
+            properties: VideoEncoderProperties {
+                avg_bitrate: Some(10_000),
+                max_key_frame_interval: Some(i32::MAX),
+                ..Default::default()
+            },
         })
         .unwrap();
 
@@ -542,14 +539,12 @@ mod test {
 
     #[test]
     fn test_video_encoder_h264() {
-        test_video_encoder(VideoEncoderCodec::H264 { avg_bitrate: Some(10_000) });
+        test_video_encoder(VideoEncoderCodec::H264 {});
     }
 
     #[test]
     fn test_video_encoder_h265() {
-        test_video_encoder(VideoEncoderCodec::H265 {
-            avg_bitrate: Some(10_000),
-            level: None,
-        });
+        // println!("{}", unsafe { cf::StringRef::from_get_rule(sys::kVTCompressionPropertyKey_MaxAllowedFrameQP as _) });
+        test_video_encoder(VideoEncoderCodec::H265 { level: None });
     }
 }

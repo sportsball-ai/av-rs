@@ -118,13 +118,13 @@ impl VideoFormatDescription {
 
 impl From<VideoFormatDescription> for FormatDescription {
     fn from(desc: VideoFormatDescription) -> Self {
-        unsafe { Self::with_cf_type_ref(desc.0 as _) }
+        unsafe { Self::from_get_rule(desc.0 as _) }
     }
 }
 
 impl From<&VideoFormatDescription> for FormatDescription {
     fn from(desc: &VideoFormatDescription) -> Self {
-        unsafe { Self::with_cf_type_ref(desc.0 as _) }
+        unsafe { Self::from_get_rule(desc.0 as _) }
     }
 }
 

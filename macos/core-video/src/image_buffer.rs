@@ -6,6 +6,6 @@ core_foundation::trait_impls!(ImageBuffer);
 
 impl ImageBuffer {
     pub fn pixel_buffer(&self) -> PixelBuffer {
-        unsafe { PixelBuffer::with_cf_type_ref(self.0 as _) }
+        unsafe { PixelBuffer::from_get_rule(self.0 as _) }
     }
 }

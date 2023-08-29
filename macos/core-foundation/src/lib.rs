@@ -36,7 +36,7 @@ macro_rules! trait_impls {
         impl std::fmt::Debug for $e {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 use $crate::CFType;
-                write!(f, "{}", self.description().unwrap_or("{..}".to_string()))
+                write!(f, "{}", self.description())
             }
         }
 
@@ -49,8 +49,12 @@ macro_rules! trait_impls {
         unsafe impl Send for $e {}
 
         impl $crate::CFType for $e {
-            unsafe fn with_cf_type_ref(cf: $crate::sys::CFTypeRef) -> Self {
+            unsafe fn from_get_rule(cf: $crate::sys::CFTypeRef) -> Self {
                 $crate::sys::CFRetain(cf);
+                Self(cf as _)
+            }
+
+            unsafe fn from_create_rule(cf: $crate::sys::CFTypeRef) -> Self {
                 Self(cf as _)
             }
 

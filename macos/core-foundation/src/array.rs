@@ -14,13 +14,10 @@ impl Array {
 
     /// # Safety
     /// Behavior is undefined if the value is not of type `T` or if the index is out of range.
-    pub unsafe fn cf_type_value_at_index<T: CFType>(&self, idx: usize) -> Option<T> {
+    pub unsafe fn cf_type_value_at_index<T: CFType>(&self, idx: usize) -> T {
         let v = sys::CFArrayGetValueAtIndex(self.0, idx as _);
-        if v.is_null() {
-            None
-        } else {
-            Some(T::with_cf_type_ref(v as _))
-        }
+        assert!(!v.is_null());
+        T::from_get_rule(v as _)
     }
 }
 

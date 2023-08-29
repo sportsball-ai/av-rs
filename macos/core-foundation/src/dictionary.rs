@@ -1,3 +1,5 @@
+use crate::sys::CFDictionaryGetKeysAndValues;
+
 use super::*;
 use std::os::raw::c_void;
 
@@ -11,9 +13,31 @@ impl Dictionary {
     pub unsafe fn cf_type_value<T: CFType>(&self, key: *const c_void) -> Option<T> {
         let mut v = std::ptr::null();
         if sys::CFDictionaryGetValueIfPresent(self.0, key, &mut v as *mut _ as _) != 0 {
-            Some(T::with_cf_type_ref(v as _))
+            Some(T::from_get_rule(v as _))
         } else {
             None
+        }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        unsafe { sys::CFDictionaryGetCount(self.0) as _ }
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// # Safety
+    /// Behavior is undefined if the keys are not of type `K` or values are not of type `V`.
+    pub unsafe fn get_keys_and_values<K: CFType, V: CFType>(&self) -> Vec<(K, V)> {
+        let len = self.len();
+        let mut keys = vec![std::ptr::null(); len];
+        let mut values = vec![std::ptr::null(); len];
+        unsafe {
+            CFDictionaryGetKeysAndValues(self.0, keys.as_mut_ptr(), values.as_mut_ptr());
+            keys.iter().zip(values.iter()).map(|(k, v)| (K::from_get_rule(*k as _), V::from_get_rule(*v as _))).collect()
         }
     }
 }
@@ -49,7 +73,7 @@ impl MutableDictionary {
 
 impl From<MutableDictionary> for Dictionary {
     fn from(desc: MutableDictionary) -> Self {
-        unsafe { Self::with_cf_type_ref(desc.0 as _) }
+        unsafe { Self::from_get_rule(desc.0 as _) }
     }
 }
 

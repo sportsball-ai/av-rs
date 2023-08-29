@@ -57,7 +57,7 @@ unsafe extern "C" fn avrs_av_capture_video_data_output_sample_buffer_delegate_di
     buffer: CMSampleBufferRef,
 ) {
     let implementation = &*implementation;
-    implementation.did_output_sample_buffer(SampleBuffer::with_cf_type_ref(buffer as _));
+    implementation.did_output_sample_buffer(SampleBuffer::from_get_rule(buffer as _));
 }
 
 pub struct AVCaptureVideoDataOutputVideoSettings {

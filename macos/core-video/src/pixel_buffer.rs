@@ -115,6 +115,6 @@ impl PixelBuffer {
 
 impl From<PixelBuffer> for ImageBuffer {
     fn from(b: PixelBuffer) -> Self {
-        unsafe { ImageBuffer::with_cf_type_ref(b.0 as _) }
+        unsafe { ImageBuffer::from_get_rule(b.0 as _) }
     }
 }

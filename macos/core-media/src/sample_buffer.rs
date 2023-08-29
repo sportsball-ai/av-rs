@@ -46,7 +46,7 @@ impl SampleBuffer {
             if buf.is_null() {
                 None
             } else {
-                Some(core_video::ImageBuffer::with_cf_type_ref(buf as _))
+                Some(core_video::ImageBuffer::from_get_rule(buf as _))
             }
         }
     }
@@ -57,7 +57,7 @@ impl SampleBuffer {
             if buf.is_null() {
                 None
             } else {
-                Some(core_foundation::Array::with_cf_type_ref(buf as _))
+                Some(core_foundation::Array::from_get_rule(buf as _))
             }
         }
     }
@@ -68,7 +68,7 @@ impl SampleBuffer {
             if buf.is_null() {
                 None
             } else {
-                Some(BlockBuffer::with_cf_type_ref(buf as _))
+                Some(BlockBuffer::from_get_rule(buf as _))
             }
         }
     }
@@ -79,7 +79,7 @@ impl SampleBuffer {
             if buf.is_null() {
                 None
             } else {
-                Some(FormatDescription::with_cf_type_ref(buf as _))
+                Some(FormatDescription::from_get_rule(buf as _))
             }
         }
     }
