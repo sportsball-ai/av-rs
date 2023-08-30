@@ -1,7 +1,8 @@
 use super::*;
+use crate::sys::CMTimeMake;
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoderOutput};
 use core_foundation::{self as cf, Array, Boolean, CFType, Dictionary, MutableDictionary, Number, OSStatus};
-use core_media::{Time, VideoCodecType};
+use core_media::VideoCodecType;
 use core_video::{PixelBuffer, PixelBufferPlane};
 use std::pin::Pin;
 
@@ -365,8 +366,8 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
 
         let frame_number = self.frame_count;
         self.frame_count += 1;
-        self.sess
-            .encode_frame(pixel_buffer.into(), Time::new((fps_den * frame_number) as _, fps_num as _), input, frame_type)?;
+        let presentation_time = unsafe { CMTimeMake((fps_den * frame_number) as _, fps_num as _) };
+        self.sess.encode_frame(pixel_buffer.into(), presentation_time, input, frame_type)?;
         self.next_video_encoder_trait_frame()
     }
 

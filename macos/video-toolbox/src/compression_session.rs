@@ -1,7 +1,7 @@
 use super::sys;
 use av_traits::EncodedFrameType;
 use core_foundation::{result, Boolean, CFType, Dictionary, MutableDictionary, OSStatus, StringRef};
-use core_media::{SampleBuffer, Time, VideoCodecType};
+use core_media::{SampleBuffer, VideoCodecType};
 use core_video::ImageBuffer;
 use std::{
     marker::{PhantomData, PhantomPinned},
@@ -111,7 +111,13 @@ impl<C: Send> CompressionSession<C> {
         &self.frames
     }
 
-    pub fn encode_frame(&mut self, image_buffer: ImageBuffer, presentation_time: Time, context: C, frame_type: EncodedFrameType) -> Result<(), OSStatus> {
+    pub fn encode_frame(
+        &mut self,
+        image_buffer: ImageBuffer,
+        presentation_time: sys::CMTime,
+        context: C,
+        frame_type: EncodedFrameType,
+    ) -> Result<(), OSStatus> {
         let context = Box::new(context);
         result(
             unsafe {
@@ -126,15 +132,10 @@ impl<C: Send> CompressionSession<C> {
                 sys::VTCompressionSessionEncodeFrame(
                     self.inner.0,
                     image_buffer.cf_type_ref() as _,
-                    sys::CMTime {
-                        value: presentation_time.value,
-                        timescale: presentation_time.timescale,
-                        flags: presentation_time.flags,
-                        epoch: presentation_time.epoch,
-                    },
+                    presentation_time,
                     sys::kCMTimeInvalid,
                     frame_options.cf_type_ref() as _,
-                    Box::into_raw(context) as *mut C as _,
+                    Box::into_raw(context) as _,
                     std::ptr::null_mut(),
                 )
             }
@@ -143,20 +144,7 @@ impl<C: Send> CompressionSession<C> {
     }
 
     pub fn flush(&mut self) -> Result<(), OSStatus> {
-        result(
-            unsafe {
-                sys::VTCompressionSessionCompleteFrames(
-                    self.inner.0,
-                    sys::CMTime {
-                        value: 0,
-                        timescale: 0,
-                        flags: 0,
-                        epoch: 0,
-                    },
-                )
-            }
-            .into(),
-        )
+        result(unsafe { sys::VTCompressionSessionCompleteFrames(self.inner.0, sys::kCMTimeInvalid) }.into())
     }
 }
 
@@ -198,9 +186,10 @@ mod test {
             let mut frame_data = vec![0, 0, (nalu.len() / 256) as u8, nalu.len() as u8];
             frame_data.extend_from_slice(nalu);
             let image_buffer = decompression_session.decode_frame(&frame_data, &format_desc).unwrap();
+            let presentation_time = unsafe { sys::CMTimeMake(frames_sent, 30) };
             frames_sent += 1;
             compression_session
-                .encode_frame(image_buffer, Time::default(), (), EncodedFrameType::Auto)
+                .encode_frame(image_buffer, presentation_time, (), EncodedFrameType::Auto)
                 .unwrap();
         }
         compression_session.flush().unwrap();
@@ -211,5 +200,14 @@ mod test {
             frame_count += 1;
         }
         assert_eq!(frame_count, frames_sent);
+    }
+
+    #[test]
+    fn test_create_cm_time() {
+        let time = unsafe { sys::CMTimeMake(20, 1000) };
+        assert_eq!(time.value as i64, 20);
+        assert_eq!(time.timescale as i32, 1000);
+        assert_eq!(time.flags, sys::kCMTimeFlags_Valid);
+        assert_eq!(time.epoch as i64, 0);
     }
 }
