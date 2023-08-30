@@ -13,7 +13,7 @@ impl Boolean {
 impl From<bool> for Boolean {
     fn from(b: bool) -> Self {
         unsafe {
-            Self::with_cf_type_ref(match b {
+            Self::from_get_rule(match b {
                 true => sys::kCFBooleanTrue,
                 false => sys::kCFBooleanFalse,
             } as _)

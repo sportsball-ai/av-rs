@@ -16,3 +16,7 @@ core-video = { path = "../core-video" }
 
 [dev-dependencies]
 h264 = { path = "../../h264" }
+textwrap = "0.16.0"
+
+[[example]]
+name = "list-encoders"

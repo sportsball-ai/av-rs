@@ -1,6 +1,6 @@
 use super::sys;
 use av_traits::EncodedFrameType;
-use core_foundation::{result, Boolean, CFType, Dictionary, MutableDictionary, OSStatus};
+use core_foundation::{result, Boolean, CFType, Dictionary, MutableDictionary, OSStatus, StringRef};
 use core_media::{SampleBuffer, Time, VideoCodecType};
 use core_video::ImageBuffer;
 use std::{
@@ -60,7 +60,7 @@ impl<C: Send> CompressionSession<C> {
                 sample_buffer: if sample_buffer.is_null() {
                     None
                 } else {
-                    Some(SampleBuffer::with_cf_type_ref(sample_buffer as _))
+                    Some(SampleBuffer::from_get_rule(sample_buffer as _))
                 },
                 context: frame_context,
             }));
@@ -97,6 +97,10 @@ impl<C: Send> CompressionSession<C> {
 
     pub fn set_property<V: CFType>(&mut self, key: sys::CFStringRef, value: V) -> Result<(), OSStatus> {
         unsafe { result(sys::VTSessionSetProperty(self.inner.0 as _, key as _, value.cf_type_ref()).into()) }
+    }
+
+    pub fn set_property_str<V: CFType>(&mut self, key: &'static str, value: V) -> Result<(), OSStatus> {
+        unsafe { result(sys::VTSessionSetProperty(self.inner.0 as _, StringRef::from_static(key).cf_type_ref() as _, value.cf_type_ref()).into()) }
     }
 
     pub fn prepare_to_encode_frames(&mut self) -> Result<(), OSStatus> {
