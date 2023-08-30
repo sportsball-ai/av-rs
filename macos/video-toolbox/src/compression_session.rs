@@ -205,9 +205,9 @@ mod test {
     #[test]
     fn test_create_cm_time() {
         let time = unsafe { sys::CMTimeMake(20, 1000) };
-        assert_eq!(time.value as i64, 20);
-        assert_eq!(time.timescale as i32, 1000);
+        assert_eq!({ time.value }, 20);
+        assert_eq!({ time.timescale }, 1000);
         assert_eq!(time.flags, sys::kCMTimeFlags_Valid);
-        assert_eq!(time.epoch as i64, 0);
+        assert_eq!({ time.epoch }, 0);
     }
 }
