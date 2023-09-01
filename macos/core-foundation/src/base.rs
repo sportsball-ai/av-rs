@@ -1,20 +1,15 @@
 use super::sys;
-use std::{error::Error, ffi::CStr, fmt};
+use std::{error::Error, fmt};
 
 #[allow(clippy::missing_safety_doc)]
 pub trait CFType {
-    unsafe fn with_cf_type_ref(cf: sys::CFTypeRef) -> Self;
+    unsafe fn from_get_rule(cf: sys::CFTypeRef) -> Self;
+    unsafe fn from_create_rule(cf: sys::CFTypeRef) -> Self;
     unsafe fn cf_type_ref(&self) -> sys::CFTypeRef;
 
     /// Gets the object's description if one is available.
-    fn description(&self) -> Option<String> {
-        unsafe {
-            let desc = sys::CFCopyDescription(self.cf_type_ref());
-            let ptr = sys::CFStringGetCStringPtr(desc, sys::kCFStringEncodingUTF8);
-            let ret = CStr::from_ptr(ptr).to_str().ok().map(|s| s.to_string());
-            sys::CFRelease(desc as _);
-            ret
-        }
+    fn description(&self) -> crate::StringRef {
+        unsafe { crate::StringRef::from_create_rule(sys::CFCopyDescription(self.cf_type_ref()) as _) }
     }
 }
 

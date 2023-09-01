@@ -8,12 +8,21 @@ use mpeg2::{
 use std::{fmt, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+pub const PTS_ROLLOVER_MOD: u64 = 1 << 33;
+pub const VIDEO_PTS_BASE: u64 = 90_000;
+
 struct CurrentSegment<S: AsyncWrite + Unpin> {
     segment: S,
     pcr: u64,
     pts: Option<u64>,
     bytes_written: usize,
     temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
+}
+
+struct PrevSegment<S: AsyncWrite + Unpin> {
+    pts: Option<u64>,
+    segment: S,
+    segment_info: SegmentInfo,
 }
 
 pub struct SegmenterConfig {
@@ -161,10 +170,15 @@ impl<S: SegmentStorage> Segmenter<S> {
                 }
             }
 
+            let mut prev_segment = None;
             if should_start_new_segment {
                 if let Some(curr) = self.current_segment.take() {
-                    let info = SegmentInfo::compile(&curr, self.analyzer.streams());
-                    self.storage.finalize_segment(curr.segment, info).await?;
+                    let segment_info = SegmentInfo::compile(&curr, self.analyzer.streams());
+                    prev_segment = Some(PrevSegment {
+                        pts: curr.pts,
+                        segment: curr.segment,
+                        segment_info,
+                    });
                 }
 
                 self.current_segment = Some(CurrentSegment {
@@ -178,6 +192,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                 self.analyzer.reset_streams_data();
             }
 
+            let mut current_segment_pts = None;
             if let Some(segment) = &mut self.current_segment {
                 let mut pes_packet_header: Option<pes::PacketHeader> = None;
                 // set the segment's pts if necessary
@@ -185,6 +200,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     if let Some(payload) = p.payload.as_ref() {
                         pes_packet_header = Some(pes::PacketHeader::decode(payload)?.0);
                         segment.pts = pes_packet_header.as_ref().and_then(|h| h.optional_header.as_ref()).and_then(|h| h.pts);
+                        current_segment_pts = segment.pts.clone();
                     }
                 }
 
@@ -214,8 +230,27 @@ impl<S: SegmentStorage> Segmenter<S> {
                 segment.segment.write_all(buf).await?;
                 segment.bytes_written += buf.len();
             }
-        }
 
+            if let Some(mut prev_segment) = prev_segment {
+                if let Some((prev_pts, curr_pts)) = prev_segment.pts.zip(current_segment_pts) {
+                    let duration = (curr_pts + PTS_ROLLOVER_MOD - prev_pts) % PTS_ROLLOVER_MOD;
+                    let max_reasonable_duration = (self.config.min_segment_duration.as_secs_f64() * VIDEO_PTS_BASE as f64 * 3.0) as u64;
+                    // set the segment duration only if it's within a reasonable value.
+                    if duration < max_reasonable_duration {
+                        prev_segment.segment_info.duration = Some(duration);
+                    } else {
+                        return Err(Error::Other(
+                            format!(
+                                "The segment duration {} exceeds maximum of {}; pts ranges from {} to {}.",
+                                duration, max_reasonable_duration, prev_pts, curr_pts,
+                            )
+                            .into(),
+                        ));
+                    }
+                }
+                self.storage.finalize_segment(prev_segment.segment, prev_segment.segment_info).await?;
+            }
+        }
         Ok(())
     }
 
@@ -257,6 +292,8 @@ pub struct SegmentInfo {
     pub presentation_time: Option<Duration>,
     pub streams: Vec<StreamInfo>,
     pub temi_timeline_descriptor: Option<TEMITimelineDescriptor>,
+    // in presentation time units of 90_000.
+    pub duration: Option<u64>,
 }
 
 impl SegmentInfo {
@@ -266,6 +303,7 @@ impl SegmentInfo {
             presentation_time: segment.pts.map(|pts| Duration::from_micros((pts * 300) / 27)),
             streams,
             temi_timeline_descriptor: segment.temi_timeline_descriptor.clone(),
+            duration: None,
         }
     }
 }
@@ -363,6 +401,9 @@ mod test {
         assert_eq!(&frame_counts, &[250, 250, 100]);
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         assert_eq!(audio_sample_counts, vec![197632, 196608, 87040]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [375375, 375375]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -394,6 +435,9 @@ mod test {
         assert_eq!(&frame_counts, &[30, 3]);
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         assert_eq!(audio_sample_counts, vec![78848, 3072]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [90068]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -425,33 +469,50 @@ mod test {
         assert_eq!(&frame_counts, &[30, 1]);
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         assert_eq!(audio_sample_counts, vec![49152, 0]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [90103]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
     /// The file used for this test was generated by an ffmpeg command that was restarted half-way
     /// through. This causes the PCR to reset, which at one point caused a panic due to overflow.
     async fn test_segmenter_restart() {
-        let mut storage = MemorySegmentStorage::new();
+        let mut storage1 = MemorySegmentStorage::new();
+        let mut storage2 = MemorySegmentStorage::new();
 
         {
             let mut f = File::open("src/testdata/restart.ts").unwrap();
             let mut buf = Vec::new();
             f.read_to_end(&mut buf).unwrap();
-            segment(
+            let result = segment(
                 buf.as_slice(),
                 SegmenterConfig {
                     min_segment_duration: Duration::from_secs(1),
                 },
-                &mut storage,
+                &mut storage1,
+            )
+            .await;
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "The segment duration 8588764592 exceeds maximum of 270000; pts ranges from 1298090 to 128090."
+            );
+
+            segment(
+                &buf[1466400..],
+                SegmenterConfig {
+                    min_segment_duration: Duration::from_secs(1),
+                },
+                &mut storage2,
             )
             .await
             .unwrap();
         }
 
-        let segments = storage.segments();
-        assert_eq!(segments.len(), 25);
+        let segments1 = storage1.segments();
+        assert_eq!(segments1.len(), 13);
         assert_eq!(
-            segments.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            segments1.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
             vec![
                 1.423_222,
                 2.423_222,
@@ -466,7 +527,27 @@ mod test {
                 11.423_221_999_999_999,
                 12.423_221_999_999_999,
                 13.423_221_999_999_999,
-                14.423_221_999_999_999,
+            ]
+        );
+        let durations = segments1.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(
+            durations,
+            [90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000]
+        );
+
+        let frame_counts = get_segment_frame_counts(segments1);
+        assert_eq!(&frame_counts, &[30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30]);
+        let audio_sample_counts = get_segment_audio_sample_counts(segments1);
+        assert_eq!(
+            audio_sample_counts,
+            vec![39936, 41984, 43008, 44032, 43008, 44032, 45056, 43008, 43008, 43008, 43008, 43008, 43008]
+        );
+
+        let segments2 = storage2.segments();
+        assert_eq!(segments2.len(), 11);
+        assert_eq!(
+            segments2.iter().map(|(_, s)| s.presentation_time.unwrap().as_secs_f64()).collect::<Vec<_>>(),
+            vec![
                 1.423_222,
                 2.423_222,
                 3.423_222,
@@ -480,18 +561,16 @@ mod test {
                 11.423_221_999_999_999,
             ]
         );
-        let frame_counts = get_segment_frame_counts(segments);
-        assert_eq!(
-            &frame_counts,
-            &[30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 25, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 14]
-        );
-        let audio_sample_counts = get_segment_audio_sample_counts(segments);
+
+        let durations = segments2.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000, 90000]);
+
+        let frame_counts = get_segment_frame_counts(segments2);
+        assert_eq!(&frame_counts, &[30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 14]);
+        let audio_sample_counts = get_segment_audio_sample_counts(segments2);
         assert_eq!(
             audio_sample_counts,
-            vec![
-                39936, 41984, 43008, 44032, 43008, 44032, 45056, 43008, 43008, 43008, 43008, 43008, 43008, 5120, 39936, 41984, 43008, 44032, 43008, 44032,
-                45056, 43008, 43008, 27648, 1024
-            ]
+            vec![39936, 41984, 43008, 44032, 43008, 44032, 45056, 43008, 43008, 27648, 1024]
         );
     }
 
@@ -559,6 +638,9 @@ mod test {
         assert_eq!(&frame_counts, &[47, 60, 45]);
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         assert_eq!(audio_sample_counts, vec![75776, 96256, 71680]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [142643, 180180]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -620,6 +702,9 @@ mod test {
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         // h264-SEI.ts doesn't contain audio
         assert_eq!(audio_sample_counts, vec![]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [180000]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -654,6 +739,10 @@ mod test {
         assert_eq!(&frame_counts, &[29, 29, 8]);
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         assert_eq!(audio_sample_counts, vec![39936, 41984, 14336]);
+        // Sine there are missing pts in PES optional header in the synthetic test video clip,
+        // we will be unable to infer the durations of the segments in this case.
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, []);
     }
 
     // This is a regression test to ensure that if the first packet of a keyframe ends with the
@@ -678,7 +767,7 @@ mod test {
         segment(
             buf.as_ref(),
             SegmenterConfig {
-                min_segment_duration: Duration::from_secs(1),
+                min_segment_duration: Duration::from_secs(2),
             },
             &mut storage,
         )
@@ -718,6 +807,9 @@ mod test {
         assert_eq!(&frame_counts, &[]);
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         assert_eq!(audio_sample_counts, vec![144384, 144384, 144384, 144384, 144384, 144384, 10240]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [270720, 270720, 270720, 270720, 270720, 270720]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 
     #[tokio::test]
@@ -765,5 +857,8 @@ mod test {
         assert_eq!(&frame_counts, &[72, 72, 72]);
         let audio_sample_counts = get_segment_audio_sample_counts(segments);
         assert_eq!(audio_sample_counts, vec![]);
+        let durations = segments.iter().flat_map(|(_, info)| info.duration).collect::<Vec<u64>>();
+        assert_eq!(durations, [267001, 271500]);
+        assert_eq!(segments.len(), durations.len() + 1);
     }
 }

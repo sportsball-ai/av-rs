@@ -129,10 +129,10 @@ impl<F> X264Encoder<F> {
                     }
                     Ok(Some(VideoEncoderOutput {
                         raw_frame: *input,
-                        encoded_frame: EncodedVideoFrame {
+                        encoded_frame: Some(EncodedVideoFrame {
                             data,
                             is_keyframe: pic_out.b_keyframe != 0,
-                        },
+                        }),
                     }))
                 }
             }
@@ -232,13 +232,13 @@ mod test {
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
             };
-            if let Some(mut output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
-                encoded.append(&mut output.encoded_frame.data);
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
         }
-        while let Some(mut output) = encoder.flush().unwrap() {
-            encoded.append(&mut output.encoded_frame.data);
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
             encoded_frames += 1;
         }
 
@@ -278,7 +278,7 @@ mod test {
                 samples: vec![y, u.clone(), v.clone()],
             };
             if let Some(output) = encoder.encode(frame, EncodedFrameType::Key).unwrap() {
-                assert!(output.encoded_frame.is_keyframe);
+                assert!(output.encoded_frame.expect("frame is not dropped").is_keyframe);
             }
         }
     }

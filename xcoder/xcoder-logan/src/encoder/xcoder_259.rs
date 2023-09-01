@@ -274,10 +274,10 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
                         };
                         self.output_frames.push_back(VideoEncoderOutput {
                             raw_frame,
-                            encoded_frame: EncodedVideoFrame {
+                            encoded_frame: Some(EncodedVideoFrame {
                                 data,
                                 is_keyframe: self.encoded_frame.is_key_frame(),
-                            },
+                            }),
                         });
                         self.encoded_frame.parameter_sets = None;
                         break;

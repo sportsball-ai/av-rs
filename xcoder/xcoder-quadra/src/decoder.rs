@@ -475,13 +475,13 @@ pub mod test {
         let mut encoded = vec![];
 
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
-            if let Some(mut output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
-                encoded.append(&mut output.encoded_frame.data);
+            if let Some(output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
         }
-        while let Some(mut output) = encoder.flush().unwrap() {
-            encoded.append(&mut output.encoded_frame.data);
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
             encoded_frames += 1;
         }
 

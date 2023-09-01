@@ -49,7 +49,7 @@ impl DecompressionSession {
             tx.send(if image_buffer.is_null() {
                 Err(status.into())
             } else {
-                result(status.into()).map(|_| unsafe { ImageBuffer::with_cf_type_ref(image_buffer as _) })
+                result(status.into()).map(|_| unsafe { ImageBuffer::from_get_rule(image_buffer as _) })
             })
             .unwrap();
         }));

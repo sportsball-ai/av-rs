@@ -1,6 +1,6 @@
 use super::sys;
 use av_traits::EncodedFrameType;
-use core_foundation::{result, Boolean, CFType, Dictionary, MutableDictionary, OSStatus};
+use core_foundation::{result, Boolean, CFType, Dictionary, MutableDictionary, OSStatus, StringRef};
 use core_media::{SampleBuffer, Time, VideoCodecType};
 use core_video::ImageBuffer;
 use std::{
@@ -15,7 +15,8 @@ struct CallbackContext<C> {
 }
 
 pub struct CompressionSessionOutputFrame<C> {
-    pub sample_buffer: SampleBuffer,
+    /// The encoded frame, or `None` if it was dropped.
+    pub sample_buffer: Option<SampleBuffer>,
     pub context: C,
 }
 
@@ -55,14 +56,14 @@ impl<C: Send> CompressionSession<C> {
         ) {
             let ctx = &*(output_callback_ref_con as *mut CallbackContext<C>);
             let frame_context = *Box::<C>::from_raw(source_frame_ref_con as *mut C);
-            let _ = ctx.frames.send(if sample_buffer.is_null() {
-                Err(status.into())
-            } else {
-                result(status.into()).map(|_| CompressionSessionOutputFrame {
-                    sample_buffer: SampleBuffer::with_cf_type_ref(sample_buffer as _),
-                    context: frame_context,
-                })
-            });
+            let _ = ctx.frames.send(result(status.into()).map(|_| CompressionSessionOutputFrame {
+                sample_buffer: if sample_buffer.is_null() {
+                    None
+                } else {
+                    Some(SampleBuffer::from_get_rule(sample_buffer as _))
+                },
+                context: frame_context,
+            }));
         }
 
         let mut sess = std::ptr::null_mut();
@@ -96,6 +97,10 @@ impl<C: Send> CompressionSession<C> {
 
     pub fn set_property<V: CFType>(&mut self, key: sys::CFStringRef, value: V) -> Result<(), OSStatus> {
         unsafe { result(sys::VTSessionSetProperty(self.inner.0 as _, key as _, value.cf_type_ref()).into()) }
+    }
+
+    pub fn set_property_str<V: CFType>(&mut self, key: &'static str, value: V) -> Result<(), OSStatus> {
+        unsafe { result(sys::VTSessionSetProperty(self.inner.0 as _, StringRef::from_static(key).cf_type_ref() as _, value.cf_type_ref()).into()) }
     }
 
     pub fn prepare_to_encode_frames(&mut self) -> Result<(), OSStatus> {

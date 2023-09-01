@@ -89,17 +89,42 @@ impl VideoFormatDescription {
             Ok(Self(ret))
         }
     }
+
+    /// Constructs a format description from H.265 parameter sets: typically one each of SPS,
+    /// PPS, and VPS. They should consist of the raw NALU data, with emulation prevention bytes
+    /// present, but no start code or length prefix. The NAL unit header length parameter
+    /// corresponds to the length prefix size used for access unit NALUs (typically 4).
+    pub fn with_hevc_parameter_sets(parameter_sets: &[&[u8]], nal_unit_header_length: usize) -> Result<Self, OSStatus> {
+        unsafe {
+            let mut ret = std::ptr::null();
+            let pointers: Vec<_> = parameter_sets.iter().map(|&ps| ps.as_ptr()).collect();
+            let sizes: Vec<_> = parameter_sets.iter().map(|ps| ps.len()).collect();
+            result(
+                sys::CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                    std::ptr::null_mut(),
+                    parameter_sets.len() as _,
+                    pointers.as_ptr(),
+                    sizes.as_ptr(),
+                    nal_unit_header_length as _,
+                    std::ptr::null(),
+                    &mut ret as _,
+                )
+                .into(),
+            )?;
+            Ok(Self(ret))
+        }
+    }
 }
 
 impl From<VideoFormatDescription> for FormatDescription {
     fn from(desc: VideoFormatDescription) -> Self {
-        unsafe { Self::with_cf_type_ref(desc.0 as _) }
+        unsafe { Self::from_get_rule(desc.0 as _) }
     }
 }
 
 impl From<&VideoFormatDescription> for FormatDescription {
     fn from(desc: &VideoFormatDescription) -> Self {
-        unsafe { Self::with_cf_type_ref(desc.0 as _) }
+        unsafe { Self::from_get_rule(desc.0 as _) }
     }
 }
 
