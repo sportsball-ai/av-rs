@@ -200,7 +200,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                     if let Some(payload) = p.payload.as_ref() {
                         pes_packet_header = Some(pes::PacketHeader::decode(payload)?.0);
                         segment.pts = pes_packet_header.as_ref().and_then(|h| h.optional_header.as_ref()).and_then(|h| h.pts);
-                        current_segment_pts = segment.pts.clone();
+                        current_segment_pts = segment.pts;
                     }
                 }
 
