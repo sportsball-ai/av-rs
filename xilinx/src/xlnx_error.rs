@@ -18,6 +18,8 @@ pub struct XlnxError {
     pub message: String,
 }
 
+impl std::error::Error for XlnxError {}
+
 impl XlnxError {
     pub fn new(xma_error: i32, message: Option<String>) -> Self {
         const TRY_AGAIN: i32 = XMA_TRY_AGAIN as i32;
