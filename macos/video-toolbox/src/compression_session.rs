@@ -87,23 +87,37 @@ impl<C: Send> CompressionSession<C> {
             }
             .into(),
         )?;
-        Ok(Self {
+        if tracing::event_enabled!(tracing::Level::TRACE) {
+            let supported_props = unsafe {
+                let mut out = std::ptr::null_mut();
+                result(sys::VTSessionCopySupportedPropertyDictionary(sess as _, &mut out as *mut _ as _).into())?;
+                Dictionary::from_create_rule(out)
+            };
+            tracing::trace!(?supported_props, "created session");
+        }
+        let self_ = Self {
             inner: CompressionSessionInner(sess),
             frames: rx,
             _callback_context: callback_context,
             _frame_context: PhantomData,
-        })
+        };
+        Ok(self_)
     }
 
-    pub fn set_property<V: CFType>(&mut self, key: sys::CFStringRef, value: V) -> Result<(), OSStatus> {
+    pub fn set_property<V: CFType + std::fmt::Debug>(&mut self, key: sys::CFStringRef, value: V) -> Result<(), OSStatus> {
+        if tracing::event_enabled!(tracing::Level::TRACE) {
+            tracing::trace!(key = %unsafe { StringRef::from_get_rule(key as _) }, ?value, "setting property");
+        }
         unsafe { result(sys::VTSessionSetProperty(self.inner.0 as _, key as _, value.cf_type_ref()).into()) }
     }
 
-    pub fn set_property_str<V: CFType>(&mut self, key: &'static str, value: V) -> Result<(), OSStatus> {
+    pub fn set_property_str<V: CFType + std::fmt::Debug>(&mut self, key: &'static str, value: V) -> Result<(), OSStatus> {
+        tracing::trace!(%key, ?value, "setting property");
         unsafe { result(sys::VTSessionSetProperty(self.inner.0 as _, StringRef::from_static(key).cf_type_ref() as _, value.cf_type_ref()).into()) }
     }
 
     pub fn prepare_to_encode_frames(&mut self) -> Result<(), OSStatus> {
+        tracing::trace!(session = ?self.inner, "preparing to encode frames");
         unsafe { result(sys::VTCompressionSessionPrepareToEncodeFrames(self.inner.0).into()) }
     }
 
