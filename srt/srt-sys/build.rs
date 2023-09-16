@@ -13,6 +13,7 @@ fn main() {
                 arch => arch,
             },
         );
+        build.define("USE_OPENSSL_PC", "OFF");
         build.define("OPENSSL_INCLUDE_DIR", format!("{}/vendor/openssl/include", env!("CARGO_MANIFEST_DIR")));
         build.define(
             "OPENSSL_CRYPTO_LIBRARY",
