@@ -13,6 +13,7 @@ av-traits = { path = "../../av-traits" }
 core-foundation = { path = "../core-foundation" }
 core-media = { path = "../core-media" }
 core-video = { path = "../core-video" }
+tracing = "0.1.37"
 
 [dev-dependencies]
 h264 = { path = "../../h264" }

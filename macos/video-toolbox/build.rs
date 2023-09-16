@@ -15,6 +15,7 @@ fn main() {
             .allowlist_function("VTCopySupportedPropertyDictionaryForEncoder")
             .allowlist_function("VTCopyVideoEncoderList")
             .allowlist_function("VTDecompressionSession.+")
+            .allowlist_function("VTSessionCopySupportedPropertyDictionary")
             .allowlist_function("VTSessionSetProperty")
             .allowlist_var("kCMTime.+")
             .allowlist_var("kCVPixelFormatType_.+")
