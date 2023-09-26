@@ -5,6 +5,7 @@ use mpeg2::{
     temi::TEMITimelineDescriptor,
     ts::{Packet, PACKET_LENGTH},
 };
+use pretty_hex::PrettyHex;
 use std::{fmt, io, time::Duration};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -28,7 +29,13 @@ pub struct SegmenterConfig {
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-    Mpeg2Decode(mpeg2::DecodeError),
+    Mpeg2TsDecode {
+        /// The position of the packet's first byte within the original/unsegmented stream.
+        packet_pos: usize,
+        inner: mpeg2::DecodeError,
+        pkt: Vec<u8>,
+    },
+    Mpeg2PesDecode(mpeg2::DecodeError),
     Other(Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -38,7 +45,14 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Io(e) => write!(f, "io error: {}", e),
-            Self::Mpeg2Decode(e) => write!(f, "mpeg2 decode error: {}", e),
+            Self::Mpeg2TsDecode { packet_pos, inner, pkt } => {
+                write!(
+                    f,
+                    "unable to decode packet starting at byte {packet_pos}: {inner}\n{pkt_hex:?}",
+                    pkt_hex = pkt.hex_dump()
+                )
+            }
+            Self::Mpeg2PesDecode(e) => write!(f, "pes decode error: {}", e),
             Self::Other(e) => e.fmt(f),
         }
     }
@@ -47,12 +61,6 @@ impl fmt::Display for Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         Self::Io(e)
-    }
-}
-
-impl From<mpeg2::DecodeError> for Error {
-    fn from(e: mpeg2::DecodeError) -> Self {
-        Self::Mpeg2Decode(e)
     }
 }
 
@@ -71,6 +79,9 @@ pub struct Segmenter<S: SegmentStorage> {
     streams_before_segment: Vec<StreamInfo>,
     previous_segment: Option<CurrentSegment<S::Segment>>,
     previous_segment_info: Option<SegmentInfo>,
+
+    /// Current byte position in the overall stream.
+    pos: usize,
 }
 
 impl<S: SegmentStorage> Segmenter<S> {
@@ -84,6 +95,7 @@ impl<S: SegmentStorage> Segmenter<S> {
             streams_before_segment: Vec::new(),
             previous_segment: None,
             previous_segment_info: None,
+            pos: 0,
         }
     }
 
@@ -103,7 +115,11 @@ impl<S: SegmentStorage> Segmenter<S> {
         }
 
         for buf in buf.chunks(PACKET_LENGTH) {
-            let p = Packet::decode(buf)?;
+            let p = Packet::decode(buf).map_err(|e| Error::Mpeg2TsDecode {
+                packet_pos: self.pos,
+                inner: e,
+                pkt: buf.to_owned(),
+            })?;
             self.analyzer.handle_packet(&p)?;
 
             if let Some(af) = &p.adaptation_field {
@@ -178,10 +194,10 @@ impl<S: SegmentStorage> Segmenter<S> {
                 if !af.private_data_bytes.is_empty() {
                     // error out if the private data in a MPEG-TS packet is not in the beginning of PES
                     if self.analyzer.is_pes(p.packet_id) && !p.payload_unit_start_indicator {
-                        return Err(Error::Mpeg2Decode(mpeg2::DecodeError::new("private data is not in the beginning of PES.")));
+                        return Err(Error::Mpeg2PesDecode(mpeg2::DecodeError::new("private data is not in the beginning of PES.")));
                     }
                     if let Some(payload) = p.payload.as_ref() {
-                        let (header, _) = pes::PacketHeader::decode(payload)?;
+                        let (header, _) = pes::PacketHeader::decode(payload).map_err(Error::Mpeg2PesDecode)?;
                         if let Some(pts) = header.optional_header.as_ref().and_then(|h| h.pts) {
                             match self.analyzer.stream(p.packet_id) {
                                 Some(analyzer::Stream::AVCVideo { .. }) | Some(analyzer::Stream::HEVCVideo { .. }) => {
@@ -230,7 +246,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                 if segment.pts.is_none() && self.analyzer.is_pes(p.packet_id) && p.payload_unit_start_indicator {
                     if pes_packet_header.is_none() {
                         pes_packet_header = if let Some(payload) = p.payload {
-                            let (header, _) = pes::PacketHeader::decode(&payload)?;
+                            let (header, _) = pes::PacketHeader::decode(&payload).map_err(Error::Mpeg2PesDecode)?;
                             Some(header)
                         } else {
                             None
@@ -265,6 +281,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                 segment.segment.write_all(buf).await?;
                 segment.bytes_written += buf.len();
             }
+            self.pos += buf.len();
         }
 
         Ok(())
