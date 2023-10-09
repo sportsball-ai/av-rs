@@ -215,6 +215,9 @@ impl Stream {
 
                                 let mut pic_timings = vec![];
                                 for message in sei.sei_message {
+                                    if message.payload_type != h264::SEI_PAYLOAD_TYPE_PIC_TIMING {
+                                        continue;
+                                    }
                                     let mut bs = h264::Bitstream::new(message.payload);
                                     let timing = h264::PicTiming::decode(&mut bs, vui_params)?;
                                     pic_timings.extend_from_slice(timing.timecodes.as_slice());
