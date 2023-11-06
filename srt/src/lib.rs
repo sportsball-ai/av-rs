@@ -342,11 +342,11 @@ fn to_sockaddr(addr: &SocketAddr) -> (sys::sockaddr_storage, sys::socklen_t) {
     (storage, socklen as _)
 }
 
-pub trait ListenerCallback {
+pub trait ListenerCallback: Send + Sync {
     fn callback(&self, stream_id: Option<&str>) -> ListenerCallbackAction;
 }
 
-impl<T: Fn(Option<&str>) -> ListenerCallbackAction> ListenerCallback for T {
+impl<T: Fn(Option<&str>) -> ListenerCallbackAction + Send + Sync> ListenerCallback for T {
     fn callback(&self, stream_id: Option<&str>) -> ListenerCallbackAction {
         (*self)(stream_id)
     }
