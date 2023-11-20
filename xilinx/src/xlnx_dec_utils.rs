@@ -15,12 +15,12 @@ pub struct XlnxDecBuffer<'a> {
 }
 
 pub struct XlnxDecoderXrmCtx {
-    pub xrm_reserve_id: u64,
-    pub device_id: i32,
+    pub xrm_reserve_id: Option<u64>,
+    pub device_id: Option<u64>,
     pub dec_load: i32,
     pub decode_res_in_use: bool,
     pub xrm_ctx: xrmContext,
-    pub cu_list_res: xrmCuListResource,
+    pub cu_list_res: xrmCuListResourceV2,
 }
 
 /// Calculates the decoder load uing the xrmU30Dec plugin.
@@ -67,105 +67,58 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
     Ok(load)
 }
 
-fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, dec_load: i32) -> Result<(), SimpleError> {
-    cu_pool_prop.cuListProp.sameDevice = true;
+fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i32, device_id: Option<u64>) -> Result<(), SimpleError> {
     cu_pool_prop.cuListNum = 1;
+
+    let mut device_info = 0;
+
+    if let Some(device_id) = device_id {
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+    }
 
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelName, "decoder")?;
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelAlias, "DECODER_MPSOC")?;
     cu_pool_prop.cuListProp.cuProps[0].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[0].requestLoad = xrm_precision_1000000_bitmask(dec_load);
+    cu_pool_prop.cuListProp.cuProps[0].deviceInfo = device_info as _;
 
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[1].kernelName, "kernel_vcu_decoder")?;
 
     cu_pool_prop.cuListProp.cuProps[1].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[1].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
+    cu_pool_prop.cuListProp.cuProps[1].deviceInfo = device_info as _;
     // we defined 2 cu requests to the properties.
     cu_pool_prop.cuListProp.cuNum = 2;
 
     Ok(())
 }
 
-pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
-    // a device has already been chosen, there is no need to assign a reserve id.
-    if xlnx_dec_ctx.device_id >= 0 {
-        return Ok(());
-    }
-
-    let mut cu_pool_prop: xrmCuPoolProperty = Default::default();
-    xlnx_fill_dec_pool_props(&mut cu_pool_prop, xlnx_dec_ctx.dec_load)?;
+pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<xrmCuPoolResInforV2, SimpleError> {
+    let mut cu_pool_prop: xrmCuPoolPropertyV2 = Default::default();
+    let mut cu_pool_res_infor: xrmCuPoolResInforV2 = Default::default();
+    xlnx_fill_dec_pool_props(&mut cu_pool_prop, xlnx_dec_ctx.dec_load, xlnx_dec_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNum(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
         if num_cu_pool <= 0 {
             bail!("no decoder resources available for allocation")
         }
 
-        xlnx_dec_ctx.xrm_reserve_id = xrmCuPoolReserve(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
-        if xlnx_dec_ctx.xrm_reserve_id == 0 {
+        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop, &mut cu_pool_res_infor);
+        if xrm_reserve_id == 0 {
             bail!("failed to reserve decode cu pool")
         }
+        xlnx_dec_ctx.xrm_reserve_id = Some(xrm_reserve_id);
     }
 
-    Ok(())
+    Ok(cu_pool_res_infor)
 }
 
-/// Allocates decoder CU based on device_id
-fn xlnx_dec_cu_alloc_device_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
-    let mut decode_cu_hw_prop: xrmCuProperty = Default::default();
-    let mut decode_cu_sw_prop: xrmCuProperty = Default::default();
-
-    strcpy_to_arr_i8(&mut decode_cu_hw_prop.kernelName, "decoder")?;
-    strcpy_to_arr_i8(&mut decode_cu_hw_prop.kernelAlias, "DECODER_MPSOC")?;
-    decode_cu_hw_prop.devExcl = false;
-    decode_cu_hw_prop.requestLoad = xrm_precision_1000000_bitmask(xlnx_dec_ctx.dec_load);
-
-    strcpy_to_arr_i8(&mut decode_cu_sw_prop.kernelName, "kernel_vcu_decoder")?;
-    decode_cu_sw_prop.devExcl = false;
-    decode_cu_sw_prop.requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-
-    let ret = unsafe {
-        xrmCuAllocFromDev(
-            xlnx_dec_ctx.xrm_ctx,
-            xlnx_dec_ctx.device_id,
-            &mut decode_cu_hw_prop,
-            &mut xlnx_dec_ctx.cu_list_res.cuResources[0],
-        )
-    };
-    if ret <= XRM_ERROR {
-        bail!("xrm failed to allocate decoder resources on device: {}", xlnx_dec_ctx.device_id);
-    }
-
-    let ret = unsafe {
-        xrmCuAllocFromDev(
-            xlnx_dec_ctx.xrm_ctx,
-            xlnx_dec_ctx.device_id,
-            &mut decode_cu_sw_prop,
-            &mut xlnx_dec_ctx.cu_list_res.cuResources[1],
-        )
-    };
-    if ret <= XRM_ERROR {
-        bail!("xrm failed to allocate decoder resources on device: {}", xlnx_dec_ctx.device_id);
-    }
-    xlnx_dec_ctx.decode_res_in_use = true;
-
-    // Set XMA plugin shared object and device index.
-    xma_dec_props.plugin_lib = xlnx_dec_ctx.cu_list_res.cuResources[0].kernelPluginFileName.as_mut_ptr();
-    xma_dec_props.dev_index = xlnx_dec_ctx.cu_list_res.cuResources[0].deviceId;
-
-    // Select ddr bank based on xclbin metadata.
-    xma_dec_props.ddr_bank_index = -1;
-    xma_dec_props.cu_index = xlnx_dec_ctx.cu_list_res.cuResources[1].cuId;
-    xma_dec_props.channel_id = xlnx_dec_ctx.cu_list_res.cuResources[1].channelId;
-
-    Ok(())
-}
-
-/// Allocates decoder CU based on reserve_id
-fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
+/// Allocates decoder CU
+fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm decoder
-
-    let mut decode_cu_list_prop = xrmCuListProperty {
+    let mut decode_cu_list_prop = xrmCuListPropertyV2 {
         cuNum: 2,
         ..Default::default()
     };
@@ -174,15 +127,44 @@ fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_d
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelAlias, "DECODER_MPSOC")?;
     decode_cu_list_prop.cuProps[0].devExcl = false;
     decode_cu_list_prop.cuProps[0].requestLoad = xrm_precision_1000000_bitmask(xlnx_dec_ctx.dec_load);
-    decode_cu_list_prop.cuProps[0].poolId = xlnx_dec_ctx.xrm_reserve_id;
 
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[1].kernelName, "kernel_vcu_decoder")?;
     decode_cu_list_prop.cuProps[1].devExcl = false;
     decode_cu_list_prop.cuProps[1].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-    decode_cu_list_prop.cuProps[1].poolId = xlnx_dec_ctx.xrm_reserve_id;
 
-    if unsafe { xrmCuListAlloc(xlnx_dec_ctx.xrm_ctx, &mut decode_cu_list_prop, &mut xlnx_dec_ctx.cu_list_res) } != 0 {
-        bail!("failed to allocate decode cu list from reserve id {}", xlnx_dec_ctx.xrm_reserve_id)
+    match (xlnx_dec_ctx.device_id, xlnx_dec_ctx.xrm_reserve_id) {
+        (Some(device_id), Some(xrm_reserve_id)) => {
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+                | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+            decode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
+            decode_cu_list_prop.cuProps[0].poolId = xrm_reserve_id;
+            decode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+            decode_cu_list_prop.cuProps[1].poolId = xrm_reserve_id;
+        }
+        (Some(device_id), None) => {
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+                | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+            decode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
+            decode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+        }
+        (None, Some(reserve_id)) => {
+            decode_cu_list_prop.cuProps[0].poolId = reserve_id;
+            decode_cu_list_prop.cuProps[1].poolId = reserve_id;
+        }
+        (None, None) => {
+            // use the zero indexed device as the default if no device or reserve_id have been provided
+            let device_info = (XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT;
+            decode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
+            decode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+        }
+    }
+
+    if unsafe { xrmCuListAllocV2(xlnx_dec_ctx.xrm_ctx, &mut decode_cu_list_prop, &mut xlnx_dec_ctx.cu_list_res) } != XRM_SUCCESS as _ {
+        bail!(
+            "failed to allocate decode cu list from reserve id {:?} and device id {:?}",
+            xlnx_dec_ctx.xrm_reserve_id,
+            xlnx_dec_ctx.device_id
+        );
     }
 
     xlnx_dec_ctx.decode_res_in_use = true;
@@ -195,17 +177,6 @@ fn xlnx_dec_cu_alloc_reserve_id(xma_dec_props: &mut XmaDecoderProperties, xlnx_d
     xma_dec_props.ddr_bank_index = -1;
     xma_dec_props.cu_index = xlnx_dec_ctx.cu_list_res.cuResources[1].cuId;
     xma_dec_props.channel_id = xlnx_dec_ctx.cu_list_res.cuResources[1].channelId;
-
-    Ok(())
-}
-
-/// Allocates decoder CU
-fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
-    if xlnx_dec_ctx.device_id >= 0 {
-        xlnx_dec_cu_alloc_device_id(xma_dec_props, xlnx_dec_ctx)?;
-    } else {
-        xlnx_dec_cu_alloc_reserve_id(xma_dec_props, xlnx_dec_ctx)?;
-    }
 
     Ok(())
 }
@@ -231,8 +202,11 @@ impl Drop for XlnxDecoderXrmCtx {
             return;
         }
         unsafe {
+            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
+            }
             if self.decode_res_in_use {
-                xrmCuListRelease(self.xrm_ctx, &mut self.cu_list_res);
+                let _ = xrmCuListReleaseV2(self.xrm_ctx, &mut self.cu_list_res);
             }
         }
     }

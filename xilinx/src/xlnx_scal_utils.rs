@@ -7,13 +7,13 @@ use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask};
 const SCAL_PLUGIN_NAME: &[u8] = b"xrmU30ScalPlugin\0";
 
 pub struct XlnxScalerXrmCtx {
-    pub xrm_reserve_id: u64,
-    pub device_id: i32,
+    pub xrm_reserve_id: Option<u64>,
+    pub device_id: Option<u64>,
     pub scal_load: i32,
     pub scal_res_in_use: bool,
     pub num_outputs: i32,
     pub xrm_ctx: xrmContext,
-    pub cu_res: xrmCuResource,
+    pub cu_res: xrmCuResourceV2,
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -59,41 +59,45 @@ pub fn xlnx_calc_scal_load(xrm_ctx: xrmContext, xma_scal_props: *mut XmaScalerPr
     Ok(load)
 }
 
-fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, scal_load: i32) -> Result<(), SimpleError> {
-    cu_pool_prop.cuListProp.sameDevice = true;
+fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, scal_load: i32, device_id: Option<u64>) -> Result<(), SimpleError> {
     cu_pool_prop.cuListNum = 1;
+
+    let mut device_info = 0;
+
+    if let Some(device_id) = device_id {
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+    }
 
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelName, "scaler")?;
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelAlias, "SCALER_MPSOC")?;
     cu_pool_prop.cuListProp.cuProps[0].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[0].requestLoad = xrm_precision_1000000_bitmask(scal_load);
+    cu_pool_prop.cuListProp.cuProps[0].deviceInfo = device_info as _;
     cu_pool_prop.cuListProp.cuNum = 1;
 
     Ok(())
 }
 
-pub fn xlnx_reserve_scal_resource(xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<(), SimpleError> {
-    // a device has already been chosen, there is no need to assign a reserve id
-    if xlnx_scal_ctx.device_id >= 0 {
-        return Ok(());
-    }
-
-    let mut cu_pool_prop: xrmCuPoolProperty = Default::default();
-    xlnx_fill_scal_pool_props(&mut cu_pool_prop, xlnx_scal_ctx.scal_load)?;
+pub fn xlnx_reserve_scal_resource(xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<xrmCuPoolResInforV2, SimpleError> {
+    let mut cu_pool_prop: xrmCuPoolPropertyV2 = Default::default();
+    let mut cu_pool_res_infor: xrmCuPoolResInforV2 = Default::default();
+    xlnx_fill_scal_pool_props(&mut cu_pool_prop, xlnx_scal_ctx.scal_load, xlnx_scal_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNum(xlnx_scal_ctx.xrm_ctx, &mut cu_pool_prop);
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_scal_ctx.xrm_ctx, &mut cu_pool_prop);
         if num_cu_pool == 0 {
             bail!("no scaler resources available for allocation")
         }
 
-        xlnx_scal_ctx.xrm_reserve_id = xrmCuPoolReserve(xlnx_scal_ctx.xrm_ctx, &mut cu_pool_prop);
-        if xlnx_scal_ctx.xrm_reserve_id == 0 {
+        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_scal_ctx.xrm_ctx, &mut cu_pool_prop, &mut cu_pool_res_infor);
+        if xrm_reserve_id == 0 {
             bail!("failed to reserve scaler cu pool")
         }
+        xlnx_scal_ctx.xrm_reserve_id = Some(xrm_reserve_id);
     }
 
-    Ok(())
+    Ok(cu_pool_res_infor)
 }
 
 pub(crate) fn xlnx_create_scal_session(
@@ -112,25 +116,40 @@ pub(crate) fn xlnx_create_scal_session(
 }
 
 fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<(), SimpleError> {
-    let mut scaler_cu_prop: xrmCuProperty = Default::default();
+    let mut scaler_cu_prop: xrmCuPropertyV2 = Default::default();
 
     strcpy_to_arr_i8(&mut scaler_cu_prop.kernelName, "scaler")?;
     strcpy_to_arr_i8(&mut scaler_cu_prop.kernelAlias, "SCALER_MPSOC")?;
     scaler_cu_prop.devExcl = false;
     scaler_cu_prop.requestLoad = xrm_precision_1000000_bitmask(xlnx_scal_ctx.scal_load);
 
-    let ret: i32;
-    if xlnx_scal_ctx.device_id < 0 {
-        scaler_cu_prop.poolId = xlnx_scal_ctx.xrm_reserve_id;
-        ret = unsafe { xrmCuAlloc(xlnx_scal_ctx.xrm_ctx, &mut scaler_cu_prop, &mut xlnx_scal_ctx.cu_res) };
-    } else {
-        ret = unsafe { xrmCuAllocFromDev(xlnx_scal_ctx.xrm_ctx, xlnx_scal_ctx.device_id, &mut scaler_cu_prop, &mut xlnx_scal_ctx.cu_res) };
+    match (xlnx_scal_ctx.device_id, xlnx_scal_ctx.xrm_reserve_id) {
+        (Some(device_id), Some(xrm_reserve_id)) => {
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+                | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+            scaler_cu_prop.deviceInfo = device_info as _;
+            scaler_cu_prop.poolId = xrm_reserve_id;
+        }
+        (Some(device_id), None) => {
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+                | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+            scaler_cu_prop.deviceInfo = device_info as _;
+        }
+        (None, Some(reserve_id)) => {
+            scaler_cu_prop.poolId = reserve_id;
+        }
+        (None, None) => {
+            // use the zero indexed device as the default if no device or reserve_id have been provided
+            let device_info = (XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT;
+            scaler_cu_prop.deviceInfo = device_info as _;
+        }
     }
-    if ret != XRM_SUCCESS as i32 {
+
+    if unsafe { xrmCuAllocV2(xlnx_scal_ctx.xrm_ctx, &mut scaler_cu_prop, &mut xlnx_scal_ctx.cu_res) } != XRM_SUCCESS as _ {
         bail!(
-            "xrm alloc failed {} to asllocate scaler cu from reserve id {}",
-            ret,
-            xlnx_scal_ctx.xrm_reserve_id
+            "failed to allocate scaler cu from reserve id {:?} and device id {:?}",
+            xlnx_scal_ctx.xrm_reserve_id,
+            xlnx_scal_ctx.device_id
         );
     }
     xlnx_scal_ctx.scal_res_in_use = true;
@@ -152,8 +171,11 @@ impl Drop for XlnxScalerXrmCtx {
             return;
         }
         unsafe {
+            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
+            }
             if self.scal_res_in_use {
-                xrmCuRelease(self.xrm_ctx, &mut self.cu_res);
+                xrmCuReleaseV2(self.xrm_ctx, &mut self.cu_res);
             }
         }
     }
