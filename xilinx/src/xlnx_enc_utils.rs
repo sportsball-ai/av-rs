@@ -7,7 +7,7 @@ const ENC_PLUGIN_NAME: &[u8] = b"xrmU30EncPlugin\0";
 
 pub struct XlnxEncoderXrmCtx {
     pub xrm_reserve_id: Option<u64>,
-    pub device_id: Option<u64>,
+    pub device_id: Option<u32>,
     pub enc_load: i32,
     pub encode_res_in_use: bool,
     pub xrm_ctx: xrmContext,
@@ -58,13 +58,13 @@ pub fn xlnx_calc_enc_load(xrm_ctx: xrmContext, xma_enc_props: *mut XmaEncoderPro
     Ok(load)
 }
 
-fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i32, enc_load: i32, device_id: Option<u64>) -> Result<(), SimpleError> {
+fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i32, enc_load: i32, device_id: Option<u32>) -> Result<(), SimpleError> {
     cu_pool_prop.cuListNum = 1;
     let mut cu_num = 0;
     let mut device_info = 0;
 
     if let Some(device_id) = device_id {
-        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
             | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
     }
 
@@ -72,7 +72,7 @@ fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "ENCODER_MPSOC")?;
     cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(enc_load);
-    cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as _;
+    cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as u64;
 
     cu_num += 1;
 
@@ -81,7 +81,7 @@ fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i
 
         cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-        cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as _;
+        cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as u64;
         cu_num += 1
     }
     // we defined multiple cu requests to the properties.
@@ -131,28 +131,25 @@ fn xlnx_enc_cu_alloc(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mu
 
     match (xlnx_enc_ctx.device_id, xlnx_enc_ctx.xrm_reserve_id) {
         (Some(device_id), Some(xrm_reserve_id)) => {
-            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
                 | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
-            encode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
+            encode_cu_list_prop.cuProps[0].deviceInfo = device_info;
             encode_cu_list_prop.cuProps[0].poolId = xrm_reserve_id;
-            encode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+            encode_cu_list_prop.cuProps[1].deviceInfo = device_info;
             encode_cu_list_prop.cuProps[1].poolId = xrm_reserve_id;
         }
         (Some(device_id), None) => {
-            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
                 | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
-            encode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
-            encode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+            encode_cu_list_prop.cuProps[0].deviceInfo = device_info;
+            encode_cu_list_prop.cuProps[1].deviceInfo = device_info;
         }
         (None, Some(reserve_id)) => {
             encode_cu_list_prop.cuProps[0].poolId = reserve_id;
             encode_cu_list_prop.cuProps[1].poolId = reserve_id;
         }
         (None, None) => {
-            // use the zero indexed device as the default if no device or reserve_id have been provided
-            let device_info = (XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT;
-            encode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
-            encode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+            bail!("failed to allocate encode cu list: no device id or reserve id provided");
         }
     }
 

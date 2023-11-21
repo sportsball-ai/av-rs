@@ -12,7 +12,7 @@ pub struct XlnxTranscodeXrmCtx {
     pub xrm_ctx: xrmContext,
     pub transcode_load: XlnxTranscodeLoad,
     pub xrm_reserve_id: Option<u64>,
-    pub device_id: Option<u64>,
+    pub device_id: Option<u32>,
 }
 
 impl XlnxTranscodeXrmCtx {
@@ -54,13 +54,13 @@ pub fn xlnx_calc_transcode_load(
 fn xlnx_fill_transcode_pool_props(
     transcode_cu_pool_prop: &mut xrmCuPoolPropertyV2,
     transcode_load: &XlnxTranscodeLoad,
-    device_id: Option<u64>,
+    device_id: Option<u32>,
 ) -> Result<(), SimpleError> {
     let mut cu_num = 0;
     transcode_cu_pool_prop.cuListNum = 1;
     let mut device_info = 0;
     if let Some(device_id) = device_id {
-        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
             | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
     }
 
@@ -69,13 +69,13 @@ fn xlnx_fill_transcode_pool_props(
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "DECODER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.dec_load);
-        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as _;
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
 
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelName, "kernel_vcu_decoder")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as _;
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
     }
 
@@ -84,7 +84,7 @@ fn xlnx_fill_transcode_pool_props(
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "SCALER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.scal_load);
-        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as _;
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
     }
 
@@ -93,7 +93,7 @@ fn xlnx_fill_transcode_pool_props(
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "ENCODER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.enc_load);
-        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as _;
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
 
         for _ in 0..transcode_load.enc_num {
@@ -101,7 +101,7 @@ fn xlnx_fill_transcode_pool_props(
             strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "")?;
             transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
             transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-            transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as _;
+            transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
             cu_num += 1;
         }
     }

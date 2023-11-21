@@ -16,7 +16,7 @@ pub struct XlnxDecBuffer<'a> {
 
 pub struct XlnxDecoderXrmCtx {
     pub xrm_reserve_id: Option<u64>,
-    pub device_id: Option<u64>,
+    pub device_id: Option<u32>,
     pub dec_load: i32,
     pub decode_res_in_use: bool,
     pub xrm_ctx: xrmContext,
@@ -67,13 +67,13 @@ pub fn xlnx_calc_dec_load(xrm_ctx: xrmContext, xma_dec_props: *mut XmaDecoderPro
     Ok(load)
 }
 
-fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i32, device_id: Option<u64>) -> Result<(), SimpleError> {
+fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i32, device_id: Option<u32>) -> Result<(), SimpleError> {
     cu_pool_prop.cuListNum = 1;
 
     let mut device_info = 0;
 
     if let Some(device_id) = device_id {
-        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
             | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
     }
 
@@ -81,13 +81,13 @@ fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i3
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[0].kernelAlias, "DECODER_MPSOC")?;
     cu_pool_prop.cuListProp.cuProps[0].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[0].requestLoad = xrm_precision_1000000_bitmask(dec_load);
-    cu_pool_prop.cuListProp.cuProps[0].deviceInfo = device_info as _;
+    cu_pool_prop.cuListProp.cuProps[0].deviceInfo = device_info;
 
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[1].kernelName, "kernel_vcu_decoder")?;
 
     cu_pool_prop.cuListProp.cuProps[1].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[1].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-    cu_pool_prop.cuListProp.cuProps[1].deviceInfo = device_info as _;
+    cu_pool_prop.cuListProp.cuProps[1].deviceInfo = device_info;
     // we defined 2 cu requests to the properties.
     cu_pool_prop.cuListProp.cuNum = 2;
 
@@ -134,28 +134,25 @@ fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mu
 
     match (xlnx_dec_ctx.device_id, xlnx_dec_ctx.xrm_reserve_id) {
         (Some(device_id), Some(xrm_reserve_id)) => {
-            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
                 | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
-            decode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
+            decode_cu_list_prop.cuProps[0].deviceInfo = device_info;
             decode_cu_list_prop.cuProps[0].poolId = xrm_reserve_id;
-            decode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+            decode_cu_list_prop.cuProps[1].deviceInfo = device_info;
             decode_cu_list_prop.cuProps[1].poolId = xrm_reserve_id;
         }
         (Some(device_id), None) => {
-            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
                 | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
-            decode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
-            decode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+            decode_cu_list_prop.cuProps[0].deviceInfo = device_info;
+            decode_cu_list_prop.cuProps[1].deviceInfo = device_info;
         }
         (None, Some(reserve_id)) => {
             decode_cu_list_prop.cuProps[0].poolId = reserve_id;
             decode_cu_list_prop.cuProps[1].poolId = reserve_id;
         }
         (None, None) => {
-            // use the zero indexed device as the default if no device or reserve_id have been provided
-            let device_info = (XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT;
-            decode_cu_list_prop.cuProps[0].deviceInfo = device_info as _;
-            decode_cu_list_prop.cuProps[1].deviceInfo = device_info as _;
+            bail!("failed to allocate decode cu list: no device id or reserve id provided");
         }
     }
 

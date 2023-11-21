@@ -8,7 +8,7 @@ const SCAL_PLUGIN_NAME: &[u8] = b"xrmU30ScalPlugin\0";
 
 pub struct XlnxScalerXrmCtx {
     pub xrm_reserve_id: Option<u64>,
-    pub device_id: Option<u64>,
+    pub device_id: Option<u32>,
     pub scal_load: i32,
     pub scal_res_in_use: bool,
     pub num_outputs: i32,
@@ -59,13 +59,13 @@ pub fn xlnx_calc_scal_load(xrm_ctx: xrmContext, xma_scal_props: *mut XmaScalerPr
     Ok(load)
 }
 
-fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, scal_load: i32, device_id: Option<u64>) -> Result<(), SimpleError> {
+fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, scal_load: i32, device_id: Option<u32>) -> Result<(), SimpleError> {
     cu_pool_prop.cuListNum = 1;
 
     let mut device_info = 0;
 
     if let Some(device_id) = device_id {
-        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
             | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
     }
 
@@ -125,13 +125,13 @@ fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &
 
     match (xlnx_scal_ctx.device_id, xlnx_scal_ctx.xrm_reserve_id) {
         (Some(device_id), Some(xrm_reserve_id)) => {
-            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
                 | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
             scaler_cu_prop.deviceInfo = device_info as _;
             scaler_cu_prop.poolId = xrm_reserve_id;
         }
         (Some(device_id), None) => {
-            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT)
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
                 | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
             scaler_cu_prop.deviceInfo = device_info as _;
         }
@@ -139,9 +139,7 @@ fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &
             scaler_cu_prop.poolId = reserve_id;
         }
         (None, None) => {
-            // use the zero indexed device as the default if no device or reserve_id have been provided
-            let device_info = (XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT;
-            scaler_cu_prop.deviceInfo = device_info as _;
+            bail!("failed to allocate scaler cu: no device id or reserve id provided");
         }
     }
 
