@@ -28,7 +28,7 @@ impl XlnxScaler {
                     ..Default::default()
                 };
 
-                let mut xma_frame = xma_frame_alloc(&mut frame_props, true);
+                let xma_frame = xma_frame_alloc(&mut frame_props, true);
 
                 // Loop through the planes. no buffer shouold be allocated yet.
                 // Since this will be used in a pipeline, xvbm will allocate the buffers.
@@ -143,18 +143,10 @@ mod scaler_tests {
         let mut xma_scal_props = XlnxXmaScalerProperties::from(scal_props);
 
         let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
+        let scal_load = xlnx_calc_scal_load(xrm_ctx, xma_scal_props.as_mut()).unwrap();
+        let mut xlnx_scal_ctx = XlnxScalerXrmCtx::new(xrm_ctx, None, None, scal_load, 3);
 
-        let cu_res: xrmCuResource = Default::default();
-
-        let mut xlnx_scal_ctx = XlnxScalerXrmCtx {
-            xrm_reserve_id: 0,
-            device_id: -1,
-            scal_load: xlnx_calc_scal_load(xrm_ctx, xma_scal_props.as_mut()).unwrap(),
-            scal_res_in_use: false,
-            xrm_ctx,
-            num_outputs: 3,
-            cu_res,
-        };
+        xlnx_reserve_scal_resource(&mut xlnx_scal_ctx).unwrap();
 
         // create xlnx scaler
         let mut scaler = XlnxScaler::new(xma_scal_props.as_mut(), &mut xlnx_scal_ctx).unwrap();

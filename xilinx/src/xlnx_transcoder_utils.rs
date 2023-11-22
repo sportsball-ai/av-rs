@@ -11,7 +11,8 @@ pub struct XlnxTranscodeLoad {
 pub struct XlnxTranscodeXrmCtx {
     pub xrm_ctx: xrmContext,
     pub transcode_load: XlnxTranscodeLoad,
-    pub reserve_idx: u64,
+    pub xrm_reserve_id: Option<u64>,
+    pub device_id: Option<u32>,
 }
 
 impl XlnxTranscodeXrmCtx {
@@ -26,7 +27,8 @@ impl XlnxTranscodeXrmCtx {
                 enc_load: 0,
                 enc_num: 0,
             },
-            reserve_idx: 0,
+            xrm_reserve_id: None,
+            device_id: None,
         }
     }
 }
@@ -36,7 +38,7 @@ pub fn xlnx_calc_transcode_load(
     xma_dec_props: &mut XmaDecoderProperties,
     xma_scal_props: &mut XmaScalerProperties,
     xma_enc_props_list: Vec<&mut XmaEncoderProperties>,
-    transcode_cu_pool_prop: &mut xrmCuPoolProperty,
+    transcode_cu_pool_prop: &mut xrmCuPoolPropertyV2,
 ) -> Result<(), SimpleError> {
     xlnx_transcode_xrm_ctx.transcode_load.dec_load = xlnx_calc_dec_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_dec_props)?;
     xlnx_transcode_xrm_ctx.transcode_load.scal_load = xlnx_calc_scal_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_scal_props)?;
@@ -45,25 +47,35 @@ pub fn xlnx_calc_transcode_load(
         xlnx_transcode_xrm_ctx.transcode_load.enc_num += 1;
     }
 
-    xlnx_fill_transcode_pool_props(transcode_cu_pool_prop, &xlnx_transcode_xrm_ctx.transcode_load)?;
+    xlnx_fill_transcode_pool_props(transcode_cu_pool_prop, &xlnx_transcode_xrm_ctx.transcode_load, xlnx_transcode_xrm_ctx.device_id)?;
     Ok(())
 }
 
-fn xlnx_fill_transcode_pool_props(transcode_cu_pool_prop: &mut xrmCuPoolProperty, transcode_load: &XlnxTranscodeLoad) -> Result<(), SimpleError> {
+fn xlnx_fill_transcode_pool_props(
+    transcode_cu_pool_prop: &mut xrmCuPoolPropertyV2,
+    transcode_load: &XlnxTranscodeLoad,
+    device_id: Option<u32>,
+) -> Result<(), SimpleError> {
     let mut cu_num = 0;
-    transcode_cu_pool_prop.cuListProp.sameDevice = true;
     transcode_cu_pool_prop.cuListNum = 1;
+    let mut device_info = 0;
+    if let Some(device_id) = device_id {
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
+            | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+    }
 
     if transcode_load.dec_load > 0 {
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelName, "decoder")?;
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "DECODER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.dec_load);
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
 
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelName, "kernel_vcu_decoder")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
     }
 
@@ -72,6 +84,7 @@ fn xlnx_fill_transcode_pool_props(transcode_cu_pool_prop: &mut xrmCuPoolProperty
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "SCALER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.scal_load);
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
     }
 
@@ -80,6 +93,7 @@ fn xlnx_fill_transcode_pool_props(transcode_cu_pool_prop: &mut xrmCuPoolProperty
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "ENCODER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.enc_load);
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
 
         for _ in 0..transcode_load.enc_num {
@@ -87,6 +101,7 @@ fn xlnx_fill_transcode_pool_props(transcode_cu_pool_prop: &mut xrmCuPoolProperty
             strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "")?;
             transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
             transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
+            transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
             cu_num += 1;
         }
     }
@@ -100,8 +115,9 @@ pub fn xlnx_reserve_transcode_resource(
     xma_dec_props: &mut XmaDecoderProperties,
     xma_scal_props: &mut XmaScalerProperties,
     xma_enc_props: Vec<&mut XmaEncoderProperties>,
-) -> Result<(), SimpleError> {
-    let mut transcode_cu_pool_prop: xrmCuPoolProperty = Default::default();
+) -> Result<Box<xrmCuPoolResInforV2>, SimpleError> {
+    let mut transcode_cu_pool_prop: Box<xrmCuPoolPropertyV2> = Box::new(Default::default());
+    let mut cu_pool_res_infor: Box<xrmCuPoolResInforV2> = Box::new(Default::default());
     xlnx_calc_transcode_load(
         xlnx_transcode_xrm_ctx,
         xma_dec_props,
@@ -110,17 +126,18 @@ pub fn xlnx_reserve_transcode_resource(
         &mut transcode_cu_pool_prop,
     )?;
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNum(xlnx_transcode_xrm_ctx.xrm_ctx, &mut transcode_cu_pool_prop);
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_transcode_xrm_ctx.xrm_ctx, transcode_cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
             bail!("no xilinx hardware resources avaliable for allocation")
         }
-        xlnx_transcode_xrm_ctx.reserve_idx = xrmCuPoolReserve(xlnx_transcode_xrm_ctx.xrm_ctx, &mut transcode_cu_pool_prop);
-        if xlnx_transcode_xrm_ctx.reserve_idx == 0 {
+        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_transcode_xrm_ctx.xrm_ctx, transcode_cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
+        if xrm_reserve_id == 0 {
             bail!("failed to reserve transcode cu pool")
         }
+        xlnx_transcode_xrm_ctx.xrm_reserve_id = Some(xrm_reserve_id);
     }
 
-    Ok(())
+    Ok(cu_pool_res_infor)
 }
 
 impl Default for XlnxTranscodeXrmCtx {
@@ -135,8 +152,8 @@ impl Drop for XlnxTranscodeXrmCtx {
             return;
         }
         unsafe {
-            if self.reserve_idx != 0 {
-                xrmCuPoolRelinquish(self.xrm_ctx, self.reserve_idx);
+            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
             }
 
             xrmDestroyContext(self.xrm_ctx);

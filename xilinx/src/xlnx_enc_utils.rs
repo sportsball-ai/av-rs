@@ -6,12 +6,25 @@ use std::{ffi::CString, os::raw::c_char, str::from_utf8};
 const ENC_PLUGIN_NAME: &[u8] = b"xrmU30EncPlugin\0";
 
 pub struct XlnxEncoderXrmCtx {
-    pub xrm_reserve_id: u64,
-    pub device_id: i32,
+    pub xrm_reserve_id: Option<u64>,
+    pub device_id: Option<u32>,
     pub enc_load: i32,
-    pub encode_res_in_use: bool,
-    pub xrm_ctx: xrmContext,
-    pub cu_list_res: xrmCuListResource,
+    pub(crate) encode_res_in_use: bool,
+    pub(crate) xrm_ctx: xrmContext,
+    pub(crate) cu_list_res: Box<xrmCuListResourceV2>,
+}
+
+impl XlnxEncoderXrmCtx {
+    pub fn new(xrm_ctx: xrmContext, device_id: Option<u32>, reserve_id: Option<u64>, enc_load: i32) -> Self {
+        Self {
+            xrm_reserve_id: reserve_id,
+            device_id,
+            enc_load,
+            encode_res_in_use: false,
+            xrm_ctx,
+            cu_list_res: Box::new(Default::default()),
+        }
+    }
 }
 
 /// Calculates the encoder load uing the xrmU30Enc plugin.
@@ -58,15 +71,22 @@ pub fn xlnx_calc_enc_load(xrm_ctx: xrmContext, xma_enc_props: *mut XmaEncoderPro
     Ok(load)
 }
 
-fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, enc_count: i32, enc_load: i32) -> Result<(), SimpleError> {
-    cu_pool_prop.cuListProp.sameDevice = true;
+fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i32, enc_load: i32, device_id: Option<u32>) -> Result<(), SimpleError> {
     cu_pool_prop.cuListNum = 1;
     let mut cu_num = 0;
+    let mut device_info = 0;
+
+    if let Some(device_id) = device_id {
+        device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
+            | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+    }
 
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[cu_num].kernelName, "encoder")?;
     strcpy_to_arr_i8(&mut cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "ENCODER_MPSOC")?;
     cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
     cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(enc_load);
+    cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as u64;
+
     cu_num += 1;
 
     for _ in 0..enc_count {
@@ -74,111 +94,84 @@ fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolProperty, enc_count: i32
 
         cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
         cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
+        cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info as u64;
         cu_num += 1
     }
-    // we defined 2 cu requests to the properties.
+    // we defined multiple cu requests to the properties.
     cu_pool_prop.cuListProp.cuNum = cu_num as i32;
 
     Ok(())
 }
 
-pub fn xlnx_reserve_enc_resource(xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<(), SimpleError> {
-    // a device has already been chosen, there is no need to assign a reserve id.
-    if xlnx_enc_ctx.device_id >= 0 {
-        return Ok(());
-    }
-
+pub fn xlnx_reserve_enc_resource(xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<Box<xrmCuPoolResInforV2>, SimpleError> {
     let enc_count = 1;
-    let mut cu_pool_prop: xrmCuPoolProperty = Default::default();
-    xlnx_fill_enc_pool_props(&mut cu_pool_prop, enc_count, xlnx_enc_ctx.enc_load)?;
+    let mut cu_pool_prop: Box<xrmCuPoolPropertyV2> = Box::new(Default::default());
+    let mut cu_pool_res_infor: Box<xrmCuPoolResInforV2> = Box::new(Default::default());
+    xlnx_fill_enc_pool_props(&mut cu_pool_prop, enc_count, xlnx_enc_ctx.enc_load, xlnx_enc_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNum(xlnx_enc_ctx.xrm_ctx, &mut cu_pool_prop);
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_enc_ctx.xrm_ctx, cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
             bail!("no encoder resources avaliable for allocation")
         }
 
-        xlnx_enc_ctx.xrm_reserve_id = xrmCuPoolReserve(xlnx_enc_ctx.xrm_ctx, &mut cu_pool_prop);
-        if xlnx_enc_ctx.xrm_reserve_id == 0 {
+        let xrm_reserve_id: u64 = xrmCuPoolReserveV2(xlnx_enc_ctx.xrm_ctx, cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
+        if xrm_reserve_id == 0 {
             bail!("failed to reserve encode cu pool")
         }
+        xlnx_enc_ctx.xrm_reserve_id = Some(xrm_reserve_id);
     }
 
-    Ok(())
+    Ok(cu_pool_res_infor)
 }
 
-/// Allocates encoder CU based on device_id
-fn xlnx_enc_cu_alloc_device_id(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<(), SimpleError> {
-    let mut encode_cu_hw_prop: xrmCuProperty = Default::default();
-    let mut encode_cu_sw_prop: xrmCuProperty = Default::default();
-
-    strcpy_to_arr_i8(&mut encode_cu_hw_prop.kernelName, "encoder")?;
-    strcpy_to_arr_i8(&mut encode_cu_hw_prop.kernelAlias, "ENCODER_MPSOC")?;
-    encode_cu_hw_prop.devExcl = false;
-    encode_cu_hw_prop.requestLoad = xrm_precision_1000000_bitmask(xlnx_enc_ctx.enc_load);
-
-    strcpy_to_arr_i8(&mut encode_cu_sw_prop.kernelName, "kernel_vcu_encoder")?;
-    encode_cu_sw_prop.devExcl = false;
-    encode_cu_sw_prop.requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-
-    let ret = unsafe {
-        xrmCuAllocFromDev(
-            xlnx_enc_ctx.xrm_ctx,
-            xlnx_enc_ctx.device_id,
-            &mut encode_cu_hw_prop,
-            &mut xlnx_enc_ctx.cu_list_res.cuResources[0],
-        )
-    };
-    if ret <= XRM_ERROR {
-        bail!("xrm failed to allocate encoder resources on device: {}", xlnx_enc_ctx.device_id);
-    }
-
-    let ret = unsafe {
-        xrmCuAllocFromDev(
-            xlnx_enc_ctx.xrm_ctx,
-            xlnx_enc_ctx.device_id,
-            &mut encode_cu_sw_prop,
-            &mut xlnx_enc_ctx.cu_list_res.cuResources[1],
-        )
-    };
-    if ret <= XRM_ERROR {
-        bail!("xrm failed to allocate encoder resources on device: {}", xlnx_enc_ctx.device_id);
-    }
-    xlnx_enc_ctx.encode_res_in_use = true;
-
-    // Set XMA plugin shared object and device index.
-    xma_enc_props.plugin_lib = xlnx_enc_ctx.cu_list_res.cuResources[0].kernelPluginFileName.as_mut_ptr();
-    xma_enc_props.dev_index = xlnx_enc_ctx.cu_list_res.cuResources[0].deviceId;
-
-    // Select ddr bank based on xclbin metadata.
-    xma_enc_props.ddr_bank_index = -1;
-    xma_enc_props.cu_index = xlnx_enc_ctx.cu_list_res.cuResources[1].cuId;
-    xma_enc_props.channel_id = xlnx_enc_ctx.cu_list_res.cuResources[1].channelId;
-
-    Ok(())
-}
-
-/// Allocated encoder CU based on reserve_id
-fn xlnx_enc_cu_alloc_reserve_id(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<(), SimpleError> {
+/// Allocated encoder CU
+fn xlnx_enc_cu_alloc(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm encoder cu
-    let mut encode_cu_list_prop = xrmCuListProperty {
+    let mut encode_cu_list_prop = Box::new(xrmCuListPropertyV2 {
         cuNum: 2,
         ..Default::default()
-    };
+    });
 
     strcpy_to_arr_i8(&mut encode_cu_list_prop.cuProps[0].kernelName, "encoder")?;
     strcpy_to_arr_i8(&mut encode_cu_list_prop.cuProps[0].kernelAlias, "ENCODER_MPSOC")?;
     encode_cu_list_prop.cuProps[0].devExcl = false;
     encode_cu_list_prop.cuProps[0].requestLoad = xrm_precision_1000000_bitmask(xlnx_enc_ctx.enc_load);
-    encode_cu_list_prop.cuProps[0].poolId = xlnx_enc_ctx.xrm_reserve_id;
 
     strcpy_to_arr_i8(&mut encode_cu_list_prop.cuProps[1].kernelName, "kernel_vcu_encoder")?;
     encode_cu_list_prop.cuProps[1].devExcl = false;
     encode_cu_list_prop.cuProps[1].requestLoad = xrm_precision_1000000_bitmask(XRM_MAX_CU_LOAD_GRANULARITY_1000000 as i32);
-    encode_cu_list_prop.cuProps[1].poolId = xlnx_enc_ctx.xrm_reserve_id;
 
-    if unsafe { xrmCuListAlloc(xlnx_enc_ctx.xrm_ctx, &mut encode_cu_list_prop, &mut xlnx_enc_ctx.cu_list_res) } != 0 {
-        bail!("failed to allocate encode cu list from reserve id {}", xlnx_enc_ctx.xrm_reserve_id)
+    match (xlnx_enc_ctx.device_id, xlnx_enc_ctx.xrm_reserve_id) {
+        (Some(device_id), Some(xrm_reserve_id)) => {
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
+                | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+            encode_cu_list_prop.cuProps[0].deviceInfo = device_info;
+            encode_cu_list_prop.cuProps[0].poolId = xrm_reserve_id;
+            encode_cu_list_prop.cuProps[1].deviceInfo = device_info;
+            encode_cu_list_prop.cuProps[1].poolId = xrm_reserve_id;
+        }
+        (Some(device_id), None) => {
+            let device_info = (device_id << XRM_DEVICE_INFO_DEVICE_INDEX_SHIFT) as u64
+                | ((XRM_DEVICE_INFO_CONSTRAINT_TYPE_HARDWARE_DEVICE_INDEX as u64) << XRM_DEVICE_INFO_CONSTRAINT_TYPE_SHIFT);
+            encode_cu_list_prop.cuProps[0].deviceInfo = device_info;
+            encode_cu_list_prop.cuProps[1].deviceInfo = device_info;
+        }
+        (None, Some(reserve_id)) => {
+            encode_cu_list_prop.cuProps[0].poolId = reserve_id;
+            encode_cu_list_prop.cuProps[1].poolId = reserve_id;
+        }
+        (None, None) => {
+            bail!("failed to allocate encode cu list: no device id or reserve id provided");
+        }
+    }
+
+    if unsafe { xrmCuListAllocV2(xlnx_enc_ctx.xrm_ctx, encode_cu_list_prop.as_mut(), xlnx_enc_ctx.cu_list_res.as_mut()) } != XRM_SUCCESS as _ {
+        bail!(
+            "failed to allocate encode cu list from reserve id {:?} and device id {:?}",
+            xlnx_enc_ctx.xrm_reserve_id,
+            xlnx_enc_ctx.device_id
+        );
     }
     xlnx_enc_ctx.encode_res_in_use = true;
 
@@ -190,17 +183,6 @@ fn xlnx_enc_cu_alloc_reserve_id(xma_enc_props: &mut XmaEncoderProperties, xlnx_e
     xma_enc_props.ddr_bank_index = -1;
     xma_enc_props.cu_index = xlnx_enc_ctx.cu_list_res.cuResources[1].cuId;
     xma_enc_props.channel_id = xlnx_enc_ctx.cu_list_res.cuResources[1].channelId;
-
-    Ok(())
-}
-
-fn xlnx_enc_cu_alloc(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<(), SimpleError> {
-    xlnx_enc_ctx.enc_load = xlnx_calc_enc_load(xlnx_enc_ctx.xrm_ctx, xma_enc_props)?;
-    if xlnx_enc_ctx.device_id >= 0 {
-        xlnx_enc_cu_alloc_device_id(xma_enc_props, xlnx_enc_ctx)?;
-    } else {
-        xlnx_enc_cu_alloc_reserve_id(xma_enc_props, xlnx_enc_ctx)?;
-    }
 
     Ok(())
 }
@@ -226,8 +208,11 @@ impl Drop for XlnxEncoderXrmCtx {
             return;
         }
         unsafe {
+            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
+            }
             if self.encode_res_in_use {
-                xrmCuListRelease(self.xrm_ctx, &mut self.cu_list_res);
+                let _ = xrmCuListReleaseV2(self.xrm_ctx, self.cu_list_res.as_mut());
             }
         }
     }
