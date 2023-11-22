@@ -94,7 +94,11 @@ fn xlnx_fill_transcode_pool_props(
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelName, "encoder")?;
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "ENCODER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
+<<<<<<< HEAD
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(total_enc_load);
+=======
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.enc_load);
+>>>>>>> 85e9b64 ([AVS-1020] Update to v2 allocation and reservation functions (#176))
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
 
