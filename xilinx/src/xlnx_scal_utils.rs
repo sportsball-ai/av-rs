@@ -10,10 +10,24 @@ pub struct XlnxScalerXrmCtx {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
     pub scal_load: i32,
-    pub scal_res_in_use: bool,
+    pub(crate) scal_res_in_use: bool,
     pub num_outputs: i32,
-    pub xrm_ctx: xrmContext,
-    pub cu_res: xrmCuResourceV2,
+    pub(crate) xrm_ctx: xrmContext,
+    pub(crate) cu_res: Box<xrmCuResourceV2>,
+}
+
+impl XlnxScalerXrmCtx {
+    pub fn new(xrm_ctx: xrmContext, device_id: Option<u32>, reserve_id: Option<u64>, scal_load: i32, num_outputs: i32) -> Self {
+        Self {
+            xrm_reserve_id: reserve_id,
+            device_id,
+            scal_load,
+            scal_res_in_use: false,
+            num_outputs,
+            xrm_ctx,
+            cu_res: Box::new(Default::default()),
+        }
+    }
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
@@ -79,18 +93,18 @@ fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, scal_load: 
     Ok(())
 }
 
-pub fn xlnx_reserve_scal_resource(xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<xrmCuPoolResInforV2, SimpleError> {
-    let mut cu_pool_prop: xrmCuPoolPropertyV2 = Default::default();
-    let mut cu_pool_res_infor: xrmCuPoolResInforV2 = Default::default();
+pub fn xlnx_reserve_scal_resource(xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<Box<xrmCuPoolResInforV2>, SimpleError> {
+    let mut cu_pool_prop: Box<xrmCuPoolPropertyV2> = Box::new(Default::default());
+    let mut cu_pool_res_infor: Box<xrmCuPoolResInforV2> = Box::new(Default::default());
     xlnx_fill_scal_pool_props(&mut cu_pool_prop, xlnx_scal_ctx.scal_load, xlnx_scal_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_scal_ctx.xrm_ctx, &mut cu_pool_prop);
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_scal_ctx.xrm_ctx, cu_pool_prop.as_mut());
         if num_cu_pool == 0 {
             bail!("no scaler resources available for allocation")
         }
 
-        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_scal_ctx.xrm_ctx, &mut cu_pool_prop, &mut cu_pool_res_infor);
+        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_scal_ctx.xrm_ctx, cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
         if xrm_reserve_id == 0 {
             bail!("failed to reserve scaler cu pool")
         }
@@ -116,7 +130,7 @@ pub(crate) fn xlnx_create_scal_session(
 }
 
 fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<(), SimpleError> {
-    let mut scaler_cu_prop: xrmCuPropertyV2 = Default::default();
+    let mut scaler_cu_prop: Box<xrmCuPropertyV2> = Box::new(Default::default());
 
     strcpy_to_arr_i8(&mut scaler_cu_prop.kernelName, "scaler")?;
     strcpy_to_arr_i8(&mut scaler_cu_prop.kernelAlias, "SCALER_MPSOC")?;
@@ -143,7 +157,7 @@ fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &
         }
     }
 
-    if unsafe { xrmCuAllocV2(xlnx_scal_ctx.xrm_ctx, &mut scaler_cu_prop, &mut xlnx_scal_ctx.cu_res) } != XRM_SUCCESS as _ {
+    if unsafe { xrmCuAllocV2(xlnx_scal_ctx.xrm_ctx, scaler_cu_prop.as_mut(), xlnx_scal_ctx.cu_res.as_mut()) } != XRM_SUCCESS as _ {
         bail!(
             "failed to allocate scaler cu from reserve id {:?} and device id {:?}",
             xlnx_scal_ctx.xrm_reserve_id,
@@ -173,7 +187,7 @@ impl Drop for XlnxScalerXrmCtx {
                 let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
             }
             if self.scal_res_in_use {
-                xrmCuReleaseV2(self.xrm_ctx, &mut self.cu_res);
+                xrmCuReleaseV2(self.xrm_ctx, self.cu_res.as_mut());
             }
         }
     }

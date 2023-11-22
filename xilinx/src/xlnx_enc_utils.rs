@@ -9,9 +9,22 @@ pub struct XlnxEncoderXrmCtx {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
     pub enc_load: i32,
-    pub encode_res_in_use: bool,
-    pub xrm_ctx: xrmContext,
-    pub cu_list_res: xrmCuListResourceV2,
+    pub(crate) encode_res_in_use: bool,
+    pub(crate) xrm_ctx: xrmContext,
+    pub(crate) cu_list_res: Box<xrmCuListResourceV2>,
+}
+
+impl XlnxEncoderXrmCtx {
+    pub fn new(xrm_ctx: xrmContext, device_id: Option<u32>, reserve_id: Option<u64>, enc_load: i32) -> Self {
+        Self {
+            xrm_reserve_id: reserve_id,
+            device_id,
+            enc_load,
+            encode_res_in_use: false,
+            xrm_ctx,
+            cu_list_res: Box::new(Default::default()),
+        }
+    }
 }
 
 /// Calculates the encoder load uing the xrmU30Enc plugin.
@@ -90,19 +103,19 @@ fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i
     Ok(())
 }
 
-pub fn xlnx_reserve_enc_resource(xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<xrmCuPoolResInforV2, SimpleError> {
+pub fn xlnx_reserve_enc_resource(xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<Box<xrmCuPoolResInforV2>, SimpleError> {
     let enc_count = 1;
-    let mut cu_pool_prop: xrmCuPoolPropertyV2 = Default::default();
-    let mut cu_pool_res_infor: xrmCuPoolResInforV2 = Default::default();
+    let mut cu_pool_prop: Box<xrmCuPoolPropertyV2> = Box::new(Default::default());
+    let mut cu_pool_res_infor: Box<xrmCuPoolResInforV2> = Box::new(Default::default());
     xlnx_fill_enc_pool_props(&mut cu_pool_prop, enc_count, xlnx_enc_ctx.enc_load, xlnx_enc_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_enc_ctx.xrm_ctx, &mut cu_pool_prop);
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_enc_ctx.xrm_ctx, cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
             bail!("no encoder resources avaliable for allocation")
         }
 
-        let xrm_reserve_id: u64 = xrmCuPoolReserveV2(xlnx_enc_ctx.xrm_ctx, &mut cu_pool_prop, &mut cu_pool_res_infor);
+        let xrm_reserve_id: u64 = xrmCuPoolReserveV2(xlnx_enc_ctx.xrm_ctx, cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
         if xrm_reserve_id == 0 {
             bail!("failed to reserve encode cu pool")
         }
@@ -115,10 +128,10 @@ pub fn xlnx_reserve_enc_resource(xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result
 /// Allocated encoder CU
 fn xlnx_enc_cu_alloc(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm encoder cu
-    let mut encode_cu_list_prop = xrmCuListPropertyV2 {
+    let mut encode_cu_list_prop = Box::new(xrmCuListPropertyV2 {
         cuNum: 2,
         ..Default::default()
-    };
+    });
 
     strcpy_to_arr_i8(&mut encode_cu_list_prop.cuProps[0].kernelName, "encoder")?;
     strcpy_to_arr_i8(&mut encode_cu_list_prop.cuProps[0].kernelAlias, "ENCODER_MPSOC")?;
@@ -153,7 +166,7 @@ fn xlnx_enc_cu_alloc(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mu
         }
     }
 
-    if unsafe { xrmCuListAllocV2(xlnx_enc_ctx.xrm_ctx, &mut encode_cu_list_prop, &mut xlnx_enc_ctx.cu_list_res) } != XRM_SUCCESS as _ {
+    if unsafe { xrmCuListAllocV2(xlnx_enc_ctx.xrm_ctx, encode_cu_list_prop.as_mut(), xlnx_enc_ctx.cu_list_res.as_mut()) } != XRM_SUCCESS as _ {
         bail!(
             "failed to allocate encode cu list from reserve id {:?} and device id {:?}",
             xlnx_enc_ctx.xrm_reserve_id,
@@ -199,7 +212,7 @@ impl Drop for XlnxEncoderXrmCtx {
                 let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
             }
             if self.encode_res_in_use {
-                let _ = xrmCuListReleaseV2(self.xrm_ctx, &mut self.cu_list_res);
+                let _ = xrmCuListReleaseV2(self.xrm_ctx, self.cu_list_res.as_mut());
             }
         }
     }

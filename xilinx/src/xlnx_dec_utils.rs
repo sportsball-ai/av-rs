@@ -18,9 +18,22 @@ pub struct XlnxDecoderXrmCtx {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
     pub dec_load: i32,
-    pub decode_res_in_use: bool,
-    pub xrm_ctx: xrmContext,
-    pub cu_list_res: xrmCuListResourceV2,
+    pub(crate) decode_res_in_use: bool,
+    pub(crate) xrm_ctx: xrmContext,
+    pub(crate) cu_list_res: Box<xrmCuListResourceV2>,
+}
+
+impl XlnxDecoderXrmCtx {
+    pub fn new(xrm_ctx: xrmContext, device_id: Option<u32>, reserve_id: Option<u64>, dec_load: i32) -> Self {
+        Self {
+            xrm_reserve_id: reserve_id,
+            device_id,
+            dec_load,
+            decode_res_in_use: false,
+            xrm_ctx,
+            cu_list_res: Box::new(Default::default()),
+        }
+    }
 }
 
 /// Calculates the decoder load uing the xrmU30Dec plugin.
@@ -94,18 +107,18 @@ fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i3
     Ok(())
 }
 
-pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<xrmCuPoolResInforV2, SimpleError> {
-    let mut cu_pool_prop: xrmCuPoolPropertyV2 = Default::default();
-    let mut cu_pool_res_infor: xrmCuPoolResInforV2 = Default::default();
+pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<Box<xrmCuPoolResInforV2>, SimpleError> {
+    let mut cu_pool_prop: Box<xrmCuPoolPropertyV2> = Box::new(Default::default());
+    let mut cu_pool_res_infor: Box<xrmCuPoolResInforV2> = Box::new(Default::default());
     xlnx_fill_dec_pool_props(&mut cu_pool_prop, xlnx_dec_ctx.dec_load, xlnx_dec_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop);
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_dec_ctx.xrm_ctx, cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
             bail!("no decoder resources available for allocation")
         }
 
-        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_dec_ctx.xrm_ctx, &mut cu_pool_prop, &mut cu_pool_res_infor);
+        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_dec_ctx.xrm_ctx, cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
         if xrm_reserve_id == 0 {
             bail!("failed to reserve decode cu pool")
         }
@@ -118,10 +131,10 @@ pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result
 /// Allocates decoder CU
 fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<(), SimpleError> {
     // Allocate xrm decoder
-    let mut decode_cu_list_prop = xrmCuListPropertyV2 {
+    let mut decode_cu_list_prop = Box::new(xrmCuListPropertyV2 {
         cuNum: 2,
         ..Default::default()
-    };
+    });
 
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelName, "decoder")?;
     strcpy_to_arr_i8(&mut decode_cu_list_prop.cuProps[0].kernelAlias, "DECODER_MPSOC")?;
@@ -156,7 +169,7 @@ fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mu
         }
     }
 
-    if unsafe { xrmCuListAllocV2(xlnx_dec_ctx.xrm_ctx, &mut decode_cu_list_prop, &mut xlnx_dec_ctx.cu_list_res) } != XRM_SUCCESS as _ {
+    if unsafe { xrmCuListAllocV2(xlnx_dec_ctx.xrm_ctx, decode_cu_list_prop.as_mut(), xlnx_dec_ctx.cu_list_res.as_mut()) } != XRM_SUCCESS as _ {
         bail!(
             "failed to allocate decode cu list from reserve id {:?} and device id {:?}",
             xlnx_dec_ctx.xrm_reserve_id,
@@ -203,7 +216,7 @@ impl Drop for XlnxDecoderXrmCtx {
                 let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
             }
             if self.decode_res_in_use {
-                let _ = xrmCuListReleaseV2(self.xrm_ctx, &mut self.cu_list_res);
+                let _ = xrmCuListReleaseV2(self.xrm_ctx, self.cu_list_res.as_mut());
             }
         }
     }

@@ -172,17 +172,8 @@ mod decoder_tests {
         let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
 
         let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-
-        let cu_list_res: xrmCuListResourceV2 = Default::default();
-
-        let mut xlnx_dec_ctx = XlnxDecoderXrmCtx {
-            xrm_reserve_id: None,
-            device_id: None,
-            dec_load: xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap(),
-            decode_res_in_use: false,
-            xrm_ctx,
-            cu_list_res,
-        };
+        let dec_load = xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap();
+        let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(xrm_ctx, None, None, dec_load);
 
         xlnx_reserve_dec_resource(&mut xlnx_dec_ctx).unwrap();
 
@@ -319,17 +310,8 @@ mod decoder_tests {
             let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
 
             let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-
-            let cu_list_res: xrmCuListResourceV2 = Default::default();
-
-            let mut xlnx_dec_ctx = XlnxDecoderXrmCtx {
-                xrm_reserve_id: None,
-                device_id: None,
-                dec_load: xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap(),
-                decode_res_in_use: false,
-                xrm_ctx,
-                cu_list_res,
-            };
+            let dec_load = xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap();
+            let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(xrm_ctx, None, None, dec_load);
 
             xlnx_reserve_dec_resource(&mut xlnx_dec_ctx).unwrap();
 

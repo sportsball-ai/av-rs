@@ -153,18 +153,8 @@ mod encoder_tests {
         let mut xma_enc_props = XlnxXmaEncoderProperties::try_from(enc_props).unwrap();
 
         let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-
-        let cu_list_res: xrmCuListResourceV2 = Default::default();
         let enc_load = xlnx_calc_enc_load(xrm_ctx, xma_enc_props.as_mut()).unwrap();
-
-        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx {
-            xrm_reserve_id: None,
-            device_id: None,
-            enc_load,
-            encode_res_in_use: false,
-            xrm_ctx,
-            cu_list_res,
-        };
+        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(xrm_ctx, None, None, enc_load);
 
         xlnx_reserve_enc_resource(&mut xlnx_enc_ctx).unwrap();
 
