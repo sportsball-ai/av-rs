@@ -45,6 +45,7 @@ pub fn xlnx_calc_transcode_load(
     for xma_enc_props in xma_enc_props_list {
         let enc_load = xlnx_calc_enc_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_enc_props)?;
         xlnx_transcode_xrm_ctx.transcode_load.enc_loads.push(enc_load);
+        xlnx_transcode_xrm_ctx.transcode_load.enc_num += 1;
     }
 
     xlnx_fill_transcode_pool_props(transcode_cu_pool_prop, &xlnx_transcode_xrm_ctx.transcode_load, xlnx_transcode_xrm_ctx.device_id)?;
