@@ -4,7 +4,7 @@ use simple_error::{bail, SimpleError};
 pub struct XlnxTranscodeLoad {
     pub dec_load: i32,
     pub scal_load: i32,
-    pub enc_load: i32,
+    pub enc_loads: Vec<i32>,
     pub enc_num: i32,
 }
 
@@ -24,7 +24,7 @@ impl XlnxTranscodeXrmCtx {
             transcode_load: XlnxTranscodeLoad {
                 dec_load: 0,
                 scal_load: 0,
-                enc_load: 0,
+                enc_loads: vec![],
                 enc_num: 0,
             },
             xrm_reserve_id: None,
@@ -43,8 +43,8 @@ pub fn xlnx_calc_transcode_load(
     xlnx_transcode_xrm_ctx.transcode_load.dec_load = xlnx_calc_dec_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_dec_props)?;
     xlnx_transcode_xrm_ctx.transcode_load.scal_load = xlnx_calc_scal_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_scal_props)?;
     for xma_enc_props in xma_enc_props_list {
-        xlnx_transcode_xrm_ctx.transcode_load.enc_load += xlnx_calc_enc_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_enc_props)?;
-        xlnx_transcode_xrm_ctx.transcode_load.enc_num += 1;
+        let enc_load = xlnx_calc_enc_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_enc_props)?;
+        xlnx_transcode_xrm_ctx.transcode_load.enc_loads.push(enc_load);
     }
 
     xlnx_fill_transcode_pool_props(transcode_cu_pool_prop, &xlnx_transcode_xrm_ctx.transcode_load, xlnx_transcode_xrm_ctx.device_id)?;
@@ -88,11 +88,13 @@ fn xlnx_fill_transcode_pool_props(
         cu_num += 1;
     }
 
-    if transcode_load.enc_load > 0 {
+    // total encoder load is the sum of all of the encoder loads
+    let total_enc_load = transcode_load.enc_loads.iter().sum::<i32>();
+    if total_enc_load > 0 {
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelName, "encoder")?;
         strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "ENCODER_MPSOC")?;
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
-        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(transcode_load.enc_load);
+        transcode_cu_pool_prop.cuListProp.cuProps[cu_num].requestLoad = xrm_precision_1000000_bitmask(total_enc_load);
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
 
