@@ -37,7 +37,10 @@ impl Dictionary {
         let mut values = vec![std::ptr::null(); len];
         unsafe {
             CFDictionaryGetKeysAndValues(self.0, keys.as_mut_ptr(), values.as_mut_ptr());
-            keys.iter().zip(values.iter()).map(|(k, v)| (K::from_get_rule(*k as _), V::from_get_rule(*v as _))).collect()
+            keys.iter()
+                .zip(values.iter())
+                .map(|(k, v)| (K::from_get_rule(*k as _), V::from_get_rule(*v as _)))
+                .collect()
         }
     }
 }

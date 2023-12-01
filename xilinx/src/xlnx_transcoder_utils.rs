@@ -1,9 +1,15 @@
 use crate::{strcpy_to_arr_i8, sys::*, xlnx_dec_utils::*, xlnx_enc_utils::*, xlnx_scal_utils::*, xrm_precision_1000000_bitmask};
 use simple_error::{bail, SimpleError};
 
+/// This struct is used to hold the load information for the transcode
+/// cu pool.  The load information is used for reservation and allocation
+/// of the transcode cu pool.
 pub struct XlnxTranscodeLoad {
     pub dec_load: i32,
     pub scal_load: i32,
+
+    /// The sum of these loads is used for resource reservation, however the
+    /// individual loads must be used to allocate the encoder for each varient.
     pub enc_loads: Vec<i32>,
     pub enc_num: i32,
 }
