@@ -1,11 +1,16 @@
 use crate::{strcpy_to_arr_i8, sys::*, xlnx_dec_utils::*, xlnx_enc_utils::*, xlnx_scal_utils::*, xrm_precision_1000000_bitmask};
 use simple_error::{bail, SimpleError};
 
+/// This struct is used to hold the load information for the transcode
+/// cu pool.  The load information is used for reservation and allocation
+/// of the transcode cu pool.
 pub struct XlnxTranscodeLoad {
     pub dec_load: i32,
     pub scal_load: i32,
+
+    /// The sum of these loads is used for resource reservation, however the
+    /// individual loads must be used to allocate the encoder for each varient.
     pub enc_loads: Vec<i32>,
-    pub enc_num: i32,
 }
 
 pub struct XlnxTranscodeXrmCtx {
@@ -25,7 +30,6 @@ impl XlnxTranscodeXrmCtx {
                 dec_load: 0,
                 scal_load: 0,
                 enc_loads: vec![],
-                enc_num: 0,
             },
             xrm_reserve_id: None,
             device_id: None,
@@ -98,7 +102,7 @@ fn xlnx_fill_transcode_pool_props(
         transcode_cu_pool_prop.cuListProp.cuProps[cu_num].deviceInfo = device_info;
         cu_num += 1;
 
-        for _ in 0..transcode_load.enc_num {
+        for _ in 0..transcode_load.enc_loads.len() {
             strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelName, "kernel_vcu_encoder")?;
             strcpy_to_arr_i8(&mut transcode_cu_pool_prop.cuListProp.cuProps[cu_num].kernelAlias, "")?;
             transcode_cu_pool_prop.cuListProp.cuProps[cu_num].devExcl = false;
