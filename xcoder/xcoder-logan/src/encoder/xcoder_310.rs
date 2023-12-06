@@ -270,12 +270,12 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
                             .expect("there should never be more output frames than input frames");
                         let data = match self.encoded_frame.parameter_sets() {
                             Some(sets) => self.config.assemble_access_unit(
-                                h264::iterate_annex_b(sets).chain(h264::iterate_annex_b(&self.encoded_frame.as_slice())),
+                                h264::iterate_annex_b(sets).chain(h264::iterate_annex_b(self.encoded_frame.as_slice())),
                                 raw_frame.timecode(),
                             ),
                             None => self
                                 .config
-                                .assemble_access_unit(h264::iterate_annex_b(&self.encoded_frame.as_slice()), raw_frame.timecode()),
+                                .assemble_access_unit(h264::iterate_annex_b(self.encoded_frame.as_slice()), raw_frame.timecode()),
                         };
                         self.output_frames.push_back(VideoEncoderOutput {
                             raw_frame,

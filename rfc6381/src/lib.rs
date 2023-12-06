@@ -59,7 +59,7 @@ pub fn codec_from_ffmpeg_codec_context(codec: &ffmpeg::sys::AVCodecContext) -> O
         AVCodecID::AV_CODEC_ID_H264 => {
             if codec.extradata_size > 0 {
                 let extradata = unsafe { std::slice::from_raw_parts(codec.extradata, codec.extradata_size as _) };
-                for nalu in h264::iterate_annex_b(&extradata) {
+                for nalu in h264::iterate_annex_b(extradata) {
                     let bs = h264::Bitstream::new(nalu.iter().copied());
                     let nalu = h264::NALUnit::decode(bs).ok()?;
                     if let Some(codec) = codec_from_h264_nalu(nalu) {
@@ -72,7 +72,7 @@ pub fn codec_from_ffmpeg_codec_context(codec: &ffmpeg::sys::AVCodecContext) -> O
         AVCodecID::AV_CODEC_ID_HEVC => {
             if codec.extradata_size > 0 {
                 let extradata = unsafe { std::slice::from_raw_parts(codec.extradata, codec.extradata_size as _) };
-                for nalu in h265::iterate_annex_b(&extradata) {
+                for nalu in h265::iterate_annex_b(extradata) {
                     let bs = h264::Bitstream::new(nalu.iter().copied());
                     let nalu = h265::NALUnit::decode(bs).ok()?;
                     if let Some(codec) = codec_from_h265_nalu(nalu) {
