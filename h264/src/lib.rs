@@ -57,46 +57,53 @@ impl<'a> Iterator for AVCCIter<'a> {
     }
 }
 
+/// Iterator over NALs in an Annex B-encoded buffer as returned by [`iterate_annex_b`].
 pub struct AnnexBIter<'a> {
-    buf: &'a [u8],
+    remaining: Option<&'a [u8]>,
 }
 
-pub fn iterate_annex_b<T: AsRef<[u8]>>(buf: &'_ T) -> AnnexBIter<'_> {
-    AnnexBIter { buf: buf.as_ref() }
+const START_CODE: [u8; 3] = [0, 0, 1];
+static START_CODE_FINDER: std::sync::OnceLock<memchr::memmem::Finder> = std::sync::OnceLock::new();
+
+/// Iterates through start code-prefixed NALs in `buf`.
+///
+/// Each NAL is expected to start with two or more `00`s followed by one `01`.
+/// If `buf` does not start with such a sequence, no NALs will be returned.
+/// NALs are also expected to be non-empty.
+pub fn iterate_annex_b(buf: &[u8]) -> AnnexBIter<'_> {
+    let zeros = buf.iter().take_while(|&&b| b == 0).count();
+    let remaining = if zeros < buf.len() && zeros >= 2 && buf[zeros] == 1 {
+        Some(&buf[zeros + 1..])
+    } else {
+        None
+    };
+    AnnexBIter { remaining }
 }
 
 impl<'a> Iterator for AnnexBIter<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut pos = 0;
-        let mut len = self.buf.len();
-        loop {
-            loop {
-                if len == 0 || self.buf[pos] != 0 {
-                    return None;
-                } else if len >= 3 && self.buf[pos] == 0 && self.buf[pos + 1] == 0 && self.buf[pos + 2] == 1 {
-                    break;
-                }
-                pos += 1;
-                len -= 1;
+        let Some(remaining) = self.remaining else {
+            return None;
+        };
+        let finder = START_CODE_FINDER.get_or_init(|| memchr::memmem::Finder::new(&START_CODE));
+
+        let (mut this_nal, rest);
+        match finder.find(remaining) {
+            Some(idx) => {
+                this_nal = &remaining[..idx];
+                let trailing_zeros = this_nal.iter().rev().take_while(|&&b| b == 0).count();
+                this_nal = &this_nal[..this_nal.len() - trailing_zeros];
+                rest = Some(&remaining[idx + START_CODE.len()..]);
             }
-
-            pos += 3;
-            len -= 3;
-
-            let nalu = pos;
-
-            loop {
-                if len == 0 || (len >= 3 && self.buf[pos] == 0 && self.buf[pos + 1] == 0 && self.buf[pos + 2] <= 1) {
-                    let ret = &self.buf[nalu..pos];
-                    self.buf = &self.buf[pos..];
-                    return Some(ret);
-                }
-                pos += 1;
-                len -= 1;
+            None => {
+                this_nal = remaining;
+                rest = None;
             }
-        }
+        };
+        self.remaining = rest;
+        Some(this_nal)
     }
 }
 
@@ -254,9 +261,12 @@ mod test {
 
     #[test]
     fn test_iterate_annex_b() {
-        let data = &[0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x04];
+        let data = [0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x04];
         let expected: Vec<&[u8]> = vec![&[0x01, 0x02, 0x03], &[0x04]];
-        assert_eq!(expected, iterate_annex_b(&data).collect::<Vec<&[u8]>>());
+        assert_eq!(expected, iterate_annex_b(&data[..]).collect::<Vec<&[u8]>>());
+
+        assert_eq!(iterate_annex_b(&[]).next(), None);
+        assert_eq!(iterate_annex_b(&[0x01, 0x02, 0x03]).next(), None);
     }
 
     #[test]
