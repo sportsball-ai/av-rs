@@ -69,7 +69,8 @@ static START_CODE_FINDER: std::sync::OnceLock<memchr::memmem::Finder> = std::syn
 ///
 /// Each NAL is expected to start with two or more `00`s followed by one `01`.
 /// If `buf` does not start with such a sequence, no NALs will be returned.
-/// NALs are also expected to be non-empty.
+/// Trailing zeros are removed from NALs (including the final one with no following start
+/// code).
 pub fn iterate_annex_b(buf: &[u8]) -> AnnexBIter<'_> {
     let zeros = buf.iter().take_while(|&&b| b == 0).count();
     let remaining = if zeros < buf.len() && zeros >= 2 && buf[zeros] == 1 {
@@ -89,12 +90,10 @@ impl<'a> Iterator for AnnexBIter<'a> {
         };
         let finder = START_CODE_FINDER.get_or_init(|| memchr::memmem::Finder::new(&START_CODE));
 
-        let (mut this_nal, rest);
+        let (this_nal, rest);
         match finder.find(remaining) {
             Some(idx) => {
                 this_nal = &remaining[..idx];
-                let trailing_zeros = this_nal.iter().rev().take_while(|&&b| b == 0).count();
-                this_nal = &this_nal[..this_nal.len() - trailing_zeros];
                 rest = Some(&remaining[idx + START_CODE.len()..]);
             }
             None => {
@@ -103,7 +102,8 @@ impl<'a> Iterator for AnnexBIter<'a> {
             }
         };
         self.remaining = rest;
-        Some(this_nal)
+        let trailing_zeros = this_nal.iter().rev().take_while(|&&b| b == 0).count();
+        Some(&this_nal[..this_nal.len() - trailing_zeros])
     }
 }
 
@@ -261,7 +261,7 @@ mod test {
 
     #[test]
     fn test_iterate_annex_b() {
-        let data = [0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x04];
+        let data = [0x00, 0x00, 0x00, 0x01, 0x01, 0x02, 0x03, 0x00, 0x00, 0x00, 0x01, 0x04, 0x00];
         let expected: Vec<&[u8]> = vec![&[0x01, 0x02, 0x03], &[0x04]];
         assert_eq!(expected, iterate_annex_b(&data[..]).collect::<Vec<&[u8]>>());
 
