@@ -147,7 +147,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                     let mut is_keyframe = false;
                                     match self.analyzer.stream(p.packet_id) {
                                         Some(analyzer::Stream::AVCVideo { .. }) => {
-                                            for nalu in h264::iterate_annex_b(&payload) {
+                                            for nalu in h264::iterate_annex_b(payload) {
                                                 if !nalu.is_empty() {
                                                     let nalu_type = nalu[0] & h264::NAL_UNIT_TYPE_MASK;
                                                     is_keyframe |= nalu_type == h264::NAL_UNIT_TYPE_CODED_SLICE_OF_IDR_PICTURE;
@@ -156,7 +156,7 @@ impl<S: SegmentStorage> Segmenter<S> {
                                         }
                                         Some(analyzer::Stream::HEVCVideo { .. }) => {
                                             use h265::Decode;
-                                            for nalu in h265::iterate_annex_b(&payload) {
+                                            for nalu in h265::iterate_annex_b(payload) {
                                                 let mut bs = h265::Bitstream::new(nalu.iter().copied());
                                                 if let Ok(header) = h265::NALUnitHeader::decode(&mut bs) {
                                                     if header.nuh_layer_id.0 == 0 {
