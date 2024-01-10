@@ -5,5 +5,5 @@ edition = "2021"
 
 [dependencies]
 av-traits = { path = "../av-traits" }
-snafu = { version = "0.7.0", default-features = false }
+snafu = { version = "0.8.0", default-features = false }
 x264-sys = { path = "x264-sys" }

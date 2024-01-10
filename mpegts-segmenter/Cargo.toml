@@ -11,11 +11,11 @@ h265 = { path = "../h265" }
 rfc6381 = { path = "../rfc6381" }
 tokio = { version = "1.0", features = ["macros", "io-util", "fs", "rt-multi-thread"] }
 async-trait = "0.1.35"
-pretty-hex = "0.3.0"
+pretty-hex = "0.4.0"
 
 [dev-dependencies]
 tempdir = "0.3.7"
-criterion = "0.3"
+criterion = "0.5"
 
 [[bench]]
 name = "benches"
