@@ -610,7 +610,7 @@ unsafe extern "C" fn log_handler_adapter(opaque: *mut c_void, level: c_int, file
     });
     if let Err(e) = r {
         let cow_panic = panic_to_cow_str(e);
-        let stderr_panic = if let Ok(cow_panic) = cow_panic {
+        let stderr_panic = if let Ok(cow_panic) = &cow_panic {
             panic::catch_unwind(|| {
                 eprintln!("srt log handler panicked while panicking {cow_panic}");
             })
@@ -635,7 +635,7 @@ fn log_handler_adapter_inner(opaque: *mut c_void, level: c_int, file: *const c_c
             let file_c_str = cstr_to_cow_lossy(file);
             let area_c_str = cstr_to_cow_lossy(area);
             let message_c_str = cstr_to_cow_lossy(message);
-            let closure = &mut (*closure);
+            let closure = closure.as_mut().unwrap();
             // Spend as little time inside `unsafe` as possible, escalate these values back into a safe context.
             (closure, file_c_str, area_c_str, message_c_str)
         };
@@ -714,7 +714,12 @@ pub struct SrtLogEvent<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::thread;
+    use std::{
+        panic::panic_any,
+        ptr::null_mut,
+        sync::atomic::{AtomicU32, Ordering},
+        thread,
+    };
 
     #[test]
     fn test_client_server() {
@@ -778,5 +783,149 @@ mod test {
         let (sockaddr, socklen) = to_sockaddr(&addr);
         let round_tripped = sockaddr_from_storage(&sockaddr, socklen).unwrap();
         assert_eq!(addr, round_tripped);
+    }
+
+    #[test]
+    fn log_handler_doesnt_panic() {
+        // If any panic unwinding moves past this point then undefined behavior would occur in real usage
+        unsafe {
+            log_handler_adapter(null_mut(), 0, null_mut(), 0, null_mut(), null_mut());
+            log_handler_adapter(null_mut(), 0, b"file\0".as_ptr().cast::<c_char>(), 0, null_mut(), null_mut());
+            log_handler_adapter(
+                null_mut(),
+                0,
+                b"file\0".as_ptr().cast::<c_char>(),
+                0,
+                b"area\0".as_ptr().cast::<c_char>(),
+                null_mut(),
+            );
+            log_handler_adapter(
+                null_mut(),
+                0,
+                b"file\0".as_ptr().cast::<c_char>(),
+                0,
+                null_mut(),
+                b"message\0".as_ptr().cast::<c_char>(),
+            );
+            log_handler_adapter(
+                null_mut(),
+                LOG_ERR,
+                b"file\0".as_ptr().cast::<c_char>(),
+                0,
+                b"area\0".as_ptr().cast::<c_char>(),
+                b"message\0".as_ptr().cast::<c_char>(),
+            );
+            {
+                let log_handler: LogHandlerRaw = Box::into_raw(Box::new(Box::new(|_log_event| {
+                    panic!();
+                })));
+                log_handler_adapter(log_handler.cast::<c_void>(), 0, null_mut(), 0, null_mut(), null_mut());
+                log_handler_adapter(log_handler.cast::<c_void>(), 0, b"file\0".as_ptr().cast::<c_char>(), 0, null_mut(), null_mut());
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    0,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    b"area\0".as_ptr().cast::<c_char>(),
+                    null_mut(),
+                );
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    0,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    null_mut(),
+                    b"message\0".as_ptr().cast::<c_char>(),
+                );
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    LOG_ERR,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    b"area\0".as_ptr().cast::<c_char>(),
+                    b"message\0".as_ptr().cast::<c_char>(),
+                );
+                let _ = Box::from_raw(log_handler);
+            }
+            {
+                let called = Arc::new(AtomicU32::new(0));
+                let called_clone = Arc::clone(&called);
+                let log_handler: LogHandlerRaw = Box::into_raw(Box::new(Box::new(move |_log_event| {
+                    // Record that this was called.
+                    called.fetch_add(1, Ordering::Relaxed);
+                })));
+                log_handler_adapter(log_handler.cast::<c_void>(), 0, null_mut(), 0, null_mut(), null_mut());
+                log_handler_adapter(log_handler.cast::<c_void>(), 0, b"file\0".as_ptr().cast::<c_char>(), 0, null_mut(), null_mut());
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    0,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    b"area\0".as_ptr().cast::<c_char>(),
+                    null_mut(),
+                );
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    0,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    null_mut(),
+                    b"message\0".as_ptr().cast::<c_char>(),
+                );
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    LOG_ERR,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    b"area\0".as_ptr().cast::<c_char>(),
+                    b"message\0".as_ptr().cast::<c_char>(),
+                );
+                let _ = Box::from_raw(log_handler);
+                assert_eq!(called_clone.load(Ordering::Relaxed), 5);
+                assert_eq!(Arc::strong_count(&called_clone), 1);
+            }
+            {
+                struct PanicBomb(Arc<AtomicU32>);
+                impl Drop for PanicBomb {
+                    fn drop(&mut self) {
+                        self.0.fetch_add(1, Ordering::Relaxed);
+                        panic!()
+                    }
+                }
+                let drop_count = Arc::new(AtomicU32::new(0));
+                let drop_count_clone = Arc::clone(&drop_count);
+                let log_handler: LogHandlerRaw = Box::into_raw(Box::new(Box::new(move |_log_event| {
+                    panic_any(PanicBomb(Arc::clone(&drop_count)));
+                })));
+                log_handler_adapter(log_handler.cast::<c_void>(), 0, null_mut(), 0, null_mut(), null_mut());
+                log_handler_adapter(log_handler.cast::<c_void>(), 0, b"file\0".as_ptr().cast::<c_char>(), 0, null_mut(), null_mut());
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    0,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    b"area\0".as_ptr().cast::<c_char>(),
+                    null_mut(),
+                );
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    0,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    null_mut(),
+                    b"message\0".as_ptr().cast::<c_char>(),
+                );
+                log_handler_adapter(
+                    log_handler.cast::<c_void>(),
+                    LOG_ERR,
+                    b"file\0".as_ptr().cast::<c_char>(),
+                    0,
+                    b"area\0".as_ptr().cast::<c_char>(),
+                    b"message\0".as_ptr().cast::<c_char>(),
+                );
+                let _ = Box::from_raw(log_handler);
+                assert_eq!(drop_count_clone.load(Ordering::Relaxed), 5);
+            }
+        }
     }
 }
