@@ -14,4 +14,9 @@
 #define threadpool_add_task logan_threadpool_add_task
 #define threadpool_destroy logan_threadpool_destroy
 #define g_device_reference_table g_logan_device_reference_table
+// Defines a shim used to bridge netint logging and rust logging
+void rust_netint_callback(int level, const char* message);
+// Part of the prior shim
+void netint_log_callback(int level, const char* format, ...);
+void setup_rust_netint_logging();
 #endif
