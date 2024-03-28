@@ -11,3 +11,5 @@
 
 #[cfg(target_os = "linux")]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+#[cfg(target_os = "linux")]
+include!("../../../logging_shim.rs");
