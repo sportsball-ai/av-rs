@@ -47,6 +47,16 @@ fn main() {
             .flag("-DLIBXCODER_OBJS_BUILD")
             .compile("xcoder-c-sys");
 
+        // Our own logging bridge
+        cc::Build::new()
+            .file("../../logging_shim.c")
+            .include(source_path.to_str().unwrap())
+            .flag("-fPIC")
+            .flag("-Wno-unused-command-line-argument")
+            .flag("-std=gnu99")
+            .flag("-DLIBXCODER_OBJS_BUILD")
+            .compile("xcoder-logging-shim");
+
         let cpp_source_files = vec!["ni_rsrc_priv.cpp", "ni_rsrc_api.cpp"];
 
         cc::Build::new()

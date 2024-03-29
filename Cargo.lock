@@ -2310,6 +2310,7 @@ version = "0.1.0"
 dependencies = [
  "bindgen",
  "cc",
+ "log",
 ]
 
 [[package]]
@@ -2330,6 +2331,7 @@ version = "0.1.0"
 dependencies = [
  "bindgen",
  "cc",
+ "log",
 ]
 
 [[package]]

@@ -60,6 +60,17 @@ fn main() {
             .flag("src/header.h")
             .compile("xcoder-logan-c-sys");
 
+        // Our own logging bridge
+        cc::Build::new()
+            .file("../../logging_shim.c")
+            .define("LOGAN", None)
+            .include(source_path.to_str().unwrap())
+            .flag("-fPIC")
+            .flag("-Wno-unused-command-line-argument")
+            .flag("-std=gnu99")
+            .flag("-DLIBXCODER_OBJS_BUILD")
+            .compile("xcoder-logging-shim");
+
         let cpp_source_files = vec!["ni_rsrc_priv_logan.cpp", "ni_rsrc_api_logan.cpp"];
 
         cc::Build::new()
