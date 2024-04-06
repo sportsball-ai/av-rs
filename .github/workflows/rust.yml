@@ -45,7 +45,7 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
         command: test
-        args: --verbose --workspace --exclude xilinx --all-features --exclude xcoder-quadra --exclude xcoder-logan ${{ matrix.args }}
+        args: --verbose --workspace --exclude xilinx --all-features --exclude xcoder-quadra --exclude xcoder-logan --exclude v4l2 ${{ matrix.args }}
   test_xcoder_logan:
     name: Test xcoder-logan
     runs-on:
