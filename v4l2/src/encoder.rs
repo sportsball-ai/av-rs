@@ -130,10 +130,17 @@ impl<F> V4L2Encoder<F> {
     pub fn new(config: V4L2EncoderConfig) -> Result<Self> {
         let paths = std::fs::read_dir("/dev")?;
 
-        let mut fd = match paths
-            .into_iter()
-            .find_map(|path| path.map(|path| Self::try_open_device(path.path(), config.input_format)).transpose())
-        {
+        let mut fd = match paths.into_iter().find_map(|r| {
+            r.map(|e| {
+                let p = e.path();
+                if p.as_os_str().to_str().map(|s| s.starts_with("/dev/video"))? {
+                    Self::try_open_device(p, config.input_format)
+                } else {
+                    None
+                }
+            })
+            .transpose()
+        }) {
             Some(r) => r?,
             None => return Err(V4L2EncoderError::NoAvailableDevice),
         };
