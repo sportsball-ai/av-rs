@@ -167,16 +167,16 @@ impl<F> V4L2Encoder<F> {
                 let fps_numerator = (config.fps * fps_denominator as f64).round() as _;
                 output_parm.timeperframe.numerator = fps_denominator;
                 output_parm.timeperframe.denominator = fps_numerator;
-                let _: bindings::v4l2_streamparm = ioctl::s_parm(&mut fd, parm)?;
+                let _: bindings::v4l2_streamparm = ioctl::s_parm(&fd, parm)?;
             }
         }
 
         if let Some(bitrate) = config.bitrate {
-            ioctl::s_ctrl(&mut fd, bindings::V4L2_CID_MPEG_VIDEO_BITRATE, bitrate as _)?;
+            ioctl::s_ctrl(&fd, bindings::V4L2_CID_MPEG_VIDEO_BITRATE, bitrate as _)?;
         }
 
         if let Some(interval) = config.keyframe_interval {
-            ioctl::s_ctrl(&mut fd, bindings::V4L2_CID_MPEG_VIDEO_H264_I_PERIOD, interval as _)?;
+            ioctl::s_ctrl(&fd, bindings::V4L2_CID_MPEG_VIDEO_H264_I_PERIOD, interval as _)?;
         }
 
         // We'll make sure the encoder always has 2 frames to work on before we block for output.
@@ -280,7 +280,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for V4L2Encoder<F> {
                 .expect("wait_for_output will block until we have an available buffer");
 
             if frame_type == EncodedFrameType::Key {
-                ioctl::s_ctrl(&mut self.fd, bindings::V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 1)?;
+                ioctl::s_ctrl(&self.fd, bindings::V4L2_CID_MPEG_VIDEO_FORCE_KEY_FRAME, 1)?;
             }
 
             let mapping = &mut self.output_mappings[output_buffer_index];
