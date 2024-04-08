@@ -1,3 +1,4 @@
+use arrayvec::ArrayVec;
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use nix::{
     fcntl::{open, OFlag},
@@ -43,15 +44,20 @@ pub enum V4L2EncoderError {
 
 type Result<T> = core::result::Result<T, V4L2EncoderError>;
 
+// We'll make sure the encoder always has 2 frames to work on before we block for output.
+// Experimentally, this performs 50% faster than using 1 set of buffers and using 3 has no
+// benefit over 2. Note that this currently means the encoder has a latency of 2 frames.
+const N_BUFFERS: usize = 2;
+
 pub struct V4L2Encoder<F> {
     config: V4L2EncoderConfig,
     fd: File,
-    capture_mappings: Vec<ioctl::PlaneMapping>,
-    output_mappings: Vec<ioctl::PlaneMapping>,
+    capture_mappings: ArrayVec<ioctl::PlaneMapping, N_BUFFERS>,
+    output_mappings: ArrayVec<ioctl::PlaneMapping, N_BUFFERS>,
     output_format: Format,
     pending_frames: VecDeque<F>,
-    available_output_buffers: Vec<usize>,
-    available_capture_buffers: Vec<usize>,
+    available_output_buffers: ArrayVec<usize, N_BUFFERS>,
+    available_capture_buffers: ArrayVec<usize, N_BUFFERS>,
 }
 
 impl<F> Drop for V4L2Encoder<F> {
@@ -81,8 +87,8 @@ impl V4L2EncoderInputFormat {
 
     fn pixel_format(&self) -> PixelFormat {
         PixelFormat::from_u32(match self {
-            Self::Yuv420Planar => 0x32315559,
-            Self::Bgra => 0x34524742,
+            Self::Yuv420Planar => 0x32315559, // FourCC: YU12
+            Self::Bgra => 0x34524742,         // FourCC: BGR4
         })
     }
 }
@@ -97,7 +103,7 @@ pub struct V4L2EncoderConfig {
     pub input_format: V4L2EncoderInputFormat,
 }
 
-const H264_PIXELFORMAT: PixelFormat = PixelFormat::from_u32(0x34363248);
+const H264_PIXELFORMAT: PixelFormat = PixelFormat::from_u32(0x34363248); // FourCC: H264
 
 // XXX: There's a really counterintuitive convention used by the V4L2 API: The output of the
 // encoder is the "capture" queue, while the input to the encoder is the "output" queue.
@@ -186,18 +192,13 @@ impl<F> V4L2Encoder<F> {
             ioctl::s_ctrl(&fd, bindings::V4L2_CID_MPEG_VIDEO_H264_I_PERIOD, interval as _)?;
         }
 
-        // We'll make sure the encoder always has 2 frames to work on before we block for output.
-        // Experimentally, this performs 50% faster than using 1 set of buffers and using 3 has no
-        // benefit over 2. Note that this currently means the encoder has a latency of 2 frames.
-        const N_BUFFERS: usize = 2;
-
         ioctl::reqbufs(&fd, QueueType::VideoOutputMplane, MemoryType::Mmap, N_BUFFERS as _)?;
         let output_mappings = (0..N_BUFFERS)
             .map(|i| -> Result<_> {
                 let buf: ioctl::QueryBuffer = ioctl::querybuf(&fd, QueueType::VideoOutputMplane, i)?;
                 Ok(ioctl::mmap(&fd, buf.planes[0].mem_offset, buf.planes[0].length)?)
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<ArrayVec<_, N_BUFFERS>>>()?;
 
         ioctl::reqbufs(&fd, QueueType::VideoCaptureMplane, MemoryType::Mmap, N_BUFFERS as _)?;
         let capture_mappings = (0..N_BUFFERS)
@@ -205,7 +206,7 @@ impl<F> V4L2Encoder<F> {
                 let buf: ioctl::QueryBuffer = ioctl::querybuf(&fd, QueueType::VideoCaptureMplane, i)?;
                 Ok(ioctl::mmap(&fd, buf.planes[0].mem_offset, buf.planes[0].length)?)
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Result<ArrayVec<_, N_BUFFERS>>>()?;
 
         ioctl::streamon(&fd, QueueType::VideoOutputMplane)?;
         ioctl::streamon(&fd, QueueType::VideoCaptureMplane)?;
