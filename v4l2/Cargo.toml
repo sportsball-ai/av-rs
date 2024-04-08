@@ -1,0 +1,11 @@
+[package]
+name = "v4l2"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+av-traits = { path = "../av-traits" }
+nix = { version = "0.27", features = ["fs"] }
+snafu = "0.8.0"
+arrayvec = "0.7.4"
+v4l2r = { git = "https://github.com/Gnurou/v4l2r", rev = "6091b1f0643f20435b97413635d935052f19c739" }
