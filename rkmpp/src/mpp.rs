@@ -1,6 +1,14 @@
+use cstr::cstr;
 use rkmpp_sys as sys;
 use snafu::Snafu;
-use std::{ffi::{c_void, CStr, CString}, marker::PhantomData, mem::MaybeUninit, ops::Deref, ptr, sync::Arc};
+use std::{
+    ffi::{c_void, CStr, CString},
+    marker::PhantomData,
+    mem::MaybeUninit,
+    ops::Deref,
+    ptr,
+    sync::Arc,
+};
 
 #[derive(Debug, Snafu)]
 #[snafu(display("error code: {code} (/var/log/syslog may contain more information)"))]
@@ -41,7 +49,7 @@ pub struct BufferGroup {
     inner: Arc<BufferGroupInner>,
 }
 
-const MODULE_TAG: &CStr = c"rkmpp_rs";
+const MODULE_TAG: &CStr = cstr!("rkmpp_rs");
 const MPP_BUFFER_FLAGS_CACHABLE: u32 = 0x00020000;
 
 impl Lib {
@@ -53,7 +61,7 @@ impl Lib {
                 sys::MppBufferType_MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE,
                 sys::MppBufferMode_MPP_BUFFER_INTERNAL,
                 MODULE_TAG.as_ptr(),
-                c"new_buffer_group".as_ptr(),
+                cstr!("new_buffer_group").as_ptr(),
             ) {
                 sys::MPP_RET_MPP_OK => Ok(BufferGroup {
                     inner: Arc::new(BufferGroupInner {
@@ -71,13 +79,12 @@ impl BufferGroup {
     pub fn get_buffer(&mut self, size: usize) -> Result<Buffer> {
         let mut buf = ptr::null_mut();
         unsafe {
-            match self.inner.lib.sys.mpp_buffer_get_with_tag(
-                self.inner.group,
-                &mut buf,
-                size,
-                MODULE_TAG.as_ptr(),
-                c"get_buffer".as_ptr(),
-            ) {
+            match self
+                .inner
+                .lib
+                .sys
+                .mpp_buffer_get_with_tag(self.inner.group, &mut buf, size, MODULE_TAG.as_ptr(), cstr!("get_buffer").as_ptr())
+            {
                 sys::MPP_RET_MPP_OK => Ok(Buffer {
                     lib: self.inner.lib.clone(),
                     _group: self.inner.clone(),
@@ -102,8 +109,16 @@ pub struct BufferSync<'a> {
 impl<'a> BufferSync<'a> {
     pub fn as_mut_slice(&self) -> &mut [u8] {
         unsafe {
-            let ptr = self.buf.lib.sys.mpp_buffer_get_ptr_with_caller(self.buf.buf, c"buffer_sync_as_mut_slice".as_ptr());
-            let size = self.buf.lib.sys.mpp_buffer_get_size_with_caller(self.buf.buf, c"buffer_sync_as_mut_slice".as_ptr());
+            let ptr = self
+                .buf
+                .lib
+                .sys
+                .mpp_buffer_get_ptr_with_caller(self.buf.buf, cstr!("buffer_sync_as_mut_slice").as_ptr());
+            let size = self
+                .buf
+                .lib
+                .sys
+                .mpp_buffer_get_size_with_caller(self.buf.buf, cstr!("buffer_sync_as_mut_slice").as_ptr());
             core::slice::from_raw_parts_mut(ptr as *mut u8, size)
         }
     }
@@ -112,7 +127,7 @@ impl<'a> BufferSync<'a> {
 impl<'a> Drop for BufferSync<'a> {
     fn drop(&mut self) {
         unsafe {
-            self.buf.lib.sys.mpp_buffer_sync_end_f(self.buf.buf, 0, c"buffer_sync_drop".as_ptr());
+            self.buf.lib.sys.mpp_buffer_sync_end_f(self.buf.buf, 0, cstr!("buffer_sync_drop").as_ptr());
         }
     }
 }
@@ -120,7 +135,7 @@ impl<'a> Drop for BufferSync<'a> {
 impl Buffer {
     pub fn sync(&self) -> BufferSync {
         unsafe {
-            self.lib.sys.mpp_buffer_sync_begin_f(self.buf, 0, c"buffer_sync".as_ptr());
+            self.lib.sys.mpp_buffer_sync_begin_f(self.buf, 0, cstr!("buffer_sync").as_ptr());
         }
         BufferSync { buf: self }
     }
@@ -129,7 +144,7 @@ impl Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
-            self.lib.sys.mpp_buffer_put_with_caller(self.buf, c"buffer_drop".as_ptr());
+            self.lib.sys.mpp_buffer_put_with_caller(self.buf, cstr!("buffer_drop").as_ptr());
         }
     }
 }
@@ -156,9 +171,7 @@ impl Lib {
 
 impl Frame {
     pub fn set_buffer(&mut self, buffer: &Buffer) {
-        unsafe {
-            self.lib.sys.mpp_frame_set_buffer(self.frame, buffer.buf)
-        }
+        unsafe { self.lib.sys.mpp_frame_set_buffer(self.frame, buffer.buf) }
     }
 }
 
@@ -205,21 +218,15 @@ impl Lib {
 
 impl Context {
     pub fn get_config(&self, cfg: &mut Config) -> Result<()> {
-        unsafe {
-            self.control(sys::MpiCmd_MPP_ENC_GET_CFG, cfg.cfg)
-        }
+        unsafe { self.control(sys::MpiCmd_MPP_ENC_GET_CFG, cfg.cfg) }
     }
 
     pub fn set_config(&mut self, cfg: &Config) -> Result<()> {
-        unsafe {
-            self.control(sys::MpiCmd_MPP_ENC_SET_CFG, cfg.cfg)
-        }
+        unsafe { self.control(sys::MpiCmd_MPP_ENC_SET_CFG, cfg.cfg) }
     }
 
     pub fn force_keyframe(&mut self) -> Result<()> {
-        unsafe {
-            self.control(sys::MpiCmd_MPP_ENC_SET_IDR_FRAME, ptr::null_mut())
-        }
+        unsafe { self.control(sys::MpiCmd_MPP_ENC_SET_IDR_FRAME, ptr::null_mut()) }
     }
 
     pub unsafe fn control(&self, cmd: sys::MpiCmd, v: *mut c_void) -> Result<()> {
@@ -244,10 +251,11 @@ impl Context {
         let mut packet = ptr::null_mut();
         unsafe {
             match (*self.api).encode_get_packet.unwrap()(self.ctx, &mut packet) {
-                sys::MPP_RET_MPP_OK => Ok(if packet.is_null() { None } else {Some(Packet {
-                    lib: self.lib.clone(),
-                    packet,
-                })}),
+                sys::MPP_RET_MPP_OK => Ok(if packet.is_null() {
+                    None
+                } else {
+                    Some(Packet { lib: self.lib.clone(), packet })
+                }),
                 code => Err(Error { code }),
             }
         }

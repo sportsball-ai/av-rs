@@ -7,3 +7,5 @@ edition = "2021"
 av-traits = { path = "../av-traits" }
 snafu = { version = "0.8.0", default-features = false }
 rkmpp-sys = { path = "rkmpp-sys" }
+# TODO: Once we update everything to Rust 1.77 we can get rid of this and use c"..."
+cstr = "0.2.12"
