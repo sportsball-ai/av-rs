@@ -216,7 +216,7 @@ checksum = "c688fc74432808e3eb684cae8830a86be1d66a2bd58e1f248ed0960a590baf6f"
 dependencies = [
  "glob",
  "libc",
- "libloading",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -907,6 +907,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "libloading"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
+dependencies = [
+ "cfg-if",
+ "windows-targets 0.52.0",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1377,6 +1387,23 @@ dependencies = [
  "ffmpeg",
  "h264",
  "h265",
+]
+
+[[package]]
+name = "rkmpp"
+version = "0.1.0"
+dependencies = [
+ "av-traits",
+ "rkmpp-sys",
+ "snafu",
+]
+
+[[package]]
+name = "rkmpp-sys"
+version = "0.1.0"
+dependencies = [
+ "bindgen",
+ "libloading 0.8.3",
 ]
 
 [[package]]
@@ -2399,7 +2426,7 @@ dependencies = [
  "bindgen",
  "h264",
  "h265",
- "libloading",
+ "libloading 0.7.4",
  "scopeguard",
  "simple-error",
 ]

@@ -24,6 +24,8 @@ members = [
     "mpeg4",
     "qtff",
     "rfc6381",
+    "rkmpp",
+    "rkmpp/rkmpp-sys",
     "kvazaar-sys",
     "v4l2",
     "xcoder",
