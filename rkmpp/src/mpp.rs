@@ -7,6 +7,7 @@ use std::{
     mem::MaybeUninit,
     ops::Deref,
     ptr,
+    rc::Rc,
     sync::Arc,
 };
 
@@ -46,7 +47,7 @@ impl Drop for BufferGroupInner {
 }
 
 pub struct BufferGroup {
-    inner: Arc<BufferGroupInner>,
+    inner: Rc<BufferGroupInner>,
 }
 
 const MODULE_TAG: &CStr = cstr!("rkmpp_rs");
@@ -64,7 +65,7 @@ impl Lib {
                 cstr!("new_buffer_group").as_ptr(),
             ) {
                 sys::MPP_RET_MPP_OK => Ok(BufferGroup {
-                    inner: Arc::new(BufferGroupInner {
+                    inner: Rc::new(BufferGroupInner {
                         lib: self.clone(),
                         group: group.assume_init(),
                     }),
@@ -98,7 +99,7 @@ impl BufferGroup {
 
 pub struct Buffer {
     lib: Lib,
-    _group: Arc<BufferGroupInner>,
+    _group: Rc<BufferGroupInner>,
     buf: sys::MppBuffer,
 }
 
@@ -107,7 +108,7 @@ pub struct BufferSync<'a> {
 }
 
 impl<'a> BufferSync<'a> {
-    pub fn as_mut_slice(&self) -> &mut [u8] {
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
         unsafe {
             let ptr = self
                 .buf
@@ -229,7 +230,7 @@ impl Context {
         unsafe { self.control(sys::MpiCmd_MPP_ENC_SET_IDR_FRAME, ptr::null_mut()) }
     }
 
-    pub unsafe fn control(&self, cmd: sys::MpiCmd, v: *mut c_void) -> Result<()> {
+    unsafe fn control(&self, cmd: sys::MpiCmd, v: *mut c_void) -> Result<()> {
         unsafe {
             match (*self.api).control.unwrap()(self.ctx, cmd, v) {
                 sys::MPP_RET_MPP_OK => Ok(()),

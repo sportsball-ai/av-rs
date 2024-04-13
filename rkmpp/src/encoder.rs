@@ -31,7 +31,7 @@ pub enum RkMppEncoderInputFormat {
 }
 
 impl RkMppEncoderInputFormat {
-    fn to_mpp(&self) -> sys::MppFrameFormat {
+    fn to_mpp(self) -> sys::MppFrameFormat {
         match self {
             RkMppEncoderInputFormat::Yuv420Planar => sys::MppFrameFormat_MPP_FMT_YUV420P,
             RkMppEncoderInputFormat::Bgra => sys::MppFrameFormat_MPP_FMT_BGRA8888,
@@ -172,7 +172,7 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for RkMppEncoder<F> {
         }
 
         {
-            let buffer = self.frame_buffer.sync();
+            let mut buffer = self.frame_buffer.sync();
             let dest = buffer.as_mut_slice();
 
             let mut offset = 0;
