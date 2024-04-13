@@ -2437,7 +2437,7 @@ dependencies = [
  "bindgen",
  "h264",
  "h265",
- "libloading 0.7.4",
+ "libloading 0.8.3",
  "scopeguard",
  "simple-error",
 ]

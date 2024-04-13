@@ -104,7 +104,7 @@ pub struct Buffer {
 }
 
 pub struct BufferSync<'a> {
-    buf: &'a Buffer,
+    buf: &'a mut Buffer,
 }
 
 impl<'a> BufferSync<'a> {
@@ -134,7 +134,7 @@ impl<'a> Drop for BufferSync<'a> {
 }
 
 impl Buffer {
-    pub fn sync(&self) -> BufferSync {
+    pub fn sync(&mut self) -> BufferSync {
         unsafe {
             self.lib.sys.mpp_buffer_sync_begin_f(self.buf, 0, cstr!("buffer_sync").as_ptr());
         }
