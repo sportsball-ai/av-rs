@@ -37,3 +37,9 @@ echo 'KERNEL=="mpp_service", MODE="0660", GROUP="video"' | sudo tee /etc/udev/ru
 ```
 
 Reboot and confirm that the device is accessible to the `video` group.
+
+If at this point you encounter issues when you attempt to use the library, you may need to also ensure that `/dev/dma_heap` is accessible to the `video` group by adding a udev rule like...
+
+```
+SUBSYSTEM=="dma_heap", MODE="0660", GROUP="video"
+```
