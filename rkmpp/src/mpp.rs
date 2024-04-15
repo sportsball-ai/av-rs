@@ -230,6 +230,10 @@ impl Context {
         unsafe { self.control(sys::MpiCmd_MPP_ENC_SET_IDR_FRAME, ptr::null_mut()) }
     }
 
+    pub fn get_encoder_header_sync_packet(&mut self, packet: &mut Packet) -> Result<()> {
+        unsafe { self.control(sys::MpiCmd_MPP_ENC_GET_HDR_SYNC, packet.packet) }
+    }
+
     unsafe fn control(&self, cmd: sys::MpiCmd, v: *mut c_void) -> Result<()> {
         unsafe {
             match (*self.api).control.unwrap()(self.ctx, cmd, v) {
@@ -295,6 +299,19 @@ pub struct Packet {
 }
 
 impl Packet {
+    pub fn with_buffer(buffer: &mut Buffer) -> Result<Packet> {
+        let mut packet = ptr::null_mut();
+        unsafe {
+            match buffer.lib.sys.mpp_packet_init_with_buffer(&mut packet, buffer.buf) {
+                sys::MPP_RET_MPP_OK => Ok(Packet {
+                    lib: buffer.lib.clone(),
+                    packet,
+                }),
+                code => Err(Error { code }),
+            }
+        }
+    }
+
     pub fn meta(&self) -> Meta {
         Meta {
             lib: self.lib.clone(),
