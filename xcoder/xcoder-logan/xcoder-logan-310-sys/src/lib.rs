@@ -28,7 +28,7 @@ mod logging {
     #[no_mangle]
     extern "C" fn rust_netint_logan_callback(level: c_int, message: *const c_char) {
         let r = panic::catch_unwind(|| {
-            let buf = unsafe { CStr::from_ptr(message) }.to_string_lossy();
+            let buf = unsafe { CStr::from_ptr(message) }.to_string_lossy().into_owned();
             match level as u32 {
                 crate::ni_log_level_t_NI_LOG_TRACE => log::trace!("{buf}"),
                 crate::ni_log_level_t_NI_LOG_DEBUG => log::debug!("{buf}"),
@@ -36,7 +36,7 @@ mod logging {
                 crate::ni_log_level_t_NI_LOG_FATAL | crate::ni_log_level_t_NI_LOG_ERROR => log::error!("{buf}"),
                 crate::ni_log_level_t_NI_LOG_NONE => {
                     // Do nothing
-                },
+                }
                 level => {
                     log::error!("netint log level {level} unrecognized, message was {buf}")
                 }
