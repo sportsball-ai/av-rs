@@ -16,10 +16,13 @@ void rust_netint_logan_callback(int level, char* message);
 void rust_netint_callback(int level, char* message);
 #endif
 
-void netint_log_callback(int level, const char* format, va_list args) {
+void netint_log_callback(int level, const char* format, ...) {
+  va_list args;
+  va_start(args, format);
   char buf[2048] = {0};
   size_t buf_len = sizeof(buf) / sizeof(buf[0]);
-  int chars_written = snprintf(buf, buf_len, format, args);
+  int chars_written = vsnprintf(buf, buf_len, format, args);
+  va_end(args);
   if (chars_written > -1 && chars_written + 1 < ((int) buf_len)) {
       #ifdef LOGAN
       rust_netint_logan_callback(level, buf);
