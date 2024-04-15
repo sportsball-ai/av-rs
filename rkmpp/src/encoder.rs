@@ -281,7 +281,7 @@ mod test {
                 encoded_frames += 1;
                 if encoded_frame.is_keyframe {
                     encoded_keyframes += 1;
-                    if encoded_frame.data.windows(5).find(|w| w == &[0, 0, 0, 1, 0x67]).is_none() {
+                    if !encoded_frame.data.windows(5).any(|w| w == &[0, 0, 0, 1, 0x67]) {
                         panic!("keyframe {} does not contain sps", encoded_keyframes);
                     }
                 }
