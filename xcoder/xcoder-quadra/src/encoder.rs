@@ -434,7 +434,7 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
     /// try again with the same frame later.
     fn try_write_frame(&mut self, f: F, force_key_frame: bool) -> Result<Option<F>> {
         if !self.frame_data_io_has_next_frame {
-            let mut frame = unsafe { &mut self.frame_data_io.data.frame };
+            let frame = unsafe { &mut self.frame_data_io.data.frame };
             frame.start_of_stream = if self.did_start { 0 } else { 1 };
             frame.extra_data_len = sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _;
             frame.pts = self.frames_copied as _;
@@ -447,7 +447,7 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
                 frame.ni_pict_type = 0;
             }
 
-            let mut dst_data = [frame.p_data[0] as *mut u8, frame.p_data[1] as *mut u8, frame.p_data[2] as *mut u8];
+            let mut dst_data = [frame.p_data[0], frame.p_data[1], frame.p_data[2]];
 
             let mut src_data = [
                 f.samples(0).as_ptr() as *mut u8,

@@ -148,7 +148,7 @@ impl<C: Send> CompressionSession<C> {
                     },
                     sys::kCMTimeInvalid,
                     frame_options.cf_type_ref() as _,
-                    Box::into_raw(context) as *mut C as _,
+                    Box::into_raw(context) as _,
                     std::ptr::null_mut(),
                 )
             }

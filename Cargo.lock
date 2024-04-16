@@ -448,16 +448,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cstr"
-version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68523903c8ae5aacfa32a0d9ae60cadeb764e1da14ee0d26b1f3089f13a54636"
-dependencies = [
- "proc-macro2",
- "quote",
-]
-
-[[package]]
 name = "either"
 version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1404,7 +1394,6 @@ name = "rkmpp"
 version = "0.1.0"
 dependencies = [
  "av-traits",
- "cstr",
  "rkmpp-sys",
  "snafu",
 ]
@@ -2373,14 +2362,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xcoder"
-version = "0.1.0"
-dependencies = [
- "xcoder-logan",
- "xcoder-quadra",
-]
-
-[[package]]
 name = "xcoder-logan"
 version = "0.1.0"
 dependencies = [
@@ -2406,7 +2387,6 @@ version = "0.1.0"
 dependencies = [
  "bindgen",
  "cc",
- "cstr",
  "log",
 ]
 
@@ -2428,7 +2408,6 @@ version = "0.1.0"
 dependencies = [
  "bindgen",
  "cc",
- "cstr",
  "log",
 ]
 

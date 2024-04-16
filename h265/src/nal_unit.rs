@@ -54,8 +54,7 @@ impl<RBSP: IntoIterator<Item = u8>> NALUnit<RBSP> {
     pub fn encode<T: io::Write>(self, bs: &mut BitstreamWriter<T>) -> io::Result<()> {
         self.nal_unit_header.encode(bs)?;
         bs.flush()?;
-        bs.inner_mut()
-            .write_all(&EmulationPrevention::new(self.rbsp_byte.into_iter()).collect::<Vec<u8>>())
+        bs.inner_mut().write_all(&EmulationPrevention::new(self.rbsp_byte).collect::<Vec<u8>>())
     }
 }
 

@@ -1,4 +1,3 @@
-use cstr::cstr;
 use rkmpp_sys as sys;
 use snafu::Snafu;
 use std::{
@@ -50,7 +49,7 @@ pub struct BufferGroup {
     inner: Rc<BufferGroupInner>,
 }
 
-const MODULE_TAG: &CStr = cstr!("rkmpp_rs");
+const MODULE_TAG: &CStr = c"rkmpp_rs";
 const MPP_BUFFER_FLAGS_CACHABLE: u32 = 0x00020000;
 
 impl Lib {
@@ -62,7 +61,7 @@ impl Lib {
                 sys::MppBufferType_MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_CACHABLE,
                 sys::MppBufferMode_MPP_BUFFER_INTERNAL,
                 MODULE_TAG.as_ptr(),
-                cstr!("new_buffer_group").as_ptr(),
+                c"new_buffer_group".as_ptr(),
             ) {
                 sys::MPP_RET_MPP_OK => Ok(BufferGroup {
                     inner: Rc::new(BufferGroupInner {
@@ -84,7 +83,7 @@ impl BufferGroup {
                 .inner
                 .lib
                 .sys
-                .mpp_buffer_get_with_tag(self.inner.group, &mut buf, size, MODULE_TAG.as_ptr(), cstr!("get_buffer").as_ptr())
+                .mpp_buffer_get_with_tag(self.inner.group, &mut buf, size, MODULE_TAG.as_ptr(), c"get_buffer".as_ptr())
             {
                 sys::MPP_RET_MPP_OK => Ok(Buffer {
                     lib: self.inner.lib.clone(),
@@ -114,12 +113,12 @@ impl<'a> BufferSync<'a> {
                 .buf
                 .lib
                 .sys
-                .mpp_buffer_get_ptr_with_caller(self.buf.buf, cstr!("buffer_sync_as_mut_slice").as_ptr());
+                .mpp_buffer_get_ptr_with_caller(self.buf.buf, c"buffer_sync_as_mut_slice".as_ptr());
             let size = self
                 .buf
                 .lib
                 .sys
-                .mpp_buffer_get_size_with_caller(self.buf.buf, cstr!("buffer_sync_as_mut_slice").as_ptr());
+                .mpp_buffer_get_size_with_caller(self.buf.buf, c"buffer_sync_as_mut_slice".as_ptr());
             core::slice::from_raw_parts_mut(ptr as *mut u8, size)
         }
     }
@@ -128,7 +127,7 @@ impl<'a> BufferSync<'a> {
 impl<'a> Drop for BufferSync<'a> {
     fn drop(&mut self) {
         unsafe {
-            self.buf.lib.sys.mpp_buffer_sync_end_f(self.buf.buf, 0, cstr!("buffer_sync_drop").as_ptr());
+            self.buf.lib.sys.mpp_buffer_sync_end_f(self.buf.buf, 0, c"buffer_sync_drop".as_ptr());
         }
     }
 }
@@ -136,7 +135,7 @@ impl<'a> Drop for BufferSync<'a> {
 impl Buffer {
     pub fn sync(&mut self) -> BufferSync {
         unsafe {
-            self.lib.sys.mpp_buffer_sync_begin_f(self.buf, 0, cstr!("buffer_sync").as_ptr());
+            self.lib.sys.mpp_buffer_sync_begin_f(self.buf, 0, c"buffer_sync".as_ptr());
         }
         BufferSync { buf: self }
     }
@@ -145,7 +144,7 @@ impl Buffer {
 impl Drop for Buffer {
     fn drop(&mut self) {
         unsafe {
-            self.lib.sys.mpp_buffer_put_with_caller(self.buf, cstr!("buffer_drop").as_ptr());
+            self.lib.sys.mpp_buffer_put_with_caller(self.buf, c"buffer_drop".as_ptr());
         }
     }
 }

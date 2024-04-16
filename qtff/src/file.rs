@@ -328,8 +328,7 @@ impl File {
                                         let mut data = match &mdat[0] {
                                             Data::SourceFile(source_offset, source_size) => {
                                                 self.f.seek(SeekFrom::Start(*source_offset))?;
-                                                let mut buf = Vec::new();
-                                                buf.resize(*source_size, 0);
+                                                let mut buf = vec![0; *source_size];
                                                 self.f.read_exact(&mut buf)?;
                                                 buf
                                             }

@@ -1,7 +1,6 @@
 use std::fs::File;
 
-mod lib;
-use lib::*;
+use h265_tile_mux::*;
 
 type BoxError = Box<dyn std::error::Error + Sync + Send>;
 

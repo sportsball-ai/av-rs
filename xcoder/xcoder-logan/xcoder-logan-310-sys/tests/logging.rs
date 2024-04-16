@@ -1,6 +1,5 @@
 #[cfg(target_os = "linux")]
 mod linux {
-    use cstr::cstr;
     use std::sync::Mutex;
 
     use xcoder_logan_310_sys as sys;
@@ -37,7 +36,7 @@ mod linux {
         log::set_max_level(log::LevelFilter::Info);
         unsafe {
             sys::setup_rust_netint_logging();
-            sys::ni_logan_log(sys::ni_log_level_t_NI_LOG_ERROR, cstr!("foo %s %d").as_ptr(), cstr!("bar").as_ptr(), 1234u32);
+            sys::ni_logan_log(sys::ni_log_level_t_NI_LOG_ERROR, c"foo %s %d".as_ptr(), c"bar".as_ptr(), 1234u32);
         }
         let l = log.0.lock().expect("not poisoned");
         assert_eq!(l.len(), 1);

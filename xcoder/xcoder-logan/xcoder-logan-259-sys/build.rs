@@ -37,7 +37,7 @@ fn main() {
             .status()
             .unwrap();
 
-        let c_source_files = vec!["ni_nvme.c", "ni_device_api_priv.c", "ni_device_api.c", "ni_util.c"];
+        let c_source_files = ["ni_nvme.c", "ni_device_api_priv.c", "ni_device_api.c", "ni_util.c"];
 
         cc::Build::new()
             .files(c_source_files.iter().map(|name| source_path.join(name)))
@@ -51,7 +51,7 @@ fn main() {
             .flag("-DLIBXCODER_OBJS_BUILD")
             .compile("xcoder-c-sys");
 
-        let cpp_source_files = vec!["ni_rsrc_priv.cpp", "ni_rsrc_api.cpp"];
+        let cpp_source_files = ["ni_rsrc_priv.cpp", "ni_rsrc_api.cpp"];
 
         cc::Build::new()
             .files(cpp_source_files.iter().map(|name| source_path.join(name)))

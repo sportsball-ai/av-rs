@@ -300,7 +300,7 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
     /// frame later.
     fn try_write_frame(&mut self, f: F, force_key_frame: bool) -> Result<Option<F>> {
         if !self.frame_data_io_has_next_frame {
-            let mut frame = unsafe { &mut self.frame_data_io.data.frame };
+            let frame = unsafe { &mut self.frame_data_io.data.frame };
             frame.start_of_stream = if self.did_start { 0 } else { 1 };
             frame.extra_data_len = sys::NI_LOGAN_APP_ENC_FRAME_META_DATA_SIZE as _;
             frame.pts = self.frames_copied as _;

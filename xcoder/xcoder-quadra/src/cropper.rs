@@ -185,7 +185,7 @@ impl Drop for XcoderCropper {
 #[cfg(test)]
 mod test {
     use super::{
-        super::{decoder::test::read_frames, *},
+        super::{decoder::read_frames, *},
         *,
     };
 

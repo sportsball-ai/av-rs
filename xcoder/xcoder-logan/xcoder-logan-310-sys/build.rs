@@ -39,7 +39,7 @@ fn main() {
             .status()
             .unwrap();
 
-        let c_source_files = vec![
+        let c_source_files = [
             "ni_log_logan.c",
             "ni_nvme_logan.c",
             "ni_device_api_priv_logan.c",
@@ -73,7 +73,7 @@ fn main() {
             .flag("-DLIBXCODER_OBJS_BUILD")
             .compile("xcoder-logging-shim");
 
-        let cpp_source_files = vec!["ni_rsrc_priv_logan.cpp", "ni_rsrc_api_logan.cpp"];
+        let cpp_source_files = ["ni_rsrc_priv_logan.cpp", "ni_rsrc_api_logan.cpp"];
 
         cc::Build::new()
             .files(cpp_source_files.iter().map(|name| source_path.join(name)))

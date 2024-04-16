@@ -28,7 +28,7 @@ fn main() {
             .status()
             .unwrap();
 
-        let c_source_files = vec![
+        let c_source_files = [
             "ni_nvme.c",
             "ni_device_api_priv.c",
             "ni_device_api.c",
@@ -59,7 +59,7 @@ fn main() {
             .flag("-DLIBXCODER_OBJS_BUILD")
             .compile("xcoder-logging-shim");
 
-        let cpp_source_files = vec!["ni_rsrc_priv.cpp", "ni_rsrc_api.cpp"];
+        let cpp_source_files = ["ni_rsrc_priv.cpp", "ni_rsrc_api.cpp"];
 
         cc::Build::new()
             .files(cpp_source_files.iter().map(|name| source_path.join(name)))

@@ -28,7 +28,6 @@ members = [
     "rkmpp/rkmpp-sys",
     "kvazaar-sys",
     "v4l2",
-    "xcoder",
     "xcoder/xcoder-logan",
     "xcoder/xcoder-logan/xcoder-logan-259-sys",
     "xcoder/xcoder-logan/xcoder-logan-310-sys",

@@ -291,7 +291,7 @@ mod test {
                     }
                 }
             }
-            state.packets.extend(completed.into_iter());
+            state.packets.extend(completed);
             state.buffer = incomplete_packet;
             Ok(n)
         }
@@ -318,7 +318,7 @@ mod test {
             .flat_map(|p| pes_stream.write(&p).unwrap())
             .take(num_of_pes_packets - 1)
             .collect::<Vec<pes::Packet>>();
-        pes_packets.extend(pes_stream.flush().into_iter());
+        pes_packets.extend(pes_stream.flush());
         if sort {
             pes_packets.sort_unstable_by_key(get_pes_packet_ts);
         }
