@@ -36,7 +36,7 @@ mod logging {
                 crate::ni_log_level_t_NI_LOG_FATAL | crate::ni_log_level_t_NI_LOG_ERROR => log::error!("{buf}"),
                 crate::ni_log_level_t_NI_LOG_NONE => {
                     // Do nothing
-                },
+                }
                 level => {
                     log::error!("netint log level {level} unrecognized, message was {buf}")
                 }
