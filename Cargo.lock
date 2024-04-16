@@ -2362,14 +2362,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "xcoder"
-version = "0.1.0"
-dependencies = [
- "xcoder-logan",
- "xcoder-quadra",
-]
-
-[[package]]
 name = "xcoder-logan"
 version = "0.1.0"
 dependencies = [
