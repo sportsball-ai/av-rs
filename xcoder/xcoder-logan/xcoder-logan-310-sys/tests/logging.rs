@@ -30,7 +30,7 @@ impl log::Log for MyLog {
 
 #[test]
 fn blah() {
-    let log = Box::leak(Box::new(MyLog::default()));
+    let log = Box::leak(Box::<MyLog>::default());
     log::set_logger(log).expect("installing logger should succeed");
     log::set_max_level(log::LevelFilter::Info);
     unsafe {
