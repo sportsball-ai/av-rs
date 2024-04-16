@@ -5,6 +5,7 @@ fn main() {
 
         let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
+        println!("cargo:rerun-if-changed=vendor/libxcoder_logan");
         let libxcoder_path = out_path.join("libxcoder_logan");
         Command::new("cp")
             .args(["-r", "vendor/libxcoder_logan", libxcoder_path.to_str().unwrap()])
@@ -61,6 +62,7 @@ fn main() {
             .compile("xcoder-logan-c-sys");
 
         // Our own logging bridge
+        println!("cargo:rerun-if-changed=../../logging_shim.c");
         cc::Build::new()
             .file("../../logging_shim.c")
             .define("LOGAN", None)
