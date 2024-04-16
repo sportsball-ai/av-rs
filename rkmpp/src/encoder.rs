@@ -22,6 +22,8 @@ pub struct RkMppEncoder<F> {
     context: mpp::Context,
     pending_frames: VecDeque<F>,
     frame_buffer: mpp::Buffer,
+    parameter_sets: Vec<u8>,
+    frames_emitted: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -127,12 +129,21 @@ impl<F> RkMppEncoder<F> {
         let mut buffer_group = lib.new_buffer_group()?;
         let frame_buffer = buffer_group.get_buffer(config.frame_size() as _)?;
 
+        let parameter_sets = {
+            let mut packet_buffer = buffer_group.get_buffer(10 * 1024)?;
+            let mut packet = mpp::Packet::with_buffer(&mut packet_buffer)?;
+            context.get_encoder_header_sync_packet(&mut packet)?;
+            packet.as_slice().to_vec()
+        };
+
         Ok(Self {
             config,
             pending_frames: VecDeque::new(),
             lib,
             context,
             frame_buffer,
+            parameter_sets,
+            frames_emitted: 0,
         })
     }
 
@@ -145,11 +156,20 @@ impl<F> RkMppEncoder<F> {
             Some(packet) => packet,
             None => return Ok(None),
         };
-        let data = packet.as_slice().to_vec();
+        let mut data = vec![];
 
         let f = self.pending_frames.pop_front().expect("we already checked for frames");
         let is_keyframe = packet.meta().get_s32(sys::MppMetaKey_e_KEY_OUTPUT_INTRA)? != 0;
 
+        if is_keyframe && self.frames_emitted > 0 {
+            // The encoder will automatically add parameter sets to the first keyframe, but we want
+            // to repeat them for all keyframes.
+            data.extend_from_slice(&self.parameter_sets);
+        }
+
+        data.extend_from_slice(packet.as_slice());
+
+        self.frames_emitted += 1;
         Ok(Some(VideoEncoderOutput {
             raw_frame: f,
             encoded_frame: Some(EncodedVideoFrame { data, is_keyframe }),
@@ -258,11 +278,14 @@ mod test {
                 .unwrap()
             {
                 let mut encoded_frame = output.encoded_frame.expect("frame was not dropped");
-                encoded.append(&mut encoded_frame.data);
                 encoded_frames += 1;
                 if encoded_frame.is_keyframe {
                     encoded_keyframes += 1;
+                    if !encoded_frame.data.windows(5).any(|w| w == [0, 0, 0, 1, 0x67]) {
+                        panic!("keyframe {} does not contain sps", encoded_keyframes);
+                    }
                 }
+                encoded.append(&mut encoded_frame.data);
             }
         }
         while let Some(output) = encoder.flush().unwrap() {
