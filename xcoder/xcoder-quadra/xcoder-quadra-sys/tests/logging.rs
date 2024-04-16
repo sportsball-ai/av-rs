@@ -1,3 +1,4 @@
+use cstr::cstr;
 use std::sync::Mutex;
 
 use xcoder_quadra_sys as sys;
