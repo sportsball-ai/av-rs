@@ -11,24 +11,19 @@
 #endif
 
 #ifdef LOGAN
-void rust_netint_logan_callback(int level, char* message);
-#else
-void rust_netint_callback(int level, char* message);
+#define rust_netint_callback rust_netint_logan_callback
+#define netint_log_callback netint_logan_log_callback
+#define ni_log_set_callback ni_logan_log_set_callback
 #endif
 
-void netint_log_callback(int level, const char* format, ...) {
-  va_list args;
-  va_start(args, format);
+void rust_netint_callback(int level, char* message);
+
+static void netint_log_callback(int level, const char* format, va_list args) {
   char buf[2048] = {0};
   size_t buf_len = sizeof(buf) / sizeof(buf[0]);
   int chars_written = vsnprintf(buf, buf_len, format, args);
-  va_end(args);
   if (chars_written > -1 && chars_written + 1 < ((int) buf_len)) {
-      #ifdef LOGAN
-      rust_netint_logan_callback(level, buf);
-      #else
       rust_netint_callback(level, buf);
-      #endif
   }
 }
 
