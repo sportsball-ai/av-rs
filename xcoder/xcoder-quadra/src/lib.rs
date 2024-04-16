@@ -97,7 +97,7 @@ pub use linux_impl::*;
 
 #[cfg(all(test, target_os = "linux"))]
 mod test {
-    use super::{decoder::test::read_frames, *};
+    use super::{decoder::read_frames, *};
 
     #[test]
     fn test_fps_to_rational() {

@@ -332,8 +332,7 @@ impl ReadData for SampleSizeData {
         match BigEndian::read_u32(&buf[4..]) {
             0 => {
                 let number_of_entries = BigEndian::read_u32(&buf[8..]);
-                let mut entry_buf = Vec::new();
-                entry_buf.resize(number_of_entries as usize * 4, 0);
+                let mut entry_buf = vec![0; number_of_entries as usize * 4];
                 reader.read_exact(&mut entry_buf)?;
                 Ok(Self {
                     version: buf[0],
@@ -1363,8 +1362,7 @@ impl<M: MediaType> ReadData for SampleDescriptionData<M> {
             if size < 4 {
                 break;
             }
-            let mut buf = Vec::new();
-            buf.resize((size - 4) as _, 0);
+            let mut buf = vec![0; (size - 4) as _];
             reader.read_exact(&mut buf)?;
             entries.push(M::SampleDescriptionDataEntry::read(Cursor::new(buf.as_slice()))?);
         }

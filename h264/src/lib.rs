@@ -85,9 +85,7 @@ impl<'a> Iterator for AnnexBIter<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        let Some(remaining) = self.remaining else {
-            return None;
-        };
+        let remaining = self.remaining?;
         let finder = START_CODE_FINDER.get_or_init(|| memchr::memmem::Finder::new(&START_CODE));
 
         let (this_nal, rest);
@@ -218,7 +216,7 @@ impl AccessUnitCounter {
         // ITU-T H.264, 04/2017, 7.4.1.2.3
         // TODO: implement the rest of 7.4.1.2.4?
         match nalu_type {
-            1 | 2 => {
+            1..=2 => {
                 if self.maybe_start_new_access_unit {
                     if let Some(sps) = &self.sps {
                         let bs = Bitstream::new(nalu.iter().copied());
@@ -233,8 +231,8 @@ impl AccessUnitCounter {
                 }
                 self.maybe_start_new_access_unit = true;
             }
-            3 | 4 | 5 => self.maybe_start_new_access_unit = true,
-            6 | 7 | 8 | 9 | 14 | 15 | 16 | 17 | 18 => {
+            3..=5 => self.maybe_start_new_access_unit = true,
+            6..=9 | 14..=18 => {
                 if self.maybe_start_new_access_unit {
                     self.maybe_start_new_access_unit = false;
                     self.count += 1;

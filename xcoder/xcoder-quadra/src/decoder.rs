@@ -371,51 +371,53 @@ impl<I, E> Drop for XcoderDecoder<I, E> {
 }
 
 #[cfg(test)]
-pub mod test {
-    use super::{super::*, *};
-    use std::io::{self, Read};
+/// Reads frames from a raw .h264 or .h265 file.
+pub fn read_frames(path: &str) -> Vec<Result<XcoderDecoderInputFrame, std::io::Error>> {
+    use std::io::Read;
 
-    /// Reads frames from a raw .h264 or .h265 file.
-    pub fn read_frames(path: &str) -> Vec<Result<XcoderDecoderInputFrame, io::Error>> {
-        let mut f = std::fs::File::open(path).unwrap();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf).unwrap();
+    let mut f = std::fs::File::open(path).unwrap();
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).unwrap();
 
-        let nalus: Vec<_> = h264::iterate_annex_b(&buf).collect();
+    let nalus: Vec<_> = h264::iterate_annex_b(&buf).collect();
 
-        let mut ret = vec![];
-        let mut buffer = vec![];
-        let mut h264_counter = h264::AccessUnitCounter::new();
-        let mut h265_counter = h265::AccessUnitCounter::new();
-        for nalu in nalus {
-            let is_new_frame = if path.contains(".h264") {
-                let before = h264_counter.count();
-                h264_counter.count_nalu(nalu).unwrap();
-                h264_counter.count() != before
-            } else {
-                let before = h265_counter.count();
-                h265_counter.count_nalu(nalu).unwrap();
-                h265_counter.count() != before
-            };
-            if is_new_frame && !buffer.is_empty() {
-                ret.push(Ok(XcoderDecoderInputFrame {
-                    data: mem::take(&mut buffer),
-                    pts: ret.len() as _,
-                    dts: ret.len() as _,
-                }));
-            }
-            buffer.extend_from_slice(&[0, 0, 0, 1]);
-            buffer.extend_from_slice(nalu);
-        }
-        if !buffer.is_empty() {
+    let mut ret = vec![];
+    let mut buffer = vec![];
+    let mut h264_counter = h264::AccessUnitCounter::new();
+    let mut h265_counter = h265::AccessUnitCounter::new();
+    for nalu in nalus {
+        let is_new_frame = if path.contains(".h264") {
+            let before = h264_counter.count();
+            h264_counter.count_nalu(nalu).unwrap();
+            h264_counter.count() != before
+        } else {
+            let before = h265_counter.count();
+            h265_counter.count_nalu(nalu).unwrap();
+            h265_counter.count() != before
+        };
+        if is_new_frame && !buffer.is_empty() {
             ret.push(Ok(XcoderDecoderInputFrame {
                 data: mem::take(&mut buffer),
                 pts: ret.len() as _,
                 dts: ret.len() as _,
             }));
         }
-        ret
+        buffer.extend_from_slice(&[0, 0, 0, 1]);
+        buffer.extend_from_slice(nalu);
     }
+    if !buffer.is_empty() {
+        ret.push(Ok(XcoderDecoderInputFrame {
+            data: mem::take(&mut buffer),
+            pts: ret.len() as _,
+            dts: ret.len() as _,
+        }));
+    }
+    ret
+}
+
+#[cfg(test)]
+mod test {
+    use super::{super::*, *};
 
     #[test]
     fn test_decoder() {
