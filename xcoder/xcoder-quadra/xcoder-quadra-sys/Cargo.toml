@@ -11,3 +11,6 @@ log = "0.4"
 # We're very permissive here with bindgen due to https://github.com/rust-lang/cargo/issues/5237
 bindgen = "0.*"
 cc = "1.0"
+
+[dev-dependencies]
+cstr = "0.2.12"
