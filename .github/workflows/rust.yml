@@ -68,7 +68,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose -p xcoder-logan -- --test-threads=1
+          args: --verbose -p xcoder-logan -p xcoder-logan-310-sys -- --test-threads=1
   test_xcoder_logan_v2_compat:
     name: Test xcoder-logan v2-compat
     runs-on:
@@ -91,7 +91,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose -p xcoder-logan --features v2-compat -- --test-threads=1
+          args: --verbose -p xcoder-logan -p xcoder-logan-259-sys --features v2-compat -- --test-threads=1
   test_xcoder_quadra:
     name: Test xcoder-quadra
     runs-on:
@@ -114,4 +114,4 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: test
-          args: --verbose -p xcoder-quadra -- --test-threads=1
+          args: --verbose -p xcoder-quadra -p xcoder-quadra-sys -- --test-threads=1
