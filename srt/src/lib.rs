@@ -928,4 +928,31 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn log_handler_used_correctly() {
+        set_log_level(LogLevel::Debug);
+        let called = Arc::new(AtomicU32::new(0));
+        let called_clone = Arc::clone(&called);
+        set_log_handler(move |_: &SrtLogEvent<'_>| {
+            called.fetch_add(1, Ordering::Relaxed);
+        });
+        let server_thread = thread::spawn(|| {
+            let listener = Listener::bind("127.0.0.1:1234").unwrap();
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0; 1316];
+            assert_eq!(conn.read(&mut buf).unwrap(), 3);
+            assert_eq!(&buf[0..3], b"foo");
+
+            assert!(conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
+        });
+
+        let mut conn = Stream::connect("127.0.0.1:1234", &ConnectOptions::default()).unwrap();
+        assert_eq!(conn.write(b"foo").unwrap(), 3);
+        assert_eq!(conn.id(), None);
+
+        server_thread.join().unwrap();
+        let called_count = called_clone.load(Ordering::Relaxed);
+        assert!(called_count > 0, "called_count = {}", called_count);
+    }
 }
