@@ -591,7 +591,7 @@ where
     F: FnMut(&SrtLogEvent) + Send + Sync + 'static,
 {
     let closure_raw = Box::into_raw(Box::new(Box::new(handler) as Box<dyn FnMut(&SrtLogEvent) + Send + Sync + 'static>));
-    let closure = LogHandler(closure_raw as LogHandlerRaw);
+    let closure = LogHandler(closure_raw);
     let mut lock = LOG_HANDLER.lock().unwrap();
     let old_handler = mem::replace(&mut *lock, Some(closure));
     unsafe {
