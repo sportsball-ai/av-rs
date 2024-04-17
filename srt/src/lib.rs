@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate lazy_static;
 
-use libc::{LOG_CRIT, LOG_DEBUG, LOG_ERR, LOG_NOTICE, LOG_WARNING};
+use libc::{sockaddr_in, sockaddr_in6, LOG_CRIT, LOG_DEBUG, LOG_ERR, LOG_NOTICE, LOG_WARNING};
 use num_traits::FromPrimitive;
 pub use srt_sys as sys;
 use std::{
@@ -237,6 +237,44 @@ impl Socket {
         self.sock
     }
 
+    #[cfg(test)]
+    fn socket_addr(&self) -> Result<SocketAddr> {
+        use std::mem::MaybeUninit;
+
+        use sys::{sockaddr, srt_getsockname};
+
+        unsafe {
+            // Try IPv4 first, if that fails try IPv6.
+            let mut ipv4: MaybeUninit<sockaddr_in> = MaybeUninit::uninit();
+            let mut len = mem::size_of::<sockaddr_in>() as i32;
+            let success = srt_getsockname(self.sock, ipv4.as_mut_ptr() as *mut sockaddr, &mut len) == 0;
+            if success && len == mem::size_of::<sockaddr_in>() as i32 {
+                let ipv4 = ipv4.assume_init();
+                Ok(SocketAddr::V4(SocketAddrV4::new(
+                    Ipv4Addr::from(ipv4.sin_addr.s_addr.to_ne_bytes()),
+                    u16::from_be_bytes(ipv4.sin_port.to_ne_bytes()),
+                )))
+            } else {
+                let mut ipv6: MaybeUninit<sockaddr_in6> = MaybeUninit::uninit();
+                let mut len = mem::size_of::<sockaddr_in6>() as i32;
+                let success = srt_getsockname(self.sock, ipv6.as_mut_ptr() as *mut sockaddr, &mut len) == 0;
+                if success && len == mem::size_of::<sockaddr_in6>() as i32 {
+                    let ipv6 = ipv6.assume_init();
+                    Ok(SocketAddr::V6(SocketAddrV6::new(
+                        Ipv6Addr::from(ipv6.sin6_addr.s6_addr),
+                        u16::from_be_bytes(ipv6.sin6_port.to_ne_bytes()),
+                        ipv6.sin6_flowinfo,
+                        ipv6.sin6_scope_id,
+                    )))
+                } else if !success {
+                    Err(io::Error::last_os_error().into())
+                } else {
+                    panic!("This function only supports IPv4 and IPv6")
+                }
+            }
+        }
+    }
+
     fn raw_stats(&mut self, clear: bool, instantaneous: bool) -> Result<sys::SRT_TRACEBSTATS> {
         unsafe {
             let mut perf: sys::SRT_TRACEBSTATS = mem::zeroed();
@@ -306,7 +344,7 @@ impl Drop for Socket {
 
 fn sockaddr_from_storage(storage: &sys::sockaddr_storage, len: sys::socklen_t) -> Result<SocketAddr> {
     // from: https://github.com/rust-lang/rust/blob/7c78a5f97de07a185eebae5a5de436c80d8ba9d4/src/libstd/sys_common/net.rs#L95
-    use libc::{c_int, sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
+    use libc::{c_int, AF_INET, AF_INET6};
     match storage.ss_family as c_int {
         AF_INET => {
             assert!(len as usize >= mem::size_of::<sockaddr_in>());
@@ -329,7 +367,7 @@ fn sockaddr_from_storage(storage: &sys::sockaddr_storage, len: sys::socklen_t) -
 }
 
 fn to_sockaddr(addr: &SocketAddr) -> (sys::sockaddr_storage, sys::socklen_t) {
-    use libc::{sockaddr_in, sockaddr_in6, AF_INET, AF_INET6};
+    use libc::{AF_INET, AF_INET6};
     let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
     let socklen = match addr {
         SocketAddr::V4(ref a) => {
@@ -590,8 +628,8 @@ pub fn set_log_handler<F>(handler: F)
 where
     F: FnMut(&SrtLogEvent) + Send + Sync + 'static,
 {
-    let closure_raw = Box::into_raw(Box::new(Box::new(handler)));
-    let closure = LogHandler(closure_raw as LogHandlerRaw);
+    let closure_raw = Box::into_raw(Box::new(Box::new(handler) as Box<dyn FnMut(&SrtLogEvent) + Send + Sync + 'static>));
+    let closure = LogHandler(closure_raw);
     let mut lock = LOG_HANDLER.lock().unwrap();
     let old_handler = mem::replace(&mut *lock, Some(closure));
     unsafe {
@@ -717,14 +755,20 @@ mod test {
     use std::{
         panic::panic_any,
         ptr::null_mut,
-        sync::atomic::{AtomicU32, Ordering},
+        sync::{
+            atomic::{AtomicU32, Ordering},
+            mpsc,
+        },
         thread,
+        time::Duration,
     };
 
     #[test]
     fn test_client_server() {
-        let server_thread = thread::spawn(|| {
-            let listener = Listener::bind("127.0.0.1:1234").unwrap();
+        let (port_tx, port_rx) = mpsc::sync_channel(1);
+        let server_thread = thread::spawn(move || {
+            let listener = Listener::bind("127.0.0.1:0").unwrap();
+            port_tx.send(listener.socket.socket_addr().unwrap().port()).unwrap();
             let (mut conn, _) = listener.accept().unwrap();
             let mut buf = [0; 1316];
             assert_eq!(conn.read(&mut buf).unwrap(), 3);
@@ -733,7 +777,8 @@ mod test {
             assert!(conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
         });
 
-        let mut conn = Stream::connect("127.0.0.1:1234", &ConnectOptions::default()).unwrap();
+        let port: u16 = port_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut conn = Stream::connect(format!("127.0.0.1:{port}"), &ConnectOptions::default()).unwrap();
         assert_eq!(conn.write(b"foo").unwrap(), 3);
         assert_eq!(conn.id(), None);
 
@@ -742,8 +787,9 @@ mod test {
 
     #[test]
     fn test_passphrase() {
-        let server_thread = thread::spawn(|| {
-            let listener = Listener::bind_with_options("127.0.0.1:1236", [ListenerOption::TooLatePacketDrop(false)].iter().cloned())
+        let (port_tx, port_rx) = mpsc::sync_channel(1);
+        let server_thread = thread::spawn(move || {
+            let listener = Listener::bind_with_options("127.0.0.1:0", [ListenerOption::TooLatePacketDrop(false)].iter().cloned())
                 .unwrap()
                 .with_callback(|stream_id: Option<&_>| {
                     assert_eq!(stream_id, Some("mystreamid"));
@@ -752,12 +798,13 @@ mod test {
                     }
                 })
                 .unwrap();
+            port_tx.send(listener.socket.socket_addr().unwrap().port()).unwrap();
             let (mut conn, _) = listener.accept().unwrap();
             let mut buf = [0; 1316];
             assert_eq!(conn.read(&mut buf).unwrap(), 3);
             assert_eq!(&buf[0..3], b"foo");
         });
-
+        let port: u16 = port_rx.recv_timeout(Duration::from_secs(5)).unwrap();
         let mut options = ConnectOptions {
             stream_id: Some("mystreamid".to_string()),
             passphrase: Some("notthepassphrase".to_string()),
@@ -765,10 +812,10 @@ mod test {
             ..Default::default()
         };
 
-        assert!(Stream::connect("127.0.0.1:1236", &options).is_err());
+        assert!(Stream::connect(format!("127.0.0.1:{port}"), &options).is_err());
 
         options.passphrase = Some("thepassphrase".to_string());
-        let mut conn = Stream::connect("127.0.0.1:1236", &options).unwrap();
+        let mut conn = Stream::connect(format!("127.0.0.1:{port}"), &options).unwrap();
         assert_eq!(conn.write(b"foo").unwrap(), 3);
         let buf = [0; 2000];
         assert_eq!(conn.write(&buf[..]).unwrap(), 1400);
@@ -927,5 +974,34 @@ mod test {
                 assert_eq!(drop_count_clone.load(Ordering::Relaxed), 5);
             }
         }
+    }
+
+    #[test]
+    fn log_handler_used_correctly() {
+        set_log_level(LogLevel::Debug);
+        let called = Arc::new(AtomicU32::new(0));
+        let called_clone = Arc::clone(&called);
+        set_log_handler(move |_: &SrtLogEvent<'_>| {
+            called.fetch_add(1, Ordering::Relaxed);
+        });
+        let (port_tx, port_rx) = mpsc::sync_channel(1);
+        let server_thread = thread::spawn(move || {
+            let listener = Listener::bind("127.0.0.1:0").unwrap();
+            port_tx.send(listener.socket.socket_addr().unwrap().port()).unwrap();
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0; 1316];
+            assert_eq!(conn.read(&mut buf).unwrap(), 3);
+            assert_eq!(&buf[0..3], b"foo");
+
+            assert!(conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
+        });
+        let port = port_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let mut conn = Stream::connect(format!("127.0.0.1:{port}"), &ConnectOptions::default()).unwrap();
+        assert_eq!(conn.write(b"foo").unwrap(), 3);
+        assert_eq!(conn.id(), None);
+
+        server_thread.join().unwrap();
+        let called_count = called_clone.load(Ordering::Relaxed);
+        assert!(called_count > 0, "called_count = {}", called_count);
     }
 }
