@@ -938,7 +938,7 @@ mod test {
             called.fetch_add(1, Ordering::Relaxed);
         });
         let server_thread = thread::spawn(|| {
-            let listener = Listener::bind("127.0.0.1:1234").unwrap();
+            let listener = Listener::bind("127.0.0.1:1233").unwrap();
             let (mut conn, _) = listener.accept().unwrap();
             let mut buf = [0; 1316];
             assert_eq!(conn.read(&mut buf).unwrap(), 3);
@@ -947,7 +947,7 @@ mod test {
             assert!(conn.raw_stats(false, false).unwrap().pktRecvTotal > 0);
         });
 
-        let mut conn = Stream::connect("127.0.0.1:1234", &ConnectOptions::default()).unwrap();
+        let mut conn = Stream::connect("127.0.0.1:1233", &ConnectOptions::default()).unwrap();
         assert_eq!(conn.write(b"foo").unwrap(), 3);
         assert_eq!(conn.id(), None);
 
