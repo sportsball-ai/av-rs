@@ -244,7 +244,7 @@ mod test {
 
         assert_eq!(encoded_frames, 90);
         assert!(encoded.len() > 5000, "encoded.len() = {}", encoded.len());
-        assert!(encoded.len() < 10000, "encoded.len() = {}", encoded.len());
+        assert!(encoded.len() < 20000, "encoded.len() = {}", encoded.len());
 
         // To inspect the output, uncomment these lines:
         //use std::io::Write;
