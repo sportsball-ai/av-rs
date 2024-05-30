@@ -470,6 +470,7 @@ mod test {
             },
             bit_depth: 8,
             hardware: Some(decoder.hardware()),
+            multicore_joint_mode: false,
         })
         .unwrap();
 
