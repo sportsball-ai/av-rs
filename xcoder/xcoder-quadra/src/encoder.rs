@@ -128,6 +128,7 @@ pub struct XcoderEncoderConfig {
     pub bitrate: Option<u32>,
     pub codec: XcoderEncoderCodec,
     pub bit_depth: u8,
+    pub multicore_joint_mode: bool,
 
     /// To use the encoder with hardware frames, provide this (e.g. from `XcoderDecoder::hardware`).
     pub hardware: Option<XcoderHardware>,
@@ -169,6 +170,8 @@ impl<F> XcoderEncoder<F> {
 
             // some formats like mpeg-ts require access unit delimiters
             cfg_enc_params.EnableAUD = 1;
+
+            cfg_enc_params.multicoreJointMode = config.multicore_joint_mode.into();
 
             match config.codec {
                 XcoderEncoderCodec::H264 { level_idc, profile } => {
@@ -546,6 +549,7 @@ mod test {
             },
             bit_depth: 8,
             hardware: None,
+            multicore_joint_mode: false,
         })
         .unwrap();
 
