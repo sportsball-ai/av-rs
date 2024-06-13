@@ -88,12 +88,7 @@ fn main() {
             .flag("src/header.h")
             .compile("xcoder-logan-cpp-sys");
 
-        let bindings = bindgen::Builder::default();
-
-        // the "whilelist_" functions have been renamed in newer bindgen versions, but we use the old
-        // names for wider compatibility
-        #[allow(deprecated)]
-        let bindings = bindings
+        let bindings = bindgen::Builder::default()
             .generate_comments(false)
             .header("src/lib.hpp")
             .allowlist_function("ni_.+")

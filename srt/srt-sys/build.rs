@@ -45,9 +45,6 @@ fn main() {
         _ => {}
     }
 
-    // the "whilelist_" functions have been renamed in newer bindgen versions, but we use the
-    // old names for wider compatibility
-    #[allow(deprecated)]
     let bindings = bindgen::Builder::default()
         .header(format!("{}/include/srt/srt.h", build.display()))
         .allowlist_function("srt_.+")

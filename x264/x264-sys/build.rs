@@ -19,12 +19,7 @@ fn main() {
 
     wrapper.file("src/lib.c").compile("x264-sys");
 
-    let bindings = bindgen::Builder::default();
-
-    // the "whilelist_" functions have been renamed in newer bindgen versions, but we use the old
-    // names for wider compatibility
-    #[allow(deprecated)]
-    let bindings = bindings
+    let bindings = bindgen::Builder::default()
         // As with cc, pass along include paths to clang.
         .clang_args(lib.include_paths.iter().map(|p| format!("-I{}", p.to_str().expect("path is valid UTF-8"))))
         .header("src/lib.h")
