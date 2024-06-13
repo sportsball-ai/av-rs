@@ -1,8 +1,9 @@
 use mpeg2::{pes, ts};
 use mpeg4::AudioDataTransportStream;
+use vecmap::VecMap;
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::VecDeque,
     error::Error,
 };
 
@@ -413,7 +414,7 @@ enum PidState {
 
 /// Analyzer processes packets in real-time, performing cheap analysis on the streams.
 pub struct Analyzer {
-    pids: HashMap<u16, PidState>,
+    pids: VecMap<u16, PidState>,
     has_video: bool,
 }
 
@@ -421,7 +422,7 @@ impl Analyzer {
     pub fn new() -> Self {
         Self {
             pids: {
-                let mut v = HashMap::new();
+                let mut v = VecMap::new();
                 v.insert(ts::PID_PAT, PidState::Pat);
                 v
             },
