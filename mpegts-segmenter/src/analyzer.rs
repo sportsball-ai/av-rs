@@ -1,7 +1,11 @@
 use mpeg2::{pes, ts};
 use mpeg4::AudioDataTransportStream;
+use vecmap::VecMap;
 
-use std::{collections::VecDeque, error::Error};
+use std::{
+    collections::VecDeque,
+    error::Error,
+};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
@@ -401,18 +405,16 @@ pub enum StreamInfo {
     Other,
 }
 
-#[allow(clippy::large_enum_variant)]
 #[derive(Clone)]
 enum PidState {
-    Unused,
     Pat,
     Pmt,
-    Pes { stream: Stream },
+    Pes { stream: Box<Stream> },
 }
 
 /// Analyzer processes packets in real-time, performing cheap analysis on the streams.
 pub struct Analyzer {
-    pids: Vec<PidState>,
+    pids: VecMap<u16, PidState>,
     has_video: bool,
 }
 
@@ -420,8 +422,8 @@ impl Analyzer {
     pub fn new() -> Self {
         Self {
             pids: {
-                let mut v = vec![PidState::Unused; 0x10000];
-                v[ts::PID_PAT as usize] = PidState::Pat;
+                let mut v = VecMap::new();
+                v.insert(ts::PID_PAT, PidState::Pat);
                 v
             },
             has_video: false,
@@ -436,19 +438,19 @@ impl Analyzer {
     }
 
     pub fn is_pes(&self, pid: u16) -> bool {
-        matches!(self.pids[pid as usize], PidState::Pes { .. })
+        matches!(self.pids.get(&pid), Some(PidState::Pes { .. }))
     }
 
     pub fn stream(&mut self, pid: u16) -> Option<&mut Stream> {
-        match &mut self.pids[pid as usize] {
-            PidState::Pes { stream } => Some(stream),
+        match self.pids.get_mut(&pid) {
+            Some(PidState::Pes { stream }) => Some(stream.as_mut()),
             _ => None,
         }
     }
 
     pub fn is_video(&self, pid: u16) -> bool {
-        match &self.pids[pid as usize] {
-            PidState::Pes { stream } => stream.is_video(),
+        match self.pids.get(&pid) {
+            Some(PidState::Pes { stream }) => stream.is_video(),
             _ => false,
         }
     }
@@ -458,17 +460,25 @@ impl Analyzer {
     }
 
     pub fn streams(&self) -> Vec<StreamInfo> {
-        self.pids
+        // Callers may have an expectation that lower PIDs appear first because a prior
+        // version of the library did that. So we'll start by gathering our PIDs and sorting them.
+        let mut pids = self
+            .pids
             .iter()
-            .filter_map(|pid| match pid {
-                PidState::Pes { stream } => Some(stream.info()),
-                _ => None,
+            .filter_map(|(key, value)| {
+                if let PidState::Pes { stream } = value {
+                    Some((*key, stream.info()))
+                } else {
+                    None
+                }
             })
-            .collect()
+            .collect::<Vec<_>>();
+        pids.sort_unstable_by_key(|(k, _v)| *k);
+        pids.into_iter().map(|(_k, v)| v).collect()
     }
 
     pub fn reset_stream_metadata(&mut self) {
-        for pid in &mut self.pids {
+        for pid in self.pids.values_mut() {
             if let PidState::Pes { stream } = pid {
                 stream.reset_stream_metadata();
             }
@@ -482,7 +492,7 @@ impl Analyzer {
     }
 
     pub fn reset_timecodes(&mut self) {
-        for pid in &mut self.pids {
+        for pid in self.pids.values_mut() {
             if let PidState::Pes { stream } = pid {
                 stream.reset_timecode();
             }
@@ -490,70 +500,67 @@ impl Analyzer {
     }
 
     pub fn handle_packet(&mut self, packet: &ts::Packet<'_>) -> Result<()> {
-        match &mut self.pids[packet.packet_id as usize] {
-            PidState::Pat => {
+        match self.pids.get_mut(&packet.packet_id) {
+            Some(PidState::Pat) => {
                 let table_sections = packet.decode_table_sections()?;
                 let syntax_section = table_sections[0].decode_syntax_section()?;
                 let pat = ts::PATData::decode(syntax_section.data)?;
                 for entry in pat.entries {
-                    self.pids[entry.program_map_pid as usize] = PidState::Pmt;
+                    self.pids.insert(entry.program_map_pid, PidState::Pmt);
                 }
             }
-            PidState::Pmt => {
+            Some(PidState::Pmt) => {
                 let table_sections = packet.decode_table_sections()?;
                 let syntax_section = table_sections[0].decode_syntax_section()?;
                 let pmt = ts::PMTData::decode(syntax_section.data)?;
                 for pes in pmt.elementary_stream_info {
-                    match &mut self.pids[pes.elementary_pid as usize] {
-                        PidState::Pes { .. } => {}
-                        state => {
-                            let stream = match pes.stream_type {
-                                0x0f => Stream::ADTSAudio {
-                                    pes: pes::Stream::new(),
-                                    channel_count: 0,
-                                    sample_rate: 0,
-                                    sample_count: 0,
-                                    object_type_indication: 0x40,
-                                    rfc6381_codec: None,
-                                },
-                                0x1b => Stream::AVCVideo {
-                                    pes: pes::Stream::new(),
-                                    width: 0,
-                                    height: 0,
-                                    frame_rate: 0.0,
-                                    is_interlaced: false,
-                                    access_unit_counter: h264::AccessUnitCounter::new(),
-                                    rfc6381_codec: None,
-                                    last_vui_parameters: None,
-                                    last_timecode: None,
-                                    timecode: None,
-                                    pts_analyzer: PTSAnalyzer::new(),
-                                    video_metadata: vec![],
-                                },
-                                0x24 => Stream::HEVCVideo {
-                                    pes: pes::Stream::new(),
-                                    width: 0,
-                                    height: 0,
-                                    frame_rate: 0.0,
-                                    access_unit_counter: h265::AccessUnitCounter::new(),
-                                    rfc6381_codec: None,
-                                    pts_analyzer: PTSAnalyzer::new(),
-                                    video_metadata: vec![],
-                                },
-                                t => Stream::Other(t),
-                            };
-                            if stream.is_video() {
-                                self.has_video = true;
-                            }
-                            *state = PidState::Pes { stream }
+                    if !matches!(self.pids.get(&pes.elementary_pid), Some(PidState::Pes { .. })) {
+                        let stream = match pes.stream_type {
+                            0x0f => Stream::ADTSAudio {
+                                pes: pes::Stream::new(),
+                                channel_count: 0,
+                                sample_rate: 0,
+                                sample_count: 0,
+                                object_type_indication: 0x40,
+                                rfc6381_codec: None,
+                            },
+                            0x1b => Stream::AVCVideo {
+                                pes: pes::Stream::new(),
+                                width: 0,
+                                height: 0,
+                                frame_rate: 0.0,
+                                is_interlaced: false,
+                                access_unit_counter: h264::AccessUnitCounter::new(),
+                                rfc6381_codec: None,
+                                last_vui_parameters: None,
+                                last_timecode: None,
+                                timecode: None,
+                                pts_analyzer: PTSAnalyzer::new(),
+                                video_metadata: vec![],
+                            },
+                            0x24 => Stream::HEVCVideo {
+                                pes: pes::Stream::new(),
+                                width: 0,
+                                height: 0,
+                                frame_rate: 0.0,
+                                access_unit_counter: h265::AccessUnitCounter::new(),
+                                rfc6381_codec: None,
+                                pts_analyzer: PTSAnalyzer::new(),
+                                video_metadata: vec![],
+                            },
+                            t => Stream::Other(t),
+                        };
+                        if stream.is_video() {
+                            self.has_video = true;
                         }
-                    };
+                        self.pids.insert(pes.elementary_pid, PidState::Pes { stream: Box::new(stream) });
+                    }
                 }
             }
-            PidState::Pes { ref mut stream } => {
+            Some(PidState::Pes { ref mut stream }) => {
                 stream.write(packet)?;
             }
-            PidState::Unused => {}
+            None => {}
         }
 
         Ok(())
@@ -562,7 +569,7 @@ impl Analyzer {
     /// Streams with variable length PES packets should be flushed after the last packet is written
     /// to them. Otherwise, the last packet might not be evaluated.
     pub fn flush(&mut self) -> Result<()> {
-        for pid in self.pids.iter_mut() {
+        for pid in self.pids.values_mut() {
             if let PidState::Pes { ref mut stream } = pid {
                 stream.flush()?;
             }
