@@ -463,6 +463,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-repr"
+version = "0.2.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bad30c9c0fa1aaf1ae5010dab11f1117b15d35faf62cda4bbbc53b9987950f18"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "enumn"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2402,6 +2413,7 @@ name = "xcoder-quadra"
 version = "0.1.0"
 dependencies = [
  "av-traits",
+ "enum-repr",
  "h264",
  "h265",
  "libc",

@@ -8,6 +8,7 @@ av-traits = { path = "../../av-traits" }
 snafu = "0.8.0"
 scopeguard = "1.1.0"
 libc = "0.2"
+enum-repr = "0.2.6"
 
 [dev-dependencies]
 h264 = { path = "../../h264" }

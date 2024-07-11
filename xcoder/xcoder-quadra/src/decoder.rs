@@ -481,6 +481,7 @@ mod test {
                 level_idc: None,
             },
             bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
             hardware: Some(decoder.hardware()),
             multicore_joint_mode: false,
         })

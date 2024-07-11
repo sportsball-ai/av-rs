@@ -1,4 +1,6 @@
-use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use crate::XcoderPixelFormat;
+
+use super::{fps_to_rational, XcoderHardware, XcoderHardwareFrame};
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
@@ -134,6 +136,7 @@ pub struct XcoderEncoderConfig {
     pub fps: f64,
     pub bitrate: Option<u32>,
     pub codec: XcoderEncoderCodec,
+    pub pixel_format: XcoderPixelFormat,
     pub bit_depth: u8,
     pub multicore_joint_mode: bool,
 
@@ -258,6 +261,7 @@ impl<F> XcoderEncoder<F> {
                 XcoderEncoderCodec::H264 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
                 XcoderEncoderCodec::H265 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
             };
+            (**session).pixel_format = i32::try_from(config.pixel_format.repr()).expect("cast should never fail");
             (**session).src_bit_depth = config.bit_depth as _;
             (**session).src_endian = sys::NI_FRAME_LITTLE_ENDIAN as _;
             (**session).bit_depth_factor = if config.bit_depth > 8 { 2 } else { 1 };
@@ -530,6 +534,8 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 
 #[cfg(test)]
 mod test {
+    use crate::XcoderPixelFormat;
+
     use super::*;
 
     struct TestFrame {
@@ -554,6 +560,7 @@ mod test {
                 level_idc: Some(41),
             },
             bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
             hardware: None,
             multicore_joint_mode: false,
         })

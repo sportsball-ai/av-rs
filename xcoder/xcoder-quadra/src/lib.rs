@@ -101,6 +101,31 @@ mod linux_impl {
             Box::from_raw(raw as *mut std::mem::MaybeUninit<T>)
         }
     }
+
+    #[enum_repr::EnumRepr(type = "u32")]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum XcoderPixelFormat {
+        Yuv420Planar = sys::ni_pix_fmt_t_NI_PIX_FMT_YUV420P,
+        Yuv420Planar10BitLittleEndian = sys::ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE,
+        Nv12 = sys::ni_pix_fmt_t_NI_PIX_FMT_NV12,
+        P010LittleEndian = sys::ni_pix_fmt_t_NI_PIX_FMT_P010LE,
+        /// 32 bit packed
+        Rgba = sys::ni_pix_fmt_t_NI_PIX_FMT_RGBA,
+        /// 32 bit packed
+        Bgra = sys::ni_pix_fmt_t_NI_PIX_FMT_BGRA,
+        /// 32 bit packed
+        Argb = sys::ni_pix_fmt_t_NI_PIX_FMT_ARGB,
+        /// 32 bit packed
+        Abgr = sys::ni_pix_fmt_t_NI_PIX_FMT_ABGR,
+        /// 32 bit packed
+        Bgr0 = sys::ni_pix_fmt_t_NI_PIX_FMT_BGR0,
+        /// 24 bit packed
+        Bgrp = sys::ni_pix_fmt_t_NI_PIX_FMT_BGRP,
+        Nv16 = sys::ni_pix_fmt_t_NI_PIX_FMT_NV16,
+        Yuyv422 = sys::ni_pix_fmt_t_NI_PIX_FMT_YUYV422,
+        Uyvy422 = sys::ni_pix_fmt_t_NI_PIX_FMT_UYVY422,
+        None = sys::ni_pix_fmt_t_NI_PIX_FMT_NONE,
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -157,6 +182,7 @@ mod test {
                 level_idc: None,
             },
             bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
             hardware: Some(decoder.hardware()),
             multicore_joint_mode: false,
         })
@@ -245,6 +271,7 @@ mod test {
                     level_idc: None,
                 },
                 bit_depth: 8,
+                pixel_format: XcoderPixelFormat::Yuv420Planar,
                 hardware: Some(decoder.hardware()),
                 multicore_joint_mode: true,
             })
