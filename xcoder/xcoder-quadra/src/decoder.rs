@@ -17,6 +17,7 @@ pub struct XcoderDecoderConfig {
     pub bit_depth: u8,
     pub fps: f64,
     pub codec: XcoderDecoderCodec,
+    pub hardware_id: Option<i32>,
     pub multicore_joint_mode: bool,
 }
 
@@ -224,7 +225,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
                 sys::ni_device_session_context_free(session);
             });
 
-            (**session).hw_id = -1;
+            (**session).hw_id = config.hardware_id.unwrap_or(-1);
             (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
             (**session).p_session_config = &*params as *const sys::ni_xcoder_params_t as _;
             (**session).codec_format = match config.codec {
@@ -432,6 +433,7 @@ mod test {
                 codec: XcoderDecoderCodec::H264,
                 bit_depth: 8,
                 fps: 29.97,
+                hardware_id: None,
                 multicore_joint_mode: false,
             },
             frames,
@@ -457,6 +459,7 @@ mod test {
                 codec: XcoderDecoderCodec::H264,
                 bit_depth: 8,
                 fps: 29.97,
+                hardware_id: None,
                 multicore_joint_mode: false,
             },
             frames,
