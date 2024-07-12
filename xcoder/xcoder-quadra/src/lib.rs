@@ -2,7 +2,7 @@
 #[path = ""]
 mod linux_impl {
     use snafu::Snafu;
-    use std::ops::Deref;
+    use std::{ffi::c_uint, ops::Deref};
     use xcoder_quadra_sys as sys;
 
     pub mod cropper;
@@ -102,7 +102,7 @@ mod linux_impl {
         }
     }
 
-    #[enum_repr::EnumRepr(type = "u32")]
+    #[enum_repr::EnumRepr(type = "c_uint")]
     #[derive(Clone, Copy, Debug, Eq, PartialEq)]
     pub enum XcoderPixelFormat {
         Yuv420Planar = sys::ni_pix_fmt_t_NI_PIX_FMT_YUV420P,
