@@ -2404,6 +2404,7 @@ dependencies = [
  "av-traits",
  "h264",
  "h265",
+ "rayon",
  "scopeguard",
  "snafu",
  "xcoder-quadra-sys",

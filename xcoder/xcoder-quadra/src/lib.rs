@@ -98,6 +98,7 @@ pub use linux_impl::*;
 #[cfg(all(test, target_os = "linux"))]
 mod test {
     use super::{decoder::read_frames, *};
+    use rayon::prelude::*;
 
     #[test]
     fn test_fps_to_rational() {
@@ -119,6 +120,7 @@ mod test {
                 codec: XcoderDecoderCodec::H264,
                 bit_depth: 8,
                 fps: 29.97,
+                multicore_joint_mode: false,
             },
             frames,
         )
@@ -193,6 +195,7 @@ mod test {
                 codec: XcoderDecoderCodec::H265,
                 bit_depth: 8,
                 fps: 24.0,
+                multicore_joint_mode: true,
             },
             frames,
         )
@@ -230,7 +233,7 @@ mod test {
                 },
                 bit_depth: 8,
                 hardware: Some(decoder.hardware()),
-                multicore_joint_mode: false,
+                multicore_joint_mode: true,
             })
             .unwrap();
 
@@ -245,32 +248,43 @@ mod test {
         let mut frame_number = 0;
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
             let frame = frame.into();
-            for enc in encodings.iter_mut() {
-                let frame = enc
-                    .cropper
-                    .crop(
-                        &frame,
-                        XcoderCrop {
-                            x: frame_number * 16,
-                            y: frame_number * 16,
-                            width: (1920.0 + 20.0 * frame_number as f64) as _,
-                            height: (1080.0 + 20.0 * frame_number as f64) as _,
-                        },
-                    )
-                    .unwrap();
-                let frame = enc.scaler.scale(&frame).unwrap();
-                if let Some(output) = enc.encoder.encode_hardware_frame((), frame).unwrap() {
-                    enc.output.append(&mut output.encoded_frame.expect("frame was not dropped").data);
-                }
-            }
+
+            encodings
+                .par_iter_mut()
+                .map(|enc| {
+                    let frame = enc
+                        .cropper
+                        .crop(
+                            &frame,
+                            XcoderCrop {
+                                x: frame_number * 16,
+                                y: frame_number * 16,
+                                width: (1920.0 + 20.0 * frame_number as f64) as _,
+                                height: (1080.0 + 20.0 * frame_number as f64) as _,
+                            },
+                        )
+                        .unwrap();
+                    let frame = enc.scaler.scale(&frame).unwrap();
+                    if let Some(output) = enc.encoder.encode_hardware_frame((), frame).unwrap() {
+                        enc.output.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+                    }
+                    Ok(())
+                })
+                .collect::<Result<(), XcoderInitError>>()
+                .unwrap();
             frame_number += 1;
         }
-        for enc in encodings.iter_mut() {
-            while let Some(output) = enc.encoder.flush().unwrap() {
-                enc.output.append(&mut output.encoded_frame.expect("frame was not dropped").data);
-            }
-            assert!(!enc.output.is_empty());
-        }
+        encodings
+            .par_iter_mut()
+            .map(|enc| {
+                while let Some(output) = enc.encoder.flush().unwrap() {
+                    enc.output.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+                }
+                assert!(!enc.output.is_empty());
+                Ok(())
+            })
+            .collect::<Result<(), XcoderInitError>>()
+            .unwrap();
 
         // If you want to inspect the output, uncomment these lines:
         /*

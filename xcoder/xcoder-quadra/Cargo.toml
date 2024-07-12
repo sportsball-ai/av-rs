@@ -12,6 +12,7 @@ scopeguard = "1.1.0"
 h264 = { path = "../../h264" }
 h265 = { path = "../../h265" }
 snafu = { version = "0.8.0", features = ["std"] }
+rayon = "1.5.0"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 xcoder-quadra-sys = { path = "xcoder-quadra-sys" }

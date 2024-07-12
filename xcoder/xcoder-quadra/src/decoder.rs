@@ -17,6 +17,7 @@ pub struct XcoderDecoderConfig {
     pub bit_depth: u8,
     pub fps: f64,
     pub codec: XcoderDecoderCodec,
+    pub multicore_joint_mode: bool,
 }
 
 pub struct XcoderDecoderInputFrame {
@@ -212,6 +213,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
                 });
             }
             params.__bindgen_anon_1.dec_input_params.hwframes = 1;
+            params.__bindgen_anon_1.dec_input_params.mcmode = config.multicore_joint_mode.into();
             let params = Box::new(params);
 
             let session = sys::ni_device_session_context_alloc_init();
@@ -430,6 +432,7 @@ mod test {
                 codec: XcoderDecoderCodec::H264,
                 bit_depth: 8,
                 fps: 29.97,
+                multicore_joint_mode: false,
             },
             frames,
         )
@@ -454,6 +457,7 @@ mod test {
                 codec: XcoderDecoderCodec::H264,
                 bit_depth: 8,
                 fps: 29.97,
+                multicore_joint_mode: false,
             },
             frames,
         )

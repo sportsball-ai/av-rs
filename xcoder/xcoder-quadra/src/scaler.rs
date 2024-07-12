@@ -200,6 +200,7 @@ mod test {
                 codec: XcoderDecoderCodec::H264,
                 bit_depth: 8,
                 fps: 29.97,
+                multicore_joint_mode: false,
             },
             frames,
         )
