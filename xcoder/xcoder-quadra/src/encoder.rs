@@ -230,7 +230,7 @@ impl<F> XcoderEncoder<F> {
 
             let mut frame_data_strides = [0; sys::NI_MAX_NUM_DATA_POINTERS as usize];
             let mut frame_data_heights = [0; sys::NI_MAX_NUM_DATA_POINTERS as usize];
-            sys::ni_get_hw_yuv420p_dim(
+            sys::ni_get_frame_dim(
                 config.width as _,
                 config.height as _,
                 if config.bit_depth > 8 { 2 } else { 1 }, // bit depth factor
@@ -241,6 +241,8 @@ impl<F> XcoderEncoder<F> {
             if config.hardware.is_some() {
                 params.hwframes = 1;
             }
+
+            let pixel_format = i32::try_from(config.pixel_format.repr()).expect("cast should never fail");
 
             let session = sys::ni_device_session_context_alloc_init();
             if session.is_null() {
@@ -261,7 +263,7 @@ impl<F> XcoderEncoder<F> {
                 XcoderEncoderCodec::H264 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
                 XcoderEncoderCodec::H265 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
             };
-            (**session).pixel_format = i32::try_from(config.pixel_format.repr()).expect("cast should never fail");
+            (**session).pixel_format = pixel_format;
             (**session).src_bit_depth = config.bit_depth as _;
             (**session).src_endian = sys::NI_FRAME_LITTLE_ENDIAN as _;
             (**session).bit_depth_factor = if config.bit_depth > 8 { 2 } else { 1 };
@@ -281,14 +283,14 @@ impl<F> XcoderEncoder<F> {
 
             let frame_data_io = {
                 let mut frame: sys::ni_frame_t = mem::zeroed();
-                let code = sys::ni_encoder_frame_buffer_alloc(
+                let code = sys::ni_frame_buffer_alloc_pixfmt(
                     &mut frame as _,
+                    pixel_format,
                     config.width as _,
-                    frame_data_heights[0],
+                    config.height as _,
                     frame_data_strides.as_mut_ptr(),
                     if matches!(config.codec, XcoderEncoderCodec::H264 { .. }) { 1 } else { 0 },
                     sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _,
-                    false,
                 );
                 if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                     return Err(XcoderEncoderError::Unknown {
@@ -584,6 +586,59 @@ mod test {
             }
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
+            };
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+                encoded_frames += 1;
+            }
+        }
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+            encoded_frames += 1;
+        }
+
+        assert_eq!(encoded_frames, 90);
+        assert!(encoded.len() > 5000);
+
+        // To inspect the output, uncomment these lines:
+        //use std::io::Write;
+        //std::fs::File::create("tmp.h264").unwrap().write_all(&encoded).unwrap();
+    }
+
+    #[test]
+    fn test_video_encoder_bgra() {
+        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 29.97,
+            bitrate: None,
+            codec: XcoderEncoderCodec::H264 {
+                profile: Some(XcoderH264Profile::Main),
+                level_idc: Some(41),
+            },
+            bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Bgra,
+            hardware: None,
+            multicore_joint_mode: false,
+        })
+        .unwrap();
+
+        let mut encoded = vec![];
+        let mut encoded_frames = 0;
+
+        for i in 0..90 {
+            let mut bgra = Vec::<[u8; 4]>::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    0
+                } else {
+                    ((line as f64 / 1080.0) * 255.0).round() as u8
+                };
+                bgra.resize(bgra.len() + 1920, [sample, sample, sample, 255]);
+            }
+            let frame = TestFrame {
+                samples: vec![bytemuck::cast_slice(&bgra).to_vec()],
             };
             if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
