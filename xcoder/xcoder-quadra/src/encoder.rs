@@ -1,6 +1,6 @@
 use crate::XcoderPixelFormat;
 
-use super::{fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
@@ -234,7 +234,6 @@ impl<F> XcoderEncoder<F> {
                 config.width as _,
                 config.height as _,
                 if config.bit_depth > 8 { 2 } else { 1 }, // bit depth factor
-                0,                                        // is nv12
                 frame_data_strides.as_mut_ptr(),
                 frame_data_heights.as_mut_ptr(),
             );
