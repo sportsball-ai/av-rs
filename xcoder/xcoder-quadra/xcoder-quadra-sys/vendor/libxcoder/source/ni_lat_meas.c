@@ -20,11 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_lat_meas.c
-*
-*  \brief  utility functions for measuring frame latency
-*
-*******************************************************************************/
+ *  \file   ni_lat_meas.c
+ *
+ *  \brief  Utility definitions for measuring frame/packet processing time in
+ *          NETINT video processing devices
+ ******************************************************************************/
 
 #ifdef __linux__
 #include <sys/ioctl.h>
@@ -71,6 +71,7 @@ ni_lat_meas_q_t *ni_lat_meas_q_create(int capacity)
     queue->capacity = capacity;
     queue->front = queue->size = 0;
     queue->rear = capacity - 1;
+    queue->last_benchmark_time = ni_gettime_ns();
     queue->array = (ni_lat_meas_q_entry_t *)malloc(
         queue->capacity * sizeof(ni_lat_meas_q_entry_t));
     if (!queue->array)
@@ -180,8 +181,8 @@ void *ni_lat_meas_q_front(ni_lat_meas_q_t *queue)
 void *ni_lat_meas_q_add_entry(ni_lat_meas_q_t *frame_time_q, uint64_t abs_time,
                               int64_t ts_time)
 {
-    // ni_log(NI_LOG_DEBUG, "ni_lat_meas_q_add_entry abs_time=%lu ts_time="
-    //        "%ld\n", abs_time, ts_time);
+    // ni_log(NI_LOG_DEBUG, "ni_lat_meas_q_add_entry abs_time=%" PRIu64 " "
+    //        "ts_time=%" PRId64 "\n", abs_time, ts_time);
     ni_lat_meas_q_entry_t entry = {.abs_timenano = abs_time,
                                    .ts_time = ts_time};
     return ni_lat_meas_q_enqueue(frame_time_q, entry);
@@ -200,8 +201,9 @@ void *ni_lat_meas_q_add_entry(ni_lat_meas_q_t *frame_time_q, uint64_t abs_time,
 uint64_t ni_lat_meas_q_check_latency(ni_lat_meas_q_t *frame_time_q,
                                      uint64_t abs_time, int64_t ts_time)
 {
-    // ni_log(NI_LOG_DEBUG, "ni_lat_meas_q_check_latency abs_time=%lu ts_time="
-    //        "%ld\n", abs_time, ts_time);
+    // ni_log(NI_LOG_DEBUG, "ni_lat_meas_q_check_latency abs_time=%" PRIu64 " "
+    //        "ts_time="%" PRId64 "\n", abs_time, ts_time);
+    uint64_t ret = -1;
     uint32_t dequeue_count = 0;
     ni_lat_meas_q_entry_t *entry = ni_lat_meas_q_front(frame_time_q);
 
@@ -231,11 +233,11 @@ uint64_t ni_lat_meas_q_check_latency(ni_lat_meas_q_t *frame_time_q,
     if ((entry == NULL) || (entry->ts_time > ts_time))
     {   // queue overrun OR
         // queue miss, perhaps frame was not enqueued properly or TS was offset
-        return -1;
+        ret = -1;
     } else if (entry->ts_time == ts_time)
-    {   // queue item is perfectly matched, calculate latency
-        return (abs_time - entry->abs_timenano);
+    {
+        ret = abs_time - entry->abs_timenano;
     }
 
-    return -1;
+    return ret;
 }

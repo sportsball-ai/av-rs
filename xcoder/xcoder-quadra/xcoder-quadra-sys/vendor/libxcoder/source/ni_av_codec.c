@@ -20,12 +20,16 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_av_codec.c
-*
-*  \brief  NETINT audio/video related utility functions
-*
-*******************************************************************************/
+ *  \file   ni_av_codec.c
+ *
+ *  \brief  Audio/video related utility definitions
+ ******************************************************************************/
 
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
 #include <limits.h>
 #include <string.h>
 #include <stdio.h>
@@ -34,6 +38,7 @@
 #include "ni_nvme.h"
 #include "ni_bitstream.h"
 #include "ni_av_codec.h"
+#include "ni_device_api_priv.h"
 
 typedef enum
 {
@@ -68,7 +73,7 @@ typedef enum
     NUM_GOP_PRESET_NUM = 17,
 } gop_preset_t;
 
-static const int32_t GOP_SIZE[NUM_GOP_PRESET_NUM] = {0, 1, 1, 1, 2, 4, 4,
+NI_UNUSED static const int32_t GOP_SIZE[NUM_GOP_PRESET_NUM] = {0, 1, 1, 1, 2, 4, 4,
                                                      4, 8, 1, 2, 4, 4};
 
 static const int32_t LT_GOP_PRESET_I_1[6] = {SLICE_TYPE_I, 1, 0, 0, 0, 0};
@@ -139,7 +144,7 @@ static const int32_t LT_GOP_PRESET_BBBBBBBSP_8[48] = {
     SLICE_TYPE_B, 5, 8, 0, 4, 6, SLICE_TYPE_B, 7, 8, 0, 6, 8,
 };
 
-static const int32_t *GOP_PRESET[NUM_GOP_PRESET_NUM] = {
+NI_UNUSED static const int32_t *GOP_PRESET[NUM_GOP_PRESET_NUM] = {
     NULL,
     LT_GOP_PRESET_I_1,
     LT_GOP_PRESET_P_1,
@@ -188,15 +193,31 @@ int ni_should_send_sei_with_frame(ni_session_context_t *p_enc_ctx,
     if (0 == p_enc_ctx->frame_num || PIC_TYPE_IDR == pic_type ||
         (p_param->cfg_enc_params.forced_header_enable &&
          p_param->cfg_enc_params.intra_period &&
-         0 == (p_enc_ctx->frame_num % p_param->cfg_enc_params.intra_period)))
+         0 ==
+             ((p_enc_ctx->frame_num + p_enc_ctx->force_idr_intra_offset) %
+              p_param->cfg_enc_params.intra_period)))
     {
+        if (PIC_TYPE_IDR == pic_type &&
+            p_param->cfg_enc_params.forced_header_enable && 
+            p_param->cfg_enc_params.intra_period &&
+            0 != (p_enc_ctx->frame_num % p_param->cfg_enc_params.intra_period))
+        {
+            p_enc_ctx->force_idr_intra_offset =
+                p_param->cfg_enc_params.intra_period -
+                (p_enc_ctx->frame_num % p_param->cfg_enc_params.intra_period);
+        }
+        ni_log2(p_enc_ctx, NI_LOG_TRACE,  "should send sei? %" PRIu64 " %d %d %d %u\n",
+               p_enc_ctx->frame_num, pic_type,
+               p_param->cfg_enc_params.forced_header_enable,
+               p_param->cfg_enc_params.intra_period,
+               p_enc_ctx->force_idr_intra_offset);
         return 1;
     }
     return 0;
 }
 
 // create a ni_rational_t
-static ni_rational_t ni_make_rational(int num, int den)
+NI_UNUSED static ni_rational_t ni_make_rational(int num, int den)
 {
     ni_rational_t r = {num, den};
     return r;
@@ -268,8 +289,8 @@ void ni_dec_retrieve_aux_data(ni_frame_t *frame)
         {
             ni_mastering_display_metadata_t *mdm =
                 (ni_mastering_display_metadata_t *)aux_data->data;
-            const int chroma_den = 50000;
-            const int luma_den = 10000;
+            const int chroma_den = MASTERING_DISP_CHROMA_DEN;
+            const int luma_den = MASTERING_DISP_LUMA_DEN;
             ni_dec_mastering_display_colour_volume_bytes_t *pColourVolume =
                 (ni_dec_mastering_display_colour_volume_bytes_t
                      *)((uint8_t *)frame->p_data[start_offset] +
@@ -278,33 +299,33 @@ void ni_dec_retrieve_aux_data(ni_frame_t *frame)
             // HEVC uses a g,b,r ordering, which we convert to a more natural r,
             // g,b,this is so we are compatible with FFmpeg default soft decoder
             mdm->display_primaries[0][0].num =
-                ni_ntohs(pColourVolume->display_primaries[2][0]);
+                ntohs(pColourVolume->display_primaries[2][0]);
             mdm->display_primaries[0][0].den = chroma_den;
             mdm->display_primaries[0][1].num =
-                ni_ntohs(pColourVolume->display_primaries[2][1]);
+                ntohs(pColourVolume->display_primaries[2][1]);
             mdm->display_primaries[0][1].den = chroma_den;
             mdm->display_primaries[1][0].num =
-                ni_ntohs(pColourVolume->display_primaries[0][0]);
+                ntohs(pColourVolume->display_primaries[0][0]);
             mdm->display_primaries[1][0].den = chroma_den;
             mdm->display_primaries[1][1].num =
-                ni_ntohs(pColourVolume->display_primaries[0][1]);
+                ntohs(pColourVolume->display_primaries[0][1]);
             mdm->display_primaries[1][1].den = chroma_den;
             mdm->display_primaries[2][0].num =
-                ni_ntohs(pColourVolume->display_primaries[1][0]);
+                ntohs(pColourVolume->display_primaries[1][0]);
             mdm->display_primaries[2][0].den = chroma_den;
             mdm->display_primaries[2][1].num =
-                ni_ntohs(pColourVolume->display_primaries[1][1]);
+                ntohs(pColourVolume->display_primaries[1][1]);
             mdm->display_primaries[2][1].den = chroma_den;
-            mdm->white_point[0].num = ni_ntohs(pColourVolume->white_point_x);
+            mdm->white_point[0].num = ntohs(pColourVolume->white_point_x);
             mdm->white_point[0].den = chroma_den;
-            mdm->white_point[1].num = ni_ntohs(pColourVolume->white_point_y);
+            mdm->white_point[1].num = ntohs(pColourVolume->white_point_y);
             mdm->white_point[1].den = chroma_den;
 
             mdm->min_luminance.num =
-                ni_ntohl(pColourVolume->min_display_mastering_luminance);
+                ntohl(pColourVolume->min_display_mastering_luminance);
             mdm->min_luminance.den = luma_den;
             mdm->max_luminance.num =
-                ni_ntohl(pColourVolume->max_display_mastering_luminance);
+                ntohl(pColourVolume->max_display_mastering_luminance);
             mdm->max_luminance.den = luma_den;
 
             mdm->has_luminance = mdm->has_primaries = 1;
@@ -332,8 +353,8 @@ void ni_dec_retrieve_aux_data(ni_frame_t *frame)
                      *)((uint8_t *)frame->p_data[start_offset] +
                         frame->sei_hdr_content_light_level_info_offset);
 
-            clm->max_cll = ni_ntohs(pLightLevel->max_content_light_level);
-            clm->max_fall = ni_ntohs(pLightLevel->max_pic_average_light_level);
+            clm->max_cll = ntohs(pLightLevel->max_content_light_level);
+            clm->max_fall = ntohs(pLightLevel->max_pic_average_light_level);
         }
     }
 
@@ -621,125 +642,27 @@ void ni_dec_retrieve_aux_data(ni_frame_t *frame)
     if (frame->vui_offset || frame->vui_len)
     {
         sei_buf = (uint8_t *)frame->p_data[start_offset] + frame->vui_offset;
+        ni_extended_dec_metadata_t *p_dec_ext_meta =
+            (ni_extended_dec_metadata_t *)sei_buf;
+        frame->vui_num_units_in_tick = p_dec_ext_meta->num_units_in_tick;
+        frame->vui_time_scale = p_dec_ext_meta->time_scale;
+        frame->color_primaries = p_dec_ext_meta->color_primaries;
+        frame->color_trc = p_dec_ext_meta->color_trc;
+        frame->color_space = p_dec_ext_meta->color_space;
+        frame->video_full_range_flag = p_dec_ext_meta->video_full_range_flag;
 
-        if (NI_CODEC_FORMAT_H265 == frame->src_codec)
-        {
-            if (sizeof(ni_dec_h265_vui_param_t) == frame->vui_len)
-            {
-                ni_dec_h265_vui_param_t *vui =
-                    (ni_dec_h265_vui_param_t *)sei_buf;
-                if (vui->colour_description_present_flag)
-                {
-                    frame->color_primaries = vui->colour_primaries;
-                    frame->color_trc = vui->transfer_characteristics;
-                    frame->color_space = vui->matrix_coefficients;
-                }
-                frame->video_full_range_flag = vui->video_full_range_flag;
-
-                if (vui->aspect_ratio_info_present_flag)
-                {
-                    frame->aspect_ratio_idc = vui->aspect_ratio_idc;
-                    if (255 == frame->aspect_ratio_idc)
-                    {
-                        frame->sar_width = vui->sar_width;
-                        frame->sar_height = vui->sar_height;
-                    }
-                }
-
-                if (vui->vui_timing_info_present_flag)
-                {
-                    frame->vui_num_units_in_tick = vui->vui_num_units_in_tick;
-                    frame->vui_time_scale = vui->vui_time_scale;
-                }
-
-                ni_log(NI_LOG_DEBUG, 
-                    "ni_dec_retrieve_aux_data H.265 VUI "
-                    "aspect_ratio_info_present_flag %u aspect_ratio_idc %u "
-                    "sar_width %u sar_height %u "
-                    "video_signal_type_present_flag %u video_format %d "
-                    "video_full_range_flag %d colour_description_present_flag "
-                    "%u "
-                    "color-pri %u color-trc %u color-space %u "
-                    "vui_timing_info_present_flag %u vui_num_units_in_tick %u "
-                    "vui_time_scale %u\n",
-                    vui->aspect_ratio_info_present_flag,
-                    frame->aspect_ratio_idc, frame->sar_width,
-                    frame->sar_height, vui->video_signal_type_present_flag,
-                    vui->video_format, frame->video_full_range_flag,
-                    vui->colour_description_present_flag,
-                    frame->color_primaries, frame->color_trc,
-                    frame->color_space, vui->vui_timing_info_present_flag,
-                    frame->vui_num_units_in_tick, frame->vui_time_scale);
-            } else
-            {
-                ni_log(NI_LOG_DEBUG, 
-                    "ni_dec_retrieve_aux_data VUI, expecting H.265 VUI "
-                    "struct size %d, got %u, dropped!\n",
-                    (int)sizeof(ni_dec_h265_vui_param_t), frame->vui_len);
-            }
-        } else if (NI_CODEC_FORMAT_H264 == frame->src_codec)
-        {
-            if (sizeof(ni_dec_h264_vui_param_t) == frame->vui_len)
-            {
-                ni_dec_h264_vui_param_t *vui =
-                    (ni_dec_h264_vui_param_t *)sei_buf;
-                if (vui->colour_description_present_flag)
-                {
-                    frame->color_primaries = vui->colour_primaries;
-                    frame->color_trc = vui->transfer_characteristics;
-                    frame->color_space = vui->matrix_coefficients;
-                }
-                frame->video_full_range_flag = vui->video_full_range_flag;
-
-                if (vui->aspect_ratio_info_present_flag)
-                {
-                    frame->aspect_ratio_idc = vui->aspect_ratio_idc;
-                    if (255 == frame->aspect_ratio_idc)
-                    {
-                        frame->sar_width = vui->sar_width;
-                        frame->sar_height = vui->sar_height;
-                    }
-                }
-
-                if (vui->vui_timing_info_present_flag)
-                {
-                    frame->vui_num_units_in_tick = vui->vui_num_units_in_tick;
-                    frame->vui_time_scale = vui->vui_time_scale;
-                }
-
-                ni_log(NI_LOG_DEBUG, 
-                    "ni_dec_retrieve_aux_data H.264 VUI "
-                    "aspect_ratio_info_present_flag %u aspect_ratio_idc %u "
-                    "sar_width %u sar_height %u "
-                    "video_signal_type_present_flag %u video_format %d "
-                    "video_full_range_flag %d colour_description_present_flag "
-                    "%u "
-                    "color-pri %u color-trc %u color-space %u "
-                    "vui_timing_info_present_flag %u vui_num_units_in_tick %u "
-                    "vui_time_scale %u pic_struct_present_flag %u\n",
-                    vui->aspect_ratio_info_present_flag,
-                    frame->aspect_ratio_idc, frame->sar_width,
-                    frame->sar_height, vui->video_signal_type_present_flag,
-                    vui->video_format, frame->video_full_range_flag,
-                    vui->colour_description_present_flag,
-                    frame->color_primaries, frame->color_trc,
-                    frame->color_space, vui->vui_timing_info_present_flag,
-                    frame->vui_num_units_in_tick, frame->vui_time_scale,
-                    vui->pic_struct_present_flag);
-            } else
-            {
-                ni_log(NI_LOG_DEBUG, 
-                    "ni_dec_retrieve_aux_data VUI, expecting H.264 VUI "
-                    "struct size %d, got %u, dropped!\n",
-                    (int)sizeof(ni_dec_h264_vui_param_t), frame->vui_len);
-            }
-        } else
-        {
-            ni_log(NI_LOG_DEBUG, 
-                "ni_dec_retrieve_aux_data VUI, unsupported codec: %d, "
-                "dropped\n",
-                frame->src_codec);
-        }
+        ni_log(NI_LOG_DEBUG,
+               "ni_dec_retrieve_aux_data VUI "
+               "aspect_ratio_idc %u "
+               "sar_width %u sar_height %u "
+               "video_full_range_flag %d "
+               "color-pri %u color-trc %u color-space %u "
+               "vui_num_units_in_tick %u "
+               "vui_time_scale %u\n",
+               frame->aspect_ratio_idc, frame->sar_width, frame->sar_height,
+               frame->video_full_range_flag, frame->color_primaries,
+               frame->color_trc, frame->color_space,
+               frame->vui_num_units_in_tick, frame->vui_time_scale);
     }
 
     // alternative transfer characteristics SEI if available
@@ -774,6 +697,13 @@ static int set_roi_map(ni_session_context_t *p_enc_ctx,
     uint32_t sumQp = 0;
 
     uint32_t max_cu_size = (codec_format == NI_CODEC_FORMAT_H264) ? 16 : 64;
+
+    // AV1 non-8x8-aligned resolution is implicitly cropped due to Quadra HW limitation
+    if (NI_CODEC_FORMAT_AV1 == codec_format)
+    {
+        width = (width / 8) * 8;
+        height = (height / 8) * 8;
+    }
 
     // for H.264, select ROI Map Block Unit Size: 16x16
     // for H.265, select ROI Map Block Unit Size: 64x64
@@ -812,10 +742,10 @@ static int set_roi_map(ni_session_context_t *p_enc_ctx,
     // decreasing importance.
     for (r = nb_roi - 1; r >= 0; r--)
     {
-        roi = (const ni_region_of_interest_t *)(aux_data->data + self_size * r);
+        roi = (const ni_region_of_interest_t *)((uint8_t *)aux_data->data + self_size * r);
         if (!roi->qoffset.den)
         {
-            ni_log(NI_LOG_DEBUG, "ni_region_of_interest_t.qoffset.den must not be "
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_region_of_interest_t.qoffset.den must not be "
                            "zero.\n");
             continue;
         }
@@ -828,7 +758,7 @@ static int set_roi_map(ni_session_context_t *p_enc_ctx,
         // Theoretically the possible qp delta range is (-32 to 31)
         set_qp = (NI_MAX_QP_INFO + 1 - set_qp) % (NI_MAX_QP_INFO + 1);
 
-        ni_log(NI_LOG_DEBUG, 
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
             "set_roi_map: left %d right %d top %d bottom %d num %d den"
             " %d set_qp %d\n",
             roi->left, roi->right, roi->top, roi->bottom, roi->qoffset.num,
@@ -866,7 +796,7 @@ static int set_roi_map(ni_session_context_t *p_enc_ctx,
                             .field.roiAbsQp_flag = 0;   // delta QP
                         p_enc_ctx->roi_map[k * subNumMbs + m].field.qp_info =
                             set_qp;
-                        // ni_log(NI_LOG_DEBUG, "## x %d y %d index %d\n", i,
+                        // ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "## x %d y %d index %d\n", i,
                         // j, k*subNumMbs+m);
                     }
                 }
@@ -935,6 +865,65 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                                     p_enc_frame->sei_hdr_plus_offset =
                                         p_enc_frame->sei_hdr_plus_len = 0;
 
+    // prep for NetInt intra period reconfiguration support: when intra period
+    // setting has been requested by both frame and API, API takes priority    
+    int intraprd = -1;
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_INTRAPRD);
+    if (aux_data)
+    {
+        intraprd = *((int32_t *)aux_data->data);
+        if (intraprd < 0 || intraprd > 1024)
+        {
+            ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid intraperiod in aux data %d\n",
+                   __func__, intraprd);
+            intraprd = -1;
+        }
+    }
+    
+    if (p_enc_ctx->reconfig_intra_period >= 0)
+    {
+        intraprd = p_enc_ctx->reconfig_intra_period;
+        p_enc_ctx->reconfig_intra_period = -1;
+        ni_log(NI_LOG_DEBUG, "%s(): API set intraPeriod %d\n", __func__,
+               intraprd);
+    }
+
+    if (intraprd >= 0)
+    {
+        if (api_params->cfg_enc_params.intra_mb_refresh_mode ||
+            api_params->cfg_enc_params.gop_preset_index == 1)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR, "ERROR: %s(): NOT allowed to reconfig intraPeriod %d in intra_mb_refresh_mode %d or gop_preset_index %d\n", 
+                __func__,
+                intraprd,
+                api_params->cfg_enc_params.intra_mb_refresh_mode,
+                api_params->cfg_enc_params.gop_preset_index);
+        }
+        else
+        {
+            // FW forces IDR frame when reconfig intra period, so the following steps are required for repeating SEI (and required for ni_should_send_sei_with_frame)
+            should_send_sei_with_frame = 1;
+            api_params->cfg_enc_params.intra_period = intraprd;
+
+            if (intraprd)
+            {
+                p_enc_ctx->force_idr_intra_offset =
+                    intraprd - (p_enc_ctx->frame_num % intraprd);
+            }
+            else
+            {
+                p_enc_ctx->force_idr_intra_offset = 0;
+            }
+            
+            p_enc_ctx->enc_change_params->enable_option |=
+                NI_SET_CHANGE_PARAM_INTRA_PERIOD;
+            p_enc_ctx->enc_change_params->intraPeriod = intraprd;
+            ni_log(NI_LOG_INFO, "%s(): set intraPeriod %d on frame %u, update intra offset %u\n", __func__,
+                   intraprd, p_enc_ctx->frame_num, p_enc_ctx->force_idr_intra_offset);
+            p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+        }
+    }
+
     // prep SEI for HDR (mastering display color volume)
     aux_data = ni_frame_get_aux_data(
         p_dec_frame, NI_FRAME_AUX_DATA_MASTERING_DISPLAY_METADATA);
@@ -958,19 +947,19 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         }
         if (!p_enc_ctx->p_master_display_meta_data)
         {
-            ni_log(NI_LOG_ERROR, "Error mem alloc for mastering display color vol\n");
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "Error mem alloc for mastering display color vol\n");
         } else
         {
             memcpy(p_enc_ctx->p_master_display_meta_data, p_src,
                    sizeof(ni_mastering_display_metadata_t));
 
-            const int luma_den = 10000;
+            const int luma_den = MASTERING_DISP_LUMA_DEN;
 
-            uint32_t uint32_t_tmp = ni_htonl(
+            uint32_t uint32_t_tmp = htonl(
                 (uint32_t)(lrint(luma_den * ni_q2d(p_src->max_luminance))));
             memcpy(p_enc_ctx->ui8_mdcv_max_min_lum_data, &uint32_t_tmp,
                    sizeof(uint32_t));
-            uint32_t_tmp = ni_htonl(
+            uint32_t_tmp = htonl(
                 (uint32_t)(lrint(luma_den * ni_q2d(p_src->min_luminance))));
             memcpy(p_enc_ctx->ui8_mdcv_max_min_lum_data + 4, &uint32_t_tmp,
                    sizeof(uint32_t));
@@ -1013,8 +1002,8 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             (ni_mastering_display_metadata_t *)
                 p_enc_ctx->p_master_display_meta_data;
 
-        const int chroma_den = 50000;
-        const int luma_den = 10000;
+        const int chroma_den = MASTERING_DISP_CHROMA_DEN;
+        const int luma_den = MASTERING_DISP_LUMA_DEN;
 
         uint16_t dp00 = 0, dp01 = 0, dp10 = 0, dp11 = 0, dp20 = 0, dp21 = 0,
                  wpx = 0, wpy = 0;
@@ -1023,29 +1012,29 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         // when sent to encoder
         dp00 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[1][0]));
-        p_mdcv->display_primaries[0][0] = ni_htons(dp00);
+        p_mdcv->display_primaries[0][0] = htons(dp00);
         dp01 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[1][1]));
-        p_mdcv->display_primaries[0][1] = ni_htons(dp01);
+        p_mdcv->display_primaries[0][1] = htons(dp01);
         dp10 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[2][0]));
-        p_mdcv->display_primaries[1][0] = ni_htons(dp10);
+        p_mdcv->display_primaries[1][0] = htons(dp10);
         dp11 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[2][1]));
-        p_mdcv->display_primaries[1][1] = ni_htons(dp11);
+        p_mdcv->display_primaries[1][1] = htons(dp11);
         dp20 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[0][0]));
-        p_mdcv->display_primaries[2][0] = ni_htons(dp20);
+        p_mdcv->display_primaries[2][0] = htons(dp20);
         dp21 = (uint16_t)lrint(chroma_den *
                                ni_q2d(p_src->display_primaries[0][1]));
-        p_mdcv->display_primaries[2][1] = ni_htons(dp21);
+        p_mdcv->display_primaries[2][1] = htons(dp21);
 
         wpx = (uint16_t)lrint(chroma_den * ni_q2d(p_src->white_point[0]));
-        p_mdcv->white_point_x = ni_htons(wpx);
+        p_mdcv->white_point_x = htons(wpx);
         wpy = (uint16_t)lrint(chroma_den * ni_q2d(p_src->white_point[1]));
-        p_mdcv->white_point_y = ni_htons(wpy);
+        p_mdcv->white_point_y = htons(wpy);
 
-        ni_log(NI_LOG_DEBUG, 
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
             "mastering display color volume, primaries "
             "%u/%u/%u/%u/%u/%u white_point_x/y %u/%u max/min_lumi %u/%u\n",
             (uint16_t)dp00, (uint16_t)dp01, (uint16_t)dp10, (uint16_t)dp11,
@@ -1082,11 +1071,11 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         }
 
         uint16_t max_content_light_level =
-            ni_htons(((ni_content_light_level_t *)aux_data->data)->max_cll);
+            htons(((ni_content_light_level_t *)aux_data->data)->max_cll);
         uint16_t max_pic_average_light_level =
-            ni_htons(((ni_content_light_level_t *)aux_data->data)->max_fall);
+            htons(((ni_content_light_level_t *)aux_data->data)->max_fall);
 
-        ni_log(NI_LOG_DEBUG, "content light level info, MaxCLL %u MaxFALL %u\n",
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "content light level info, MaxCLL %u MaxFALL %u\n",
                        ((ni_content_light_level_t *)aux_data->data)->max_cll,
                        ((ni_content_light_level_t *)aux_data->data)->max_fall);
 
@@ -1141,13 +1130,13 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_A53_CC);
     if (aux_data)
     {
-        ni_log(NI_LOG_DEBUG, "ni_enc_prep_aux_data sei_cc_len %d\n", aux_data->size);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_prep_aux_data sei_cc_len %d\n", aux_data->size);
 
         uint8_t cc_data_emu_prevent[NI_MAX_SEI_DATA];
         int cc_size = aux_data->size;
         if (cc_size > NI_MAX_SEI_DATA)
         {
-            ni_log(NI_LOG_DEBUG, "ni_enc_prep_aux_data sei_cc_len %d > MAX %d !\n",
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_prep_aux_data sei_cc_len %d > MAX %d !\n",
                            aux_data->size, (int)NI_MAX_SEI_DATA);
             cc_size = NI_MAX_SEI_DATA;
         }
@@ -1156,7 +1145,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             ni_insert_emulation_prevent_bytes(cc_data_emu_prevent, cc_size);
         if (cc_size_emu_prevent != cc_size)
         {
-            ni_log(NI_LOG_DEBUG, "ni_enc_prep_aux_data: close caption "
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_prep_aux_data: close caption "
                            "emulation prevention bytes added: %d\n",
                            cc_size_emu_prevent - cc_size);
         }
@@ -1222,7 +1211,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         ni_bs_writer_put(&pb, 0, 8);   // u8 application version = 0x00
 
         ni_bs_writer_put(&pb, hdrp->num_windows, 2);
-        ni_log(NI_LOG_DEBUG, "hdr10+ num_windows %u\n", hdrp->num_windows);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ num_windows %u\n", hdrp->num_windows);
         for (w = 1; w < hdrp->num_windows; w++)
         {
             ni_bs_writer_put(
@@ -1252,10 +1241,10 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         ni_bs_writer_put(&pb, ui_tmp, 27);
         ni_bs_writer_put(
             &pb, hdrp->targeted_system_display_actual_peak_luminance_flag, 1);
-        ni_log(NI_LOG_DEBUG, "hdr10+ targeted_system_display_maximum_luminance "
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ targeted_system_display_maximum_luminance "
                        "%u\n",
                        ui_tmp);
-        ni_log(NI_LOG_DEBUG, 
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
             "hdr10+ targeted_system_display_actual_peak_luminance_"
             "flag %u\n",
             hdrp->targeted_system_display_actual_peak_luminance_flag);
@@ -1270,7 +1259,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                 &pb,
                 hdrp->num_cols_targeted_system_display_actual_peak_luminance,
                 5);
-            ni_log(NI_LOG_DEBUG, 
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
                 "hdr10+ num_rows_targeted_system_display_actual_peak_luminance "
                 "x num_cols_targeted_system_display_actual_peak_luminance %u x "
                 "%u\n",
@@ -1291,7 +1280,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                             hdrp->targeted_system_display_actual_peak_luminance
                                 [i][j]));
                     ni_bs_writer_put(&pb, ui_tmp, 4);
-                    ni_log(NI_LOG_DEBUG, "hdr10+ targeted_system_display_actual_peak_"
+                    ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ targeted_system_display_actual_peak_"
                                    "luminance[%d][%d] %u\n",
                                    i, j, ui_tmp);
                 }
@@ -1303,15 +1292,15 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             {
                 ui_tmp = lrint(100000 * ni_q2d(hdrp->params[w].maxscl[i]));
                 ni_bs_writer_put(&pb, ui_tmp, 17);
-                ni_log(NI_LOG_DEBUG, "hdr10+ maxscl[%d][%d] %u\n", w, i, ui_tmp);
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ maxscl[%d][%d] %u\n", w, i, ui_tmp);
             }
             ui_tmp = lrint(100000 * ni_q2d(hdrp->params[w].average_maxrgb));
             ni_bs_writer_put(&pb, ui_tmp, 17);
-            ni_log(NI_LOG_DEBUG, "hdr10+ average_maxrgb[%d] %u\n", w, ui_tmp);
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ average_maxrgb[%d] %u\n", w, ui_tmp);
 
             ni_bs_writer_put(
                 &pb, hdrp->params[w].num_distribution_maxrgb_percentiles, 4);
-            ni_log(NI_LOG_DEBUG, 
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
                 "hdr10+ num_distribution_maxrgb_percentiles[%d] %d\n", w,
                 hdrp->params[w].num_distribution_maxrgb_percentiles);
 
@@ -1324,10 +1313,10 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                     100000 *
                     ni_q2d(hdrp->params[w].distribution_maxrgb[i].percentile));
                 ni_bs_writer_put(&pb, ui_tmp, 17);
-                ni_log(NI_LOG_DEBUG, 
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
                     "hdr10+ distribution_maxrgb_percentage[%d][%d] %u\n", w, i,
                     hdrp->params[w].distribution_maxrgb[i].percentage);
-                ni_log(NI_LOG_DEBUG, 
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
                     "hdr10+ distribution_maxrgb_percentile[%d][%d] %u\n", w, i,
                     ui_tmp);
             }
@@ -1335,12 +1324,12 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             ui_tmp =
                 lrint(1000 * ni_q2d(hdrp->params[w].fraction_bright_pixels));
             ni_bs_writer_put(&pb, ui_tmp, 10);
-            ni_log(NI_LOG_DEBUG, "hdr10+ fraction_bright_pixels[%d] %u\n", w, ui_tmp);
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ fraction_bright_pixels[%d] %u\n", w, ui_tmp);
         }
 
         ni_bs_writer_put(&pb,
                          hdrp->mastering_display_actual_peak_luminance_flag, 1);
-        ni_log(NI_LOG_DEBUG, 
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
             "hdr10+ mastering_display_actual_peak_luminance_flag %u\n",
             hdrp->mastering_display_actual_peak_luminance_flag);
         if (hdrp->mastering_display_actual_peak_luminance_flag)
@@ -1349,7 +1338,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                 &pb, hdrp->num_rows_mastering_display_actual_peak_luminance, 5);
             ni_bs_writer_put(
                 &pb, hdrp->num_cols_mastering_display_actual_peak_luminance, 5);
-            ni_log(NI_LOG_DEBUG, 
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
                 "hdr10+ num_rows_mastering_display_actual_peak_luminance x "
                 "num_cols_mastering_display_actual_peak_luminance %u x %u\n",
                 hdrp->num_rows_mastering_display_actual_peak_luminance,
@@ -1368,7 +1357,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                             hdrp->mastering_display_actual_peak_luminance[i]
                                                                          [j]));
                     ni_bs_writer_put(&pb, ui_tmp, 4);
-                    ni_log(NI_LOG_DEBUG, 
+                    ni_log2(p_enc_ctx, NI_LOG_DEBUG,  
                         "hdr10+ "
                         "mastering_display_actual_peak_luminance[%d][%d] %u\n",
                         i, j, ui_tmp);
@@ -1378,49 +1367,49 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         for (w = 0; w < hdrp->num_windows; w++)
         {
             ni_bs_writer_put(&pb, hdrp->params[w].tone_mapping_flag, 1);
-            ni_log(NI_LOG_DEBUG, "hdr10+ tone_mapping_flag[%d] %u\n", w,
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ tone_mapping_flag[%d] %u\n", w,
                            hdrp->params[w].tone_mapping_flag);
 
             if (hdrp->params[w].tone_mapping_flag)
             {
                 ui_tmp = lrint(4095 * ni_q2d(hdrp->params[w].knee_point_x));
                 ni_bs_writer_put(&pb, ui_tmp, 12);
-                ni_log(NI_LOG_DEBUG, "hdr10+ knee_point_x[%d] %u\n", w, ui_tmp);
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ knee_point_x[%d] %u\n", w, ui_tmp);
 
                 ui_tmp = lrint(4095 * ni_q2d(hdrp->params[w].knee_point_y));
                 ni_bs_writer_put(&pb, ui_tmp, 12);
-                ni_log(NI_LOG_DEBUG, "hdr10+ knee_point_y[%d] %u\n", w, ui_tmp);
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ knee_point_y[%d] %u\n", w, ui_tmp);
 
                 ni_bs_writer_put(&pb, hdrp->params[w].num_bezier_curve_anchors,
                                  4);
-                ni_log(NI_LOG_DEBUG, "hdr10+ num_bezier_curve_anchors[%d] %u\n", w,
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ num_bezier_curve_anchors[%d] %u\n", w,
                                hdrp->params[w].num_bezier_curve_anchors);
                 for (i = 0; i < hdrp->params[w].num_bezier_curve_anchors; i++)
                 {
                     ui_tmp = lrint(
                         1023 * ni_q2d(hdrp->params[w].bezier_curve_anchors[i]));
                     ni_bs_writer_put(&pb, ui_tmp, 10);
-                    ni_log(NI_LOG_DEBUG, "hdr10+ bezier_curve_anchors[%d][%d] %u\n",
+                    ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ bezier_curve_anchors[%d][%d] %u\n",
                                    w, i, ui_tmp);
                 }
             }
 
             ni_bs_writer_put(&pb, hdrp->params[w].color_saturation_mapping_flag,
                              1);
-            ni_log(NI_LOG_DEBUG, "hdr10+ color_saturation_mapping_flag[%d] %u\n", w,
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ color_saturation_mapping_flag[%d] %u\n", w,
                            hdrp->params[w].color_saturation_mapping_flag);
             if (hdrp->params[w].color_saturation_mapping_flag)
             {
                 ui_tmp =
                     lrint(8 * ni_q2d(hdrp->params[w].color_saturation_weight));
                 ni_bs_writer_put(&pb, 6, ui_tmp);
-                ni_log(NI_LOG_DEBUG, "hdr10+ color_saturation_weight[%d] %u\n", w,
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ color_saturation_weight[%d] %u\n", w,
                                ui_tmp);
             }
         }   // num_windows
 
         uint64_t hdr10p_num_bytes = (ni_bs_writer_tell(&pb) + 7) / 8;
-        ni_log(NI_LOG_DEBUG, "hdr10+ total bits: %d -> bytes %" PRIu64 "\n",
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "hdr10+ total bits: %d -> bytes %" PRIu64 "\n",
                        (int)ni_bs_writer_tell(&pb), hdr10p_num_bytes);
         ni_bs_writer_align_zero(&pb);
 
@@ -1472,7 +1461,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             p_enc_frame->sei_total_len += p_enc_frame->sei_hdr_plus_len;
         } else
         {
-            ni_log(NI_LOG_ERROR, 
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  
                 "ni_enc_prep_aux_data: codec %d not supported for HDR10+ "
                 "SEI !\n",
                 codec_format);
@@ -1486,7 +1475,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_UDU_SEI);
     if (aux_data)
     {
-        ni_log(NI_LOG_DEBUG, "ni_enc_prep_aux_data sei_user_data_unreg_len %d\n",
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_prep_aux_data sei_user_data_unreg_len %d\n",
                        aux_data->size);
 
         // emulation prevention checking: a working buffer of size in worst case
@@ -1520,7 +1509,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             // discard this UDU SEI if the total SEI size exceeds the max size
             if (p_enc_frame->sei_total_len + sei_len > NI_ENC_MAX_SEI_BUF_SIZE)
             {
-                ni_log(NI_LOG_ERROR, 
+                ni_log2(p_enc_ctx, NI_LOG_ERROR,  
                     "ni_enc_prep_aux_data sei total length %u + sei_len %d "
                     "exceeds maximum sei size %u, discarding it !\n",
                     p_enc_frame->sei_total_len, sei_len,
@@ -1584,7 +1573,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         self_size = roi->self_size;
         if (!self_size || aux_data->size % self_size)
         {
-            ni_log(NI_LOG_ERROR, "Invalid ni_region_of_interest_t.self_size, "
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "Invalid ni_region_of_interest_t.self_size, "
                            "aux_data size %d self_size %u\n",
                            aux_data->size, self_size);
         } else
@@ -1604,7 +1593,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                 p_enc_ctx->av_rois = malloc(aux_data->size);
                 if (!p_enc_ctx->av_rois)
                 {
-                    ni_log(NI_LOG_ERROR, "malloc ROI aux_data failed.\n");
+                    ni_log2(p_enc_ctx, NI_LOG_ERROR,  "malloc ROI aux_data failed.\n");
                     is_new_rois = 0;
                 } else
                 {
@@ -1622,7 +1611,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
                                 api_params->source_height,
                                 api_params->cfg_enc_params.rc.intra_qp))
                 {
-                    ni_log(NI_LOG_ERROR, "set_roi_map failed\n");
+                    ni_log2(p_enc_ctx, NI_LOG_ERROR,  "set_roi_map failed\n");
                 }
             }
         }
@@ -1658,7 +1647,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
 
         p_enc_frame->extra_data_len += p_enc_ctx->roi_len;
 
-        ni_log(NI_LOG_DEBUG, "ni_enc_prep_aux_data: supply QP map, cacheRoi %d "
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_prep_aux_data: supply QP map, cacheRoi %d "
                        "aux_data %d ctx->roi_map %d frame->roi_len %u ctx->roi_len %u\n",
                        api_params->cacheRoi, aux_data != NULL,
                        p_enc_ctx->roi_map != NULL, p_enc_frame->roi_len, p_enc_ctx->roi_len);
@@ -1672,7 +1661,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     if (aux_data)
     {
         ltr = *((ni_long_term_ref_t *)aux_data->data);
-        ni_log(NI_LOG_DEBUG,
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG, 
                "%s(): frame aux data LTR use_cur_src_as_ltr %u "
                "use_ltr %u\n",
                __func__, ltr.use_cur_src_as_long_term_pic,
@@ -1685,7 +1674,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         p_enc_ctx->ltr_to_set.use_cur_src_as_long_term_pic =
             p_enc_ctx->ltr_to_set.use_long_term_ref = 0;
 
-        ni_log(NI_LOG_DEBUG,
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG, 
                "%s(): frame API set LTR use_cur_src_as_ltr %u "
                "use_ltr %u\n",
                __func__, ltr.use_cur_src_as_long_term_pic,
@@ -1699,6 +1688,29 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         p_enc_frame->use_long_term_ref = ltr.use_long_term_ref;
     }
 
+    // prep for NetInt target max/min QP reconfiguration support: when max/min QP
+    // setting has been requested by both frame and API, API takes priority
+    ni_rc_min_max_qp qp_info = {0};
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_MAX_MIN_QP);
+    if (aux_data)
+    {
+        qp_info = *(ni_rc_min_max_qp *)aux_data->data;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG, 
+                "%s(): frame aux data qp info max/min I qp <%d %d> maxDeltaQp <%d> max/min PB qp <%d %d>",
+                __func__, qp_info.maxQpI, qp_info.minQpI, qp_info.maxDeltaQp, qp_info.maxQpPB, qp_info.minQpPB);
+    }
+    if (qp_info.maxQpI > 0)
+    {
+        p_enc_ctx->enc_change_params->minQpI     = qp_info.minQpI;
+        p_enc_ctx->enc_change_params->maxQpI     = qp_info.maxQpI;
+        p_enc_ctx->enc_change_params->maxDeltaQp = qp_info.maxDeltaQp;
+        p_enc_ctx->enc_change_params->minQpPB    = qp_info.minQpPB;
+        p_enc_ctx->enc_change_params->maxQpPB    = qp_info.maxQpPB;
+        p_enc_ctx->enc_change_params->enable_option |=
+            NI_SET_CHANGE_PARAM_RC_MIN_MAX_QP;
+        p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+    }
+
     // prep for NetInt target bitrate reconfiguration support: when bitrate
     // setting has been requested by both frame and API, API takes priority
     int32_t bitrate = -1;
@@ -1706,7 +1718,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     if (aux_data)
     {
         bitrate = *((int32_t *)aux_data->data);
-        ni_log(NI_LOG_DEBUG, "%s(): frame aux data bitrate %d\n", __func__,
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data bitrate %d\n", __func__,
                bitrate);
     }
 
@@ -1714,7 +1726,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     {
         bitrate = p_enc_ctx->target_bitrate;
         p_enc_ctx->target_bitrate = -1;
-        ni_log(NI_LOG_DEBUG, "%s(): API set bitrate %d\n", __func__, bitrate);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set bitrate %d\n", __func__, bitrate);
     }
 
     if (bitrate > 0)
@@ -1724,6 +1736,10 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
 
         p_enc_ctx->enc_change_params->bitRate = bitrate;
         p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+
+        // update last bitrate with reconfigured bitrate
+        p_enc_ctx->last_bitrate = bitrate;
+        ni_log2(p_enc_ctx, NI_LOG_INFO, "%s: bitrate %d updated for reconfig\n", __func__, bitrate);
     }
 
     // prep for NetInt API force frame type
@@ -1733,7 +1749,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         p_enc_frame->ni_pict_type = PIC_TYPE_IDR;
 
         p_enc_ctx->force_idr_frame = 0;
-        ni_log(NI_LOG_DEBUG, "%s(): API force IDR frame\n", __func__);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API force IDR frame\n", __func__);
     }
 
     // prep for NetInt VUI reconfiguration support: when VUI HRD
@@ -1746,7 +1762,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
 
         if (aux_vui_ptr->colorDescPresent < 0 || aux_vui_ptr->colorDescPresent > 1)
         {
-            ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid colorDescPresent in aux data %d\n",
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): invalid colorDescPresent in aux data %d\n",
                    __func__, aux_vui_ptr->colorDescPresent);
         }
         else
@@ -1756,7 +1772,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
 
         if((aux_vui_ptr->aspectRatioWidth > NI_MAX_ASPECTRATIO) || (aux_vui_ptr->aspectRatioHeight > NI_MAX_ASPECTRATIO))
         {
-            ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid aspect ratio in aux data %dx%d\n",
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): invalid aspect ratio in aux data %dx%d\n",
                    __func__, aux_vui_ptr->aspectRatioWidth, aux_vui_ptr->aspectRatioHeight);
         }
         else
@@ -1771,7 +1787,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
 
         if (aux_vui_ptr->videoFullRange < 0 || aux_vui_ptr->videoFullRange > 1)
         {
-            ni_log(NI_LOG_ERROR, "ERROR: %s(): invalid videoFullRange in aux data %d\n",
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): invalid videoFullRange in aux data %d\n",
                    __func__, aux_vui_ptr->videoFullRange);
         }
         else
@@ -1790,7 +1806,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             p_enc_ctx->vui.aspectRatioWidth =
             p_enc_ctx->vui.aspectRatioHeight =
             p_enc_ctx->vui.videoFullRange = 0;
-        ni_log(NI_LOG_DEBUG, "%s(): API set VUI "
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set VUI "
                "colorDescPresent %d colorPrimaries %d "
                "colorTrc %d colorSpace %d aspectRatioWidth %d "
                "aspectRatioHeight %d videoFullRange %d\n",
@@ -1823,7 +1839,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     if (aux_data)
     {
         ltr_interval = *((int32_t *)aux_data->data);
-        ni_log(NI_LOG_DEBUG, "%s(): frame aux data LTR interval %d\n", __func__,
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data LTR interval %d\n", __func__,
                ltr_interval);
     }
 
@@ -1831,7 +1847,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     {
         ltr_interval = p_enc_ctx->ltr_interval;
         p_enc_ctx->ltr_interval = -1;
-        ni_log(NI_LOG_DEBUG, "%s(): API set LTR interval %d\n", __func__,
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set LTR interval %d\n", __func__,
                ltr_interval);
     }
 
@@ -1855,7 +1871,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         int32_t framerate_denom = aux_framerate_ptr->framerate_denom;
         if ((framerate_num <= 0) || (framerate_denom <= 0))
         {
-            ni_log(NI_LOG_ERROR,
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,
                    "ERROR: %s(): invalid framerate in aux data (%d/%d)\n",
                    __func__, framerate_num, framerate_denom);
         } else
@@ -1875,7 +1891,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             if (((framerate_num + framerate_denom - 1) / framerate_denom) >
                 NI_MAX_FRAMERATE)
             {
-                ni_log(NI_LOG_ERROR,
+                ni_log2(p_enc_ctx, NI_LOG_ERROR, 
                        "ERROR: %s(): invalid framerate in aux data (%d/%d)\n",
                        __func__, aux_framerate_ptr->framerate_num,
                        aux_framerate_ptr->framerate_denom);
@@ -1883,7 +1899,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
             {
                 framerate.framerate_num = framerate_num;
                 framerate.framerate_denom = framerate_denom;
-                ni_log(NI_LOG_DEBUG, "%s(): frame aux data framerate (%d/%d)\n",
+                ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data framerate (%d/%d)\n",
                        __func__, framerate_num, framerate_denom);
             }
         }
@@ -1894,7 +1910,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         framerate = p_enc_ctx->framerate;
         p_enc_ctx->framerate.framerate_num =
             p_enc_ctx->framerate.framerate_denom = 0;
-        ni_log(NI_LOG_DEBUG, "%s(): API set framerate (%d/%d)\n", __func__,
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set framerate (%d/%d)\n", __func__,
                framerate.framerate_num, framerate.framerate_denom);
     }
 
@@ -1907,6 +1923,12 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         p_enc_ctx->enc_change_params->frameRateDenom =
             framerate.framerate_denom;
         p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+
+        // update last framerate with reconfigured framerate
+        p_enc_ctx->last_framerate.framerate_num = framerate.framerate_num;
+        p_enc_ctx->last_framerate.framerate_denom = framerate.framerate_denom;
+        ni_log2(p_enc_ctx, NI_LOG_INFO, "%s: framerate num %d denom %d updated for reconfig\n",
+               __func__, framerate.framerate_num, framerate.framerate_denom);
     }
 
     // prep for NetInt frame reference invalidation support: when this setting
@@ -1917,7 +1939,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     if (aux_data)
     {
         frame_num = *((int32_t *)aux_data->data);
-        ni_log(NI_LOG_ERROR, "%s(): frame aux data frame ref invalid %d\n",
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data frame ref invalid %d\n",
                __func__, frame_num);
     }
 
@@ -1925,7 +1947,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
     {
         frame_num = p_enc_ctx->ltr_frame_ref_invalid;
         p_enc_ctx->ltr_frame_ref_invalid = -1;
-        ni_log(NI_LOG_ERROR, "%s(): API set frame ref invalid %d\n", __func__,
+        ni_log2(p_enc_ctx, NI_LOG_ERROR,  "%s(): API set frame ref invalid %d\n", __func__,
                frame_num);
     }
 
@@ -1956,6 +1978,249 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
         p_enc_frame->sei_total_len +=
             p_enc_frame->preferred_characteristics_data_len;
     }
+
+    // prep for NetInt maxFrameSize reconfiguration support: when maxFrameSize
+    // setting has been requested by both frame aux data and API, API takes priority
+    int32_t max_frame_size = 0;
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_MAX_FRAME_SIZE);
+    if (aux_data)
+    {
+        max_frame_size = *((int32_t *)aux_data->data);
+        uint32_t maxFrameSize = (uint32_t)max_frame_size / 2000;
+        uint32_t min_maxFrameSize;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data max_frame_size %d\n", __func__,
+               max_frame_size);
+
+        if (!api_params->low_delay_mode)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): max_frame_size %d is valid only when lowDelay mode is enabled\n",
+                   __func__, max_frame_size);
+            max_frame_size = 0;
+        }
+        else
+        {
+            int32_t tmp_bitrate, tmp_framerate_num, tmp_framerate_denom;
+            tmp_bitrate = (p_enc_ctx->enc_change_params->bitRate > 0) ?  p_enc_ctx->enc_change_params->bitRate : api_params->bitrate;      
+          
+            if ((p_enc_ctx->enc_change_params->frameRateNum > 0) && (p_enc_ctx->enc_change_params->frameRateDenom > 0))
+            {
+              tmp_framerate_num = p_enc_ctx->enc_change_params->frameRateNum;
+              tmp_framerate_denom = p_enc_ctx->enc_change_params->frameRateDenom;
+            }
+            else
+            {
+              tmp_framerate_num = (int32_t)api_params->fps_number;
+              tmp_framerate_denom = (int32_t)api_params->fps_denominator;
+            }
+
+            min_maxFrameSize = (((uint32_t)tmp_bitrate / tmp_framerate_num * tmp_framerate_denom) / 8) / 2000;
+
+            if (maxFrameSize < min_maxFrameSize)
+            {
+                ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): max_frame_size %d is too small (invalid)\n",
+                       __func__, max_frame_size);
+                max_frame_size = 0;
+            }
+            
+            if (max_frame_size > NI_MAX_FRAME_SIZE) {
+                max_frame_size = NI_MAX_FRAME_SIZE;
+            }
+        }            
+    }
+
+    if (p_enc_ctx->max_frame_size > 0)
+    {
+        max_frame_size = p_enc_ctx->max_frame_size;
+        p_enc_ctx->max_frame_size = 0;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set max_frame_size %d\n", __func__, max_frame_size);
+    }
+
+    if (max_frame_size > 0)
+    {
+        p_enc_ctx->enc_change_params->enable_option |=
+            NI_SET_CHANGE_PARAM_MAX_FRAME_SIZE;
+
+        p_enc_ctx->enc_change_params->maxFrameSize = (uint16_t)(max_frame_size / 2000);
+        p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+    }
+
+    // prep for NetInt crf reconfiguration support: when crf
+    // setting has been requested by both frame aux data and API, API takes priority
+    float crf = -1.0f;
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_CRF);
+    if (aux_data)
+    {
+        crf = (float)(*((int32_t *)aux_data->data));
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data crf %d\n", __func__,
+               crf);
+
+        if (api_params->cfg_enc_params.crf < 0)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): reconfigure crf value %d is valid only in CRF mode\n",
+                   __func__, crf);
+            crf = -1;
+        }
+        else
+        {
+            if (crf < 0 || crf > 51)
+            {
+                ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): crf value %d is invalid (valid range in [0..51])\n",
+                       __func__, crf);
+                crf = -1;
+            }
+        }
+    }
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_CRF_FLOAT);
+    if (aux_data)
+    {
+        crf = *((float *)aux_data->data);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data crf %f\n", __func__,
+               crf);
+
+        if (api_params->cfg_enc_params.crfFloat < 0)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): reconfigure crf value %f is valid only in CRF mode\n",
+                   __func__, crf);
+            crf = -1;
+        }
+        else
+        {
+            if (crf < 0 || crf > 51)
+            {
+                ni_log2(p_enc_ctx, NI_LOG_ERROR,  "ERROR: %s(): crf value %f is invalid (valid range in [0..51])\n",
+                       __func__, crf);
+                crf = -1;
+            }
+        }
+    }
+
+    if (p_enc_ctx->reconfig_crf >= 0 || p_enc_ctx->reconfig_crf_decimal > 0)
+    {
+        crf = (float)(p_enc_ctx->reconfig_crf +
+                      (float)p_enc_ctx->reconfig_crf_decimal / 100.0);
+        p_enc_ctx->reconfig_crf = -1;
+        p_enc_ctx->reconfig_crf_decimal = 0;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set reconfig_crf %f\n", __func__, crf);
+    }
+
+    if (crf >= 0)
+    {
+        p_enc_ctx->enc_change_params->enable_option |=
+            NI_SET_CHANGE_PARAM_CRF;
+
+        p_enc_ctx->enc_change_params->crf = (uint8_t)crf;
+        p_enc_ctx->enc_change_params->crfDecimal =
+              (float)((crf - (float)p_enc_ctx->enc_change_params->crf) * 100);
+        p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+    }
+
+    int32_t vbvMaxRate = 0;
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_VBV_MAX_RATE);
+    if (aux_data)
+    {
+        vbvMaxRate = *((int32_t *)aux_data->data);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data vbvMaxRate %d\n", __func__,
+               vbvMaxRate);
+    }
+
+    if (p_enc_ctx->reconfig_vbv_max_rate > 0)
+    {
+        vbvMaxRate = p_enc_ctx->reconfig_vbv_max_rate;
+        p_enc_ctx->reconfig_vbv_max_rate = 0;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set reconfig_vbv_max_rate %d\n", __func__, vbvMaxRate);
+    }
+
+    if (vbvMaxRate)
+    {
+        p_enc_ctx->enc_change_params->enable_option |=
+            NI_SET_CHANGE_PARAM_VBV;
+
+        p_enc_ctx->enc_change_params->vbvMaxRate = vbvMaxRate;
+        p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+    }
+
+    int32_t vbvBufferSize = 0;
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_VBV_BUFFER_SIZE);
+    if (aux_data)
+    {
+        vbvBufferSize = *((int32_t *)aux_data->data);
+        if ((vbvBufferSize < 10 && vbvBufferSize != 0) || vbvBufferSize > 3000)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR,  "%s(): invalid frame aux data vbvBufferSize %d\n", __func__,
+                   vbvBufferSize);
+            vbvBufferSize = 0;
+        } 
+        else
+        {
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): frame aux data vbvBufferSize %d\n", __func__,
+                   vbvBufferSize);
+        }
+    }
+
+    if (p_enc_ctx->reconfig_vbv_buffer_size > 0)
+    {
+        vbvBufferSize = p_enc_ctx->reconfig_vbv_buffer_size;
+        p_enc_ctx->reconfig_vbv_buffer_size = 0;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "%s(): API set reconfig_vbv_max_rate %d\n", __func__, vbvBufferSize);
+    }
+
+    if (vbvBufferSize)
+    {
+        p_enc_ctx->enc_change_params->enable_option |=
+            NI_SET_CHANGE_PARAM_VBV;
+
+        p_enc_ctx->enc_change_params->vbvBufferSize = vbvBufferSize;
+        p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+    }
+
+    int16_t sliceArg = 0;
+    aux_data = ni_frame_get_aux_data(p_dec_frame, NI_FRAME_AUX_DATA_SLICE_ARG);
+    if (aux_data)
+    {
+        sliceArg = *((int16_t *)aux_data->data);
+        ni_encoder_cfg_params_t *p_enc = &api_params->cfg_enc_params;
+        if (p_enc->slice_mode == 0)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR, "%s():not support to reconfig slice_arg when slice_mode disable.\n",
+                    __func__);
+            sliceArg = 0;
+        }
+        if (NI_CODEC_FORMAT_JPEG == p_enc_ctx->codec_format || NI_CODEC_FORMAT_AV1 == p_enc_ctx->codec_format)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR, "%s():sliceArg is only supported for H.264 or H.265.\n",
+                    __func__);
+            sliceArg = 0;
+        }
+        int ctu_mb_size = (NI_CODEC_FORMAT_H264 == p_enc_ctx->codec_format) ? 16 : 64;
+        int max_num_ctu_mb_row = (api_params->source_height + ctu_mb_size - 1) / ctu_mb_size;
+        if (sliceArg < 1 || sliceArg > max_num_ctu_mb_row)
+        {
+            ni_log2(p_enc_ctx, NI_LOG_ERROR, "%s(): invalid frame aux data sliceArg %d\n", __func__,
+                    sliceArg);
+            sliceArg = 0;
+        }
+        else
+        {
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG, "%s(): frame aux data sliceArg %d\n", __func__,
+                    sliceArg);
+        }
+    }
+
+    if (p_enc_ctx->reconfig_slice_arg > 0)
+    {
+        sliceArg = p_enc_ctx->reconfig_slice_arg;
+        p_enc_ctx->reconfig_slice_arg = 0;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG, "%s(): API set reconfig_slice_arg %d\n", __func__, sliceArg);
+    }
+
+    if (sliceArg)
+    {
+        p_enc_ctx->enc_change_params->enable_option |=
+            NI_SET_CHANGE_PARAM_SLICE_ARG;
+
+        p_enc_ctx->enc_change_params->sliceArg = sliceArg;
+        p_enc_frame->reconf_len = sizeof(ni_encoder_change_params_t);
+    }
 }
 
 /*!*****************************************************************************
@@ -1971,7 +2236,7 @@ void ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx,
  *  \param[in]  udu_data SEI for User data unregistered
  *  \param[in]  hdrp_data SEI for HDR10+
  *  \param[in]  is_hwframe, must be 0 (sw frame) or 1 (hw frame)
- *  \param[in]  is_nv12frame, must be 1 (nv12 frame) or 0 (not)
+ *  \param[in]  is_semiplanar, must be 1 (semiplanar frame) or 0 (not)
  *
  *  \return NONE
  ******************************************************************************/
@@ -1981,27 +2246,43 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
                           const uint8_t *mdcv_data, const uint8_t *cll_data,
                           const uint8_t *cc_data, const uint8_t *udu_data,
                           const uint8_t *hdrp_data, int is_hwframe,
-                          int is_nv12frame)
+                          int is_semiplanar)
 {
     ni_xcoder_params_t *api_params =
         (ni_xcoder_params_t *)p_enc_ctx->p_session_config;
 
     // fill in extra data  (skipping meta data header)
-    if (is_hwframe != 0 && is_hwframe != 1 && is_nv12frame != 0 &&
-        is_nv12frame != 1)
+    if (is_hwframe != 0 && is_hwframe != 1 && is_semiplanar != 0 &&
+        is_semiplanar != 1)
     {
-        ni_log(NI_LOG_ERROR, 
+        ni_log2(p_enc_ctx, NI_LOG_ERROR,  
             "ni_enc_copy_aux_data: error, illegal hwframe or nv12frame\n");
         return;
     }
+
+    uint32_t frame_metadata_size = NI_APP_ENC_FRAME_META_DATA_SIZE;
+    if (ni_cmp_fw_api_ver((char*) &p_enc_ctx->fw_rev[NI_XCODER_REVISION_API_MAJOR_VER_IDX],
+                          "6Q") < 0)
+    {
+        frame_metadata_size = NI_APP_ENC_FRAME_META_DATA_SIZE_UNDER_MAJOR_6_MINOR_Q;
+    }
+    
     uint8_t *dst = (uint8_t *)p_enc_frame->p_data[2 + is_hwframe] +
-        p_enc_frame->data_len[2 + is_hwframe] + NI_APP_ENC_FRAME_META_DATA_SIZE;
+        p_enc_frame->data_len[2 + is_hwframe] + frame_metadata_size;
 
     if (!is_hwframe)
     {
-        dst = (uint8_t *)p_enc_frame->p_data[2 - is_nv12frame] +
-            p_enc_frame->data_len[2 - is_nv12frame] +
-            NI_APP_ENC_FRAME_META_DATA_SIZE;
+        dst = (uint8_t *)p_enc_frame->p_data[2 - is_semiplanar] +
+            p_enc_frame->data_len[2 - is_semiplanar] +
+            frame_metadata_size;
+    }
+
+    // Separate metadata buffer (not contiguous with YUV buffer)
+    if (p_enc_frame->separate_metadata)
+    {
+        dst = p_enc_frame->p_metadata_buffer + frame_metadata_size;
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: p_metadata_buffer %p frame_metadata_size %u dst %p\n",
+                       p_enc_frame->p_metadata_buffer, frame_metadata_size, dst);     
     }
 
     // fill in reconfig data if enabled; even if it's disabled, keep the space
@@ -2009,8 +2290,8 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
     if (p_enc_frame->reconf_len || api_params->cfg_enc_params.roi_enable ||
         p_enc_frame->sei_total_len)
     {
-        ni_log(NI_LOG_DEBUG, "ni_enc_copy_aux_data: keep reconfig space: %"
-               PRId64 "\n", sizeof(ni_encoder_change_params_t));
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: keep reconfig space: %"
+               PRId64 " to %p\n", sizeof(ni_encoder_change_params_t), dst);
 
         memset(dst, 0, sizeof(ni_encoder_change_params_t));
 
@@ -2032,16 +2313,16 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
         if (p_enc_frame->roi_len && p_enc_ctx->roi_map)
         {
             memcpy(dst, p_enc_ctx->roi_map, p_enc_frame->roi_len);
-            ni_log(NI_LOG_DEBUG, "ni_enc_copy_aux_data: ROI size: %u\n",
-                           p_enc_frame->roi_len);
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: ROI size: %u to %p\n",
+                           p_enc_frame->roi_len, dst);
 
         } else
         {
             memset(dst, 0, p_enc_ctx->roi_len);
-            ni_log(NI_LOG_DEBUG, "ni_enc_copy_aux_data: zeroed ROI size: %u\n",
-                           p_enc_ctx->roi_len);
+            ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: zeroed ROI size: %u to %p\n",
+                           p_enc_ctx->roi_len, dst);
         }
-
+        // for QUADRA, when ROI enabled, requires ROI map included in input buffer and data transferred for every frame
         dst += p_enc_ctx->roi_len;
         // reset frame ROI len to the actual map size
         p_enc_frame->roi_len = p_enc_ctx->roi_len;
@@ -2050,8 +2331,8 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
     // HDR SEI: mastering display color volume
     if (p_enc_frame->sei_hdr_mastering_display_color_vol_len)
     {
-        ni_log(NI_LOG_DEBUG, "ni_enc_copy_aux_data: HDR SEI mdcv size: %u\n",
-                       p_enc_frame->sei_hdr_mastering_display_color_vol_len);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: HDR SEI mdcv size: %u to %p\n",
+                       p_enc_frame->sei_hdr_mastering_display_color_vol_len, dst);
         memcpy(dst, mdcv_data,
                p_enc_frame->sei_hdr_mastering_display_color_vol_len);
         dst += p_enc_frame->sei_hdr_mastering_display_color_vol_len;
@@ -2060,8 +2341,8 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
     // HDR SEI: content light level info
     if (p_enc_frame->sei_hdr_content_light_level_info_len)
     {
-        ni_log(NI_LOG_DEBUG, "ni_enc_copy_aux_data: HDR SEI cll size: %u\n",
-                       p_enc_frame->sei_hdr_content_light_level_info_len);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: HDR SEI cll size: %u to %p\n",
+                       p_enc_frame->sei_hdr_content_light_level_info_len, dst);
 
         memcpy(dst, cll_data,
                p_enc_frame->sei_hdr_content_light_level_info_len);
@@ -2071,6 +2352,9 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
     // HLG SEI: preferred characteristics
     if (p_enc_frame->preferred_characteristics_data_len)
     {
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: preferred characteristics size: %u to %p\n",
+                       p_enc_frame->preferred_characteristics_data_len, dst);
+        
         dst[0] = dst[1] = dst[2] = 0;
         dst[3] = 1;
         if (NI_CODEC_FORMAT_H265 == codec_format)
@@ -2096,9 +2380,9 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
     // close caption
     if (p_enc_frame->sei_cc_len)
     {
-        ni_log(NI_LOG_DEBUG, "ni_enc_copy_aux_data: close caption size: %u\n",
-                       p_enc_frame->sei_cc_len);
-
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: close caption size: %u to %p\n",
+                       p_enc_frame->sei_cc_len, dst);
+        
         memcpy(dst, cc_data, p_enc_frame->sei_cc_len);
         dst += p_enc_frame->sei_cc_len;
     }
@@ -2106,6 +2390,9 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
     // HDR10+
     if (p_enc_frame->sei_hdr_plus_len)
     {
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: HDR10+ size: %u to %p\n",
+                       p_enc_frame->sei_hdr_plus_len, dst); 
+        
         memcpy(dst, hdrp_data, p_enc_frame->sei_hdr_plus_len);
         dst += p_enc_frame->sei_hdr_plus_len;
     }
@@ -2113,7 +2400,881 @@ void ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx,
     // User data unregistered SEI
     if (p_enc_frame->sei_user_data_unreg_len)
     {
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "ni_enc_copy_aux_data: UDU size: %u to %p\n",
+                       p_enc_frame->sei_user_data_unreg_len, dst); 
         memcpy(dst, udu_data, p_enc_frame->sei_user_data_unreg_len);
         //dst += p_enc_frame->sei_user_data_unreg_len;
     }
+}
+
+/*!*****************************************************************************
+  *  \brief  Send an input data frame to the encoder with YUV data given in 
+  *   the inputs.
+  * 
+  *   For ideal performance memory should be 4k aligned. If it is not 4K aligned
+  *   then a temporary 4k aligned memory will be used to copy data to and from
+  *   when writing and reading. This will negatively impact performance.
+  * 
+  *   Any metadata to be sent with the frame should be attached to p_enc_frame
+  *   as aux data (e.g. using ni_frame_new_aux_data()).
+  *
+  *  \param[in] p_ctx                         Encoder session context
+  *  \param[in] p_enc_frame                   Struct holding information about the frame 
+  *                                           to be sent to the encoder
+  *  \param[in] p_yuv_buffer                  Caller allocated buffer holding YUV data 
+  *                                           for the frame
+  *
+  *  \return On success
+  *                          Total number of bytes written
+  *          On failure
+  *                          NI_RETCODE_INVALID_PARAM
+  *                          NI_RETCODE_ERROR_MEM_ALOC
+  *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+  *                          NI_RETCODE_ERROR_INVALID_SESSION
+  *****************************************************************************/
+int ni_enc_write_from_yuv_buffer(ni_session_context_t *p_ctx,
+                                 ni_frame_t *p_enc_frame, uint8_t *p_yuv_buffer)
+{
+    int frame_width;
+    int frame_height;
+    bool need_copy = true;
+    ni_xcoder_params_t *p_param;
+    ni_retcode_t retval = NI_RETCODE_SUCCESS;
+    bool alignment_2pass_wa = false;
+    int is_hwframe;
+
+    if (!p_ctx || !p_enc_frame)
+    {
+        ni_log2(p_ctx, NI_LOG_ERROR,  "ERROR: %s passed parameters are null, return\n",
+               __func__);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+    if (!p_yuv_buffer)
+    {
+        // send EOS
+        p_enc_frame->end_of_stream = 1;
+        goto send_frame;
+    }
+
+    if (((uintptr_t)p_yuv_buffer) % NI_MEM_PAGE_ALIGNMENT)
+    {
+        ni_log2(p_ctx, NI_LOG_INFO, "WARNING: %s passed buffer ptr %p is not 4k aligned\n",
+               __func__, p_yuv_buffer);
+
+    }
+
+    is_hwframe = p_ctx->hw_action != NI_CODEC_HW_NONE;
+    frame_width = p_enc_frame->video_width;
+    frame_height = p_enc_frame->video_height;
+    p_param = (ni_xcoder_params_t *)p_ctx->p_session_config;
+
+    // extra data starts with metadata header
+    p_enc_frame->extra_data_len = NI_APP_ENC_FRAME_META_DATA_SIZE;
+
+    if (!p_enc_frame->start_of_stream &&
+        (p_enc_frame->video_width != p_ctx->actual_video_width ||
+         p_enc_frame->video_height != p_ctx->active_video_height ||
+         p_enc_frame->pixel_format != p_ctx->pixel_format))
+    {
+        ni_log2(p_ctx, NI_LOG_INFO,
+               "%s: resolution change %dx%d -> %dx%d "
+               "or pixel format change %d -> %d\n",
+               __func__, p_ctx->actual_video_width, p_ctx->active_video_height,
+               p_enc_frame->video_width, p_enc_frame->video_height,
+               p_ctx->pixel_format, p_enc_frame->pixel_format);
+
+        // change run state
+        p_ctx->session_run_state = SESSION_RUN_STATE_SEQ_CHANGE_DRAINING;
+
+        ni_log2(p_ctx, NI_LOG_DEBUG,  "%s: session_run_state change to %d \n", __func__,
+               p_ctx->session_run_state);
+
+        // send EOS
+        p_enc_frame->end_of_stream = 1;
+        goto send_frame;
+    }
+
+    // ROI demo mode takes higher priority over aux data
+    // Note: when ROI demo modes enabled, supply ROI map for the specified range
+    //       frames, and 0 map for others
+    if (p_param->roi_demo_mode && p_param->cfg_enc_params.roi_enable)
+    {
+        if (p_ctx->frame_num > 90 && p_ctx->frame_num < 300)
+        {
+            p_enc_frame->roi_len = p_ctx->roi_len;
+        } else
+        {
+            p_enc_frame->roi_len = 0;
+        }
+        // when ROI enabled, always have a data buffer for ROI
+        // Note: this is handled separately from ROI through side/aux data
+        p_enc_frame->extra_data_len += p_ctx->roi_len;
+    }
+
+    int should_send_sei_with_frame =
+        ni_should_send_sei_with_frame(p_ctx, PIC_TYPE_P, p_param);
+
+    uint8_t mdcv_data[NI_MAX_SEI_DATA];
+    uint8_t cll_data[NI_MAX_SEI_DATA];
+    uint8_t cc_data[NI_MAX_SEI_DATA];
+    uint8_t udu_data[NI_MAX_SEI_DATA];
+    uint8_t hdrp_data[NI_MAX_SEI_DATA];
+
+    // Convert aux data attached to input frame into required format,
+    // and store in local arrays
+    ni_enc_prep_aux_data(p_ctx, p_enc_frame, p_enc_frame, p_ctx->codec_format,
+                         should_send_sei_with_frame, mdcv_data, cll_data,
+                         cc_data, udu_data, hdrp_data);
+
+    p_enc_frame->extra_data_len += p_enc_frame->sei_total_len;
+
+    // data layout requirement: leave space for reconfig data if at least one of
+    // reconfig, SEI or ROI is present
+    // Note: ROI is present when enabled, so use encode config flag instead of
+    //       frame's roi_len as it can be 0 indicating a 0'd ROI map setting !
+    if (p_enc_frame->reconf_len || p_enc_frame->sei_total_len ||
+        (p_param->roi_demo_mode && p_param->cfg_enc_params.roi_enable))
+    {
+        p_enc_frame->extra_data_len += sizeof(ni_encoder_change_params_t);
+    }
+
+    // Check whether line-by-line copy is needed
+    int dst_stride[NI_MAX_NUM_DATA_POINTERS] = {0};
+    int dst_height_aligned[NI_MAX_NUM_DATA_POINTERS] = {0};
+    int is_semiplanar = !ni_get_planar_from_pixfmt(p_ctx->pixel_format);
+    ni_get_hw_yuv420p_dim(frame_width, frame_height, p_ctx->bit_depth_factor,
+                          is_semiplanar, dst_stride, dst_height_aligned);
+
+    int src_stride[NI_MAX_NUM_DATA_POINTERS];
+    int src_height[NI_MAX_NUM_DATA_POINTERS];
+    uint8_t *p_src[NI_MAX_NUM_DATA_POINTERS];
+
+    bool isrgba = (p_ctx->pixel_format == NI_PIX_FMT_ABGR || p_ctx->pixel_format == NI_PIX_FMT_ARGB
+                        || p_ctx->pixel_format == NI_PIX_FMT_RGBA || p_ctx->pixel_format == NI_PIX_FMT_BGRA);
+
+    // NOTE - FFmpeg / Gstreamer users should use linesize array in frame structure instead of src_stride in the following sample code
+    src_stride[0] = frame_width * p_ctx->bit_depth_factor;
+    src_height[0] = frame_height;
+    p_src[0] = p_yuv_buffer;
+    
+    if (isrgba)
+    {
+        src_stride[1] = 0;
+        src_stride[2] = 0;
+
+        src_height[1] = 0;
+        src_height[2] = 0;
+
+        p_src[1] = NULL;
+        p_src[2] = NULL;    
+    }
+    else
+    {
+        src_stride[1] = is_semiplanar ? src_stride[0] : src_stride[0] / 2;
+        src_stride[2] = is_semiplanar ? 0 : src_stride[0] / 2;
+
+        src_height[1] = src_height[0] / 2;
+        src_height[2] = is_semiplanar ? 0 : src_height[1];
+
+        p_src[1] = p_src[0] + src_stride[0] * src_height[0];
+        p_src[2] = p_src[1] + src_stride[1] * src_height[1];
+    } 
+
+    alignment_2pass_wa = (
+                               (p_param->cfg_enc_params.lookAheadDepth || 
+                                p_param->cfg_enc_params.crfFloat >= 0) &&
+                               (p_ctx->codec_format == NI_CODEC_FORMAT_H265 ||
+                                p_ctx->codec_format == NI_CODEC_FORMAT_AV1));
+
+    if (alignment_2pass_wa && !is_hwframe) {
+        if (is_semiplanar) {
+            // for 2-pass encode output mismatch WA, need to extend (and
+            // pad) CbCr plane height, because 1st pass assume input 32
+            // align
+            dst_height_aligned[1] = (((dst_height_aligned[0] + 31) / 32) * 32) / 2;
+        } else {
+            // for 2-pass encode output mismatch WA, need to extend (and
+            // pad) Cr plane height, because 1st pass assume input 32 align
+            dst_height_aligned[2] = (((dst_height_aligned[0] + 31) / 32) * 32) / 2;
+        }
+    }
+
+    // check input resolution zero copy compatible or not
+    if (ni_encoder_frame_zerocopy_check(p_ctx,
+        p_param, frame_width, frame_height,
+        (const int *)src_stride, false) == NI_RETCODE_SUCCESS)
+    {
+        need_copy = false;
+        //alloc metadata buffer etc. (if needed)
+        retval = ni_encoder_frame_zerocopy_buffer_alloc(
+            p_enc_frame, frame_width,
+            frame_height, (const int *)src_stride, (const uint8_t **)p_src,
+            (int)(p_enc_frame->extra_data_len));
+        if (retval != NI_RETCODE_SUCCESS)
+            goto end;
+    }
+    else
+    {
+        // if linesize changes (while resolution remains the same), copy to previously configured linesizes
+        if (p_param->luma_linesize && p_param->chroma_linesize)
+        {
+            dst_stride[0] = p_param->luma_linesize;
+            dst_stride[1] = p_param->chroma_linesize;
+            dst_stride[2] = is_semiplanar ? 0 : p_param->chroma_linesize;
+        }
+        retval = ni_encoder_sw_frame_buffer_alloc(
+            p_param->cfg_enc_params.planar, p_enc_frame, frame_width,
+            dst_height_aligned[0], dst_stride,
+            p_ctx->codec_format == NI_CODEC_FORMAT_H264,
+            (int)(p_enc_frame->extra_data_len), alignment_2pass_wa);
+        if (retval != NI_RETCODE_SUCCESS)
+        {
+            return retval;
+        }    
+    }
+
+    ni_log2(p_ctx, NI_LOG_TRACE, 
+           "%s: src_stride %d dst_stride "
+           "%d dst_height_aligned %d src_height %d need_copy %d\n",
+           __func__, src_stride[0],
+           dst_stride[0], dst_height_aligned[0],
+           src_height[0], need_copy);    
+
+    if (need_copy)
+    {
+        ni_copy_hw_yuv420p((uint8_t **)(p_enc_frame->p_data), p_src,
+                           frame_width, frame_height, p_ctx->bit_depth_factor,
+                           is_semiplanar,
+                           p_param->cfg_enc_params.conf_win_right, dst_stride,
+                           dst_height_aligned, src_stride, src_height);
+        p_enc_frame->separate_metadata = 0;
+    }
+
+    ni_log2(p_ctx, NI_LOG_DEBUG, 
+           "p_dst alloc linesize = %d/%d/%d  src height=%d  "
+           "dst height aligned = %d/%d/%d force_key_frame=%d, "
+           "extra_data_len=%u"
+           " sei_size=%u (hdr_content_light_level %u hdr_mastering_display_"
+           "color_vol %u hdr10+ %u hrd %d) reconf_size=%u roi_size=%u "
+           "force_pic_qp=%u udu_sei_size=%u "
+           "use_cur_src_as_long_term_pic %u use_long_term_ref %u\n",
+           dst_stride[0], dst_stride[1], dst_stride[2], frame_height,
+           dst_height_aligned[0], dst_height_aligned[1], dst_height_aligned[2],
+           p_enc_frame->force_key_frame, p_enc_frame->extra_data_len,
+           p_enc_frame->sei_total_len,
+           p_enc_frame->sei_hdr_content_light_level_info_len,
+           p_enc_frame->sei_hdr_mastering_display_color_vol_len,
+           p_enc_frame->sei_hdr_plus_len, 0, /* hrd is 0 size for now */
+           p_enc_frame->reconf_len, p_enc_frame->roi_len,
+           p_enc_frame->force_pic_qp, p_enc_frame->sei_user_data_unreg_len,
+           p_enc_frame->use_cur_src_as_long_term_pic,
+           p_enc_frame->use_long_term_ref);
+
+    ni_enc_copy_aux_data(p_ctx, p_enc_frame, p_enc_frame, p_ctx->codec_format,
+                         mdcv_data, cll_data, cc_data, udu_data, hdrp_data,
+                         0 /*swframe*/, is_semiplanar);
+
+send_frame:
+    retval = ni_device_session_write(p_ctx, (ni_session_data_io_t *)p_enc_frame,
+                                     NI_DEVICE_TYPE_ENCODER);
+end:
+    if (!need_copy)
+    {
+        // Don't want to accidentally free or reuse user-allocated YUV buffer, so remove from frame
+        p_enc_frame->p_buffer = NULL;
+        p_enc_frame->buffer_size = 0;
+        for (int i = 0; i < NI_MAX_NUM_DATA_POINTERS; i++)
+        {
+            p_enc_frame->data_len[i] = 0;
+            p_enc_frame->p_data[i] = NULL;
+        }
+    }
+
+    return retval;
+}
+
+/*!*****************************************************************************
+ *  \brief  Find the next start code
+ *
+ *  \param[in]  p pointer to buffer start address.
+ *  \param[in]  end pointer to buffer end address.
+ *  \param[state]  state pointer to nalu type address
+ *
+ *  \return search end address
+ ******************************************************************************/
+const uint8_t *ni_find_start_code (const uint8_t *p, const uint8_t *end, uint32_t *state)
+{
+  int i;
+
+  if (p >= end)
+    return end;
+
+  for (i = 0; i < 3; i++) {
+    uint32_t tmp = *state << 8;
+    *state = tmp + *(p++);
+    if (tmp == 0x100 || p == end)
+      return p;
+  }
+
+  while (p < end) {
+    if (p[-1] > 1)
+      p += 3;
+    else if (p[-2])
+      p += 2;
+    else if (p[-3] | (p[-1] - 1))
+      p++;
+    else {
+      p++;
+      break;
+    }
+  }
+
+  p = ((p) < (end) ? (p - 4) : (end - 4));      // min
+  *state =
+      (((uint32_t) (p)[0] << 24) | ((p)[1] << 16) | ((p)[2] << 8) | (p)[3]);
+
+  return p + 4;
+}
+
+/*!******************************************************************************
+ * \brief  Extract custom sei payload data from pkt_data,
+ *  and save it to ni_packet_t
+ *
+ * \param uint8_t *pkt_data - FFMpeg AVPacket data
+ * \param int pkt_size - packet size
+ * \param long index - pkt data index of custom sei first byte after SEI type
+ * \param ni_packet_t *p_packet - netint internal packet
+ * \param uint8_t sei_type - type of SEI
+ * \param int vcl_found - whether got vcl in the pkt data, 1 means got
+ *
+ * \return - 0 on success, non-0 on failure
+ ********************************************************************************/
+int ni_extract_custom_sei(uint8_t *pkt_data, int pkt_size, long index,
+                          ni_packet_t *p_packet, uint8_t sei_type, int vcl_found)
+{
+  int i, len;
+  uint8_t *udata;
+  uint8_t *sei_data;
+  int sei_size;
+  int sei_index;
+  ni_custom_sei_t *p_custom_sei;
+
+  ni_log(NI_LOG_TRACE, "%s() enter\n", __FUNCTION__);
+
+  if (p_packet->p_custom_sei_set == NULL)
+  {
+    /* max size */
+    p_packet->p_custom_sei_set = (ni_custom_sei_set_t *)malloc(sizeof(ni_custom_sei_set_t));
+    if (p_packet->p_custom_sei_set == NULL)
+    {
+      ni_log(NI_LOG_ERROR, "failed to allocate all custom sei buffer.\n");
+      return NI_RETCODE_ERROR_MEM_ALOC;
+    }
+    memset(p_packet->p_custom_sei_set, 0, sizeof(ni_custom_sei_set_t));
+  }
+
+  sei_index = p_packet->p_custom_sei_set->count;
+  p_custom_sei = &p_packet->p_custom_sei_set->custom_sei[sei_index];
+  if (sei_index >= NI_MAX_CUSTOM_SEI_CNT)
+  {
+    ni_log(NI_LOG_INFO, "number of custom sei in current frame is out of limit(%d).\n",
+           NI_MAX_CUSTOM_SEI_CNT);
+    return 0;
+  }
+  sei_data = &p_custom_sei->data[0];
+
+  /*! extract SEI payload size.
+   *  the first byte after SEI type is the SEI payload size.
+   *  if the first byte is 255(0xFF), it means the SEI payload size is more than 255.
+   *  in this case, to get the SEI payload size is to do a summation.
+   *  the end of SEI size is the first non-0xFF value.
+   *  for example, 0xFF 0xFF 0x08, the SEI payload size equals to (0xFF+0xFF+0x08).
+   */
+  sei_size = 0;
+  while (index < pkt_size && pkt_data[index] == 0xff)
+  {
+    sei_size += pkt_data[index++];
+  }
+
+  if (index >= pkt_size)
+  {
+    ni_log(NI_LOG_INFO, "custom sei corrupted: length truncated.\n");
+    return NI_RETCODE_FAILURE;
+  }
+  sei_size += pkt_data[index++];
+
+  if (sei_size > NI_MAX_CUSTOM_SEI_DATA)
+  {
+    ni_log(NI_LOG_INFO, "custom sei corrupted: size(%d) out of limit(%d).\n",
+           sei_size, NI_MAX_CUSTOM_SEI_DATA);
+    return 0;
+  }
+
+  udata = &pkt_data[index];
+
+  /* set SEI payload type at the first byte */
+  sei_data[0] = sei_type;
+
+  /* extract SEI payload data
+   * SEI payload data in NAL is EBSP(Encapsulated Byte Sequence Payload), 
+   * need change EBSP to RBSP(Raw Byte Sequence Payload) for exact size
+   */
+  for (i = 0, len = 0; (i < pkt_size - index) && len < sei_size; i++, len++)
+  {
+    /* if the latest 3-byte data pattern matchs '00 00 03' which means udata[i] is an escaping byte,
+     * discard udata[i]. */
+    if (i >= 2 && udata[i - 2] == 0 && udata[i - 1] == 0 && udata[i] == 3)
+    {
+        len--;
+        continue;
+    }
+    sei_data[len] = udata[i];
+  }
+
+  if (len != sei_size)
+  {
+    ni_log(NI_LOG_INFO, "custom sei corrupted: data truncated, "
+           "required size:%d, actual size:%d.\n", sei_size, len);
+    return NI_RETCODE_FAILURE;
+  }
+
+  p_custom_sei->type = sei_type;
+  p_custom_sei->size = sei_size;
+  p_custom_sei->location = vcl_found ? NI_CUSTOM_SEI_LOC_AFTER_VCL : NI_CUSTOM_SEI_LOC_BEFORE_VCL;
+
+  p_packet->p_custom_sei_set->count++;
+
+  ni_log(NI_LOG_TRACE, "%s() exit, custom sei size=%d type=%d\n",
+         __FUNCTION__, sei_size, sei_type);
+
+  return 0;
+}
+
+/*!******************************************************************************
+ * \brief  Decode parse packet
+ *
+ * \param[in] p_session_ctx             Pointer to a caller allocated 
+ *                                      ni_session_context_t struct
+ * \param[in] p_param                   Pointer to a caller allocated
+ *                                      ni_xcoder_params_t struct
+ * \param[in] *data                     FFMpeg AVPacket data
+ * \param[in] size                      packet size
+ * \param[in] p_packet                  Pointer to a caller allocated
+ *                                      ni_packet_t struct
+ * \param[in] low_delay                 FFmpeg lowdelay
+ * \param[in] codec_format              enum ni_codec_format_t
+ * \param[in] pkt_nal_bitmap            pkt_nal_bitmap
+ * \param[in] custom_sei_type           custom_sei_type
+ * \param[in] *svct_skip_next_packet    svct_skip_next_packet int*
+ * \param[in] *is_lone_sei_pkt          is_lone_sei_pkt int*
+ *
+ * \return - 0 on success, non-0 on failure
+ ********************************************************************************/
+int ni_dec_packet_parse(ni_session_context_t *p_session_ctx, ni_xcoder_params_t *p_param,
+                           uint8_t *data, int size, ni_packet_t *p_packet, int low_delay,
+                           int codec_format, int pkt_nal_bitmap, int custom_sei_type,
+                           int *svct_skip_next_packet, int *is_lone_sei_pkt)
+{
+    int pkt_sei_alone = 1;
+    int vcl_found = 0;
+    int tmp_low_delay =
+        (p_session_ctx->decoder_low_delay == -1) ? 0 : low_delay;
+    int svct_layer = (codec_format == NI_CODEC_FORMAT_H264) ?
+        p_param->dec_input_params.svct_decoding_layer :
+        NI_INVALID_SVCT_DECODING_LAYER;
+    // int pkt_nal_bitmap = ni_dec_ctx->pkt_nal_bitmap;
+    const uint8_t *ptr = data;
+    const uint8_t *end = data + size;
+    uint32_t stc;
+    int nalu_type;
+    uint8_t sei_type = 0;
+    int ret = 0;
+    int nalu_count = 0;
+    ni_bitstream_reader_t br;
+    uint32_t temporal_id;
+
+    if (pkt_nal_bitmap & NI_GENERATE_ALL_NAL_HEADER_BIT)
+    {
+        ni_log2(p_session_ctx, NI_LOG_TRACE, 
+               "ni_dec_packet_parse(): already find the header of streams.\n");
+        low_delay = 0;
+    }
+
+    while (
+        (custom_sei_type != NI_INVALID_SEI_TYPE ||
+         p_param->dec_input_params.custom_sei_passthru != NI_INVALID_SEI_TYPE ||
+         svct_layer != NI_INVALID_SVCT_DECODING_LAYER || tmp_low_delay ||
+         p_param->dec_input_params.enable_all_sei_passthru) &&
+        ptr < end)
+    {
+        stc = -1;
+        ptr = ni_find_start_code(ptr, end, &stc);
+        if (ptr == end)
+        {
+            if (0 == nalu_count)
+            {
+                pkt_sei_alone = 0;
+                ni_log2(p_session_ctx, NI_LOG_TRACE,  "%s(): no NAL found in pkt.\n",
+                       __FUNCTION__);
+            }
+            break;
+        }
+        nalu_count++;
+
+        if (NI_CODEC_FORMAT_H264 == codec_format)
+        {
+            nalu_type = (int)stc & 0x1f;
+
+            //check whether the packet is sei alone
+            pkt_sei_alone = (pkt_sei_alone && 6 /*H264_NAL_SEI */ == nalu_type);
+
+            // Enable decoder low delay mode on sequence change
+            if (low_delay)
+            {
+                switch (nalu_type)
+                {
+                    case 7 /*H264_NAL_SPS */:
+                        pkt_nal_bitmap |= NI_NAL_SPS_BIT;
+                        break;
+                    case 8 /*H264_NAL_PPS */:
+                        pkt_nal_bitmap |= NI_NAL_PPS_BIT;
+                        break;
+                    default:
+                        break;
+                }
+
+                if (pkt_nal_bitmap == (NI_NAL_SPS_BIT | NI_NAL_PPS_BIT))
+                {
+                    ni_log2(p_session_ctx, NI_LOG_TRACE, 
+                           "ni_dec_packet_parse(): Detect SPS, PPS and IDR, "
+                           "enable decoder low delay mode.\n");
+                    p_session_ctx->decoder_low_delay = low_delay;
+                    pkt_nal_bitmap |= NI_GENERATE_ALL_NAL_HEADER_BIT;
+                    low_delay = 0;
+                }
+            }
+            // check whether the packet contains SEI NAL after VCL units
+            if (6 /*H264_NAL_SEI */ == nalu_type)
+            {
+                sei_type = *ptr;
+                if (vcl_found ||
+                    custom_sei_type == sei_type ||
+                    p_param->dec_input_params.custom_sei_passthru == sei_type ||
+                    p_param->dec_input_params.enable_all_sei_passthru)
+                {
+                    // SEI after VCL found or SEI type indicated then extract
+                    // the SEI unit;
+                    // ret = ni_quadra_extract_custom_sei(ni_dec_ctx, data, size,
+                    //                                    ptr + 1 - data, p_packet,
+                    //                                    sei_type, vcl_found);
+                    ret =  ni_extract_custom_sei(data, size,
+                                                ptr + 1 - data, p_packet,
+                                                sei_type, vcl_found);
+                    if (ret != 0)
+                    {
+                        return ret;
+                    }
+                }
+            } else if (nalu_type >= 1 /* H264_NAL_SLICE */ &&
+                       nalu_type <= 5 /* H264_NAL_IDR_SLICE */)
+            {
+                vcl_found = 1;
+            } else if (14 /*H264_NAL_PREFIX */ == nalu_type)
+            {
+                ni_bitstream_reader_init(&br, ptr,
+                                         48);   // 3 * 2 bytes * 8 = 48 bits
+                // skip some header
+                ni_bs_reader_skip_bits(&br, 16);
+                temporal_id = ni_bs_reader_get_bits(&br, 3);
+                if (temporal_id > svct_layer)
+                {
+                    // H264_NAL_PREFIX UNIT will be sent with the last packet.
+                    // So, the H264_NAL_PREFIX here is used for the next packet.
+                    *svct_skip_next_packet = 1;
+                    ni_log2(p_session_ctx, NI_LOG_TRACE, 
+                           "ni_dec_packet_parse(): temporal_id %d"
+                           " is bigger than decoded layer %d, skip the next "
+                           "packet\n",
+                           temporal_id, svct_layer);
+                }
+            }
+        } else if (NI_CODEC_FORMAT_H265 == codec_format)
+        {
+            nalu_type = (int)(stc >> 1) & 0x3F;
+
+            //check whether the packet is sei alone
+            pkt_sei_alone = (pkt_sei_alone &&
+                             (39 /* HEVC_NAL_SEI_PREFIX */ == nalu_type ||
+                              40 /* HEVC_NAL_SEI_SUFFIX */ == nalu_type));
+
+            // Enable decoder low delay mode on sequence change
+            if (low_delay)
+            {
+                switch (nalu_type)
+                {
+                    case 32 /* HEVC_NAL_VPS */:
+                        pkt_nal_bitmap |= NI_NAL_VPS_BIT;
+                        break;
+                    case 33 /* HEVC_NAL_SPS */:
+                        pkt_nal_bitmap |= NI_NAL_SPS_BIT;
+                        break;
+                    case 34 /* HEVC_NAL_PPS */:
+                        pkt_nal_bitmap |= NI_NAL_PPS_BIT;
+                        break;
+                    default:
+                        break;
+                }
+
+                if (pkt_nal_bitmap ==
+                    (NI_NAL_VPS_BIT | NI_NAL_SPS_BIT | NI_NAL_PPS_BIT))
+                {
+                    // Packets before the header is sent cannot be decoded.
+                    // So set packet num to zero here.
+                    ni_log2(p_session_ctx, NI_LOG_TRACE, 
+                           "ni_dec_packet_parse(): Detect VPS, SPS, PPS and "
+                           "IDR enable decoder low delay mode.\n");
+                    p_session_ctx->decoder_low_delay = low_delay;
+                    pkt_nal_bitmap |= NI_GENERATE_ALL_NAL_HEADER_BIT;
+                    low_delay = 0;
+                }
+            }
+            // check whether the packet contains SEI NAL after VCL units
+            if (39 /* HEVC_NAL_SEI_PREFIX */ == nalu_type ||
+                40 /* HEVC_NAL_SEI_SUFFIX */ == nalu_type)
+            {
+                sei_type = *(ptr + 1);
+                if (vcl_found ||
+                    custom_sei_type == sei_type ||
+                    p_param->dec_input_params.custom_sei_passthru == sei_type ||
+                    p_param->dec_input_params.enable_all_sei_passthru)
+                {
+                    // SEI after VCL found or SEI type indicated then extract
+                    // the SEI unit;
+                    // ret = ni_quadra_extract_custom_sei(ni_dec_ctx, data, size,
+                    //                                    ptr + 2 - data, p_packet,
+                    //                                    sei_type, vcl_found);
+                    ret = ni_extract_custom_sei(data, size, ptr + 2 - data, p_packet,
+                                                sei_type, vcl_found);
+                    if (ret != 0)
+                    {
+                        return ret;
+                    }
+                }
+            } else if (nalu_type >= 0 /* HEVC_NAL_TRAIL_N */ &&
+                       nalu_type <= 31 /* HEVC_NAL_RSV_VCL31 */)
+            {
+                vcl_found = 1;
+            }
+        } else
+        {
+            ni_log2(p_session_ctx,NI_LOG_DEBUG, "%s() wrong codec %d !\n", __FUNCTION__, codec_format);
+            pkt_sei_alone = 0;
+            break;
+        }
+    }
+
+    if (nalu_count > 0)
+    {
+        *is_lone_sei_pkt = pkt_sei_alone;
+    }
+
+    return 0;
+}
+
+/*!******************************************************************************
+ * \brief  Expand frame form src frame
+ *
+ * \param[in] dst                  Pointer to a caller allocated ni_frame_t struct
+ * \param[in] src                  Pointer to a caller allocated ni_frame_t struct
+ * \param[in] dst_stride           int dst_stride[]
+ * \param[in] raw_width            frame width
+ * \param[in] raw_height           frame height
+ * \param[in] ni_fmt               ni_pix_fmt_t type for ni pix_fmt
+ * \param[in] nb_planes            int nb_planes
+ *
+ * \return - 0 on success, NI_RETCODE_FAILURE on failure
+ ********************************************************************************/
+int ni_expand_frame(ni_frame_t *dst, ni_frame_t *src, int dst_stride[],
+                        int raw_width, int raw_height, int ni_fmt, int nb_planes)
+{
+    int i, j, h, tenBit = 0;
+    int vpad[3], hpad[3], src_height[3], src_width[3], src_stride[3];
+    uint8_t *src_line, *dst_line, *sample, *dest, YUVsample;
+    uint16_t lastidx;
+
+    switch (ni_fmt)
+    {
+        case NI_PIX_FMT_YUV420P:
+            /* width of source frame for each plane in pixels */
+            src_width[0] = NIALIGN(raw_width, 2);
+            src_width[1] = NIALIGN(raw_width, 2) / 2;
+            src_width[2] = NIALIGN(raw_width, 2) / 2;
+
+            /* height of source frame for each plane in pixels */
+            src_height[0] = NIALIGN(raw_height, 2);
+            src_height[1] = NIALIGN(raw_height, 2) / 2;
+            src_height[2] = NIALIGN(raw_height, 2) / 2;
+
+            /* stride of source frame for each plane in bytes */
+            src_stride[0] = NIALIGN(src_width[0], 128);
+            src_stride[1] = NIALIGN(src_width[1], 128);
+            src_stride[2] = NIALIGN(src_width[2], 128);
+
+            tenBit = 0;
+
+            /* horizontal padding needed for each plane in bytes */
+            hpad[0] = dst_stride[0] - src_width[0];
+            hpad[1] = dst_stride[1] - src_width[1];
+            hpad[2] = dst_stride[2] - src_width[2];
+
+            /* vertical padding needed for each plane in pixels */
+            vpad[0] = NI_MIN_HEIGHT - src_height[0];
+            vpad[1] = NI_MIN_HEIGHT / 2 - src_height[1];
+            vpad[2] = NI_MIN_HEIGHT / 2 - src_height[2];
+
+            break;
+
+        case NI_PIX_FMT_YUV420P10LE:
+            /* width of source frame for each plane in pixels */
+            src_width[0] = NIALIGN(raw_width, 2);
+            src_width[1] = NIALIGN(raw_width, 2) / 2;
+            src_width[2] = NIALIGN(raw_width, 2) / 2;
+
+            /* height of source frame for each plane in pixels */
+            src_height[0] = NIALIGN(raw_height, 2);
+            src_height[1] = NIALIGN(raw_height, 2) / 2;
+            src_height[2] = NIALIGN(raw_height, 2) / 2;
+
+            /* stride of source frame for each plane in bytes */
+            src_stride[0] = NIALIGN(src_width[0] * 2, 128);
+            src_stride[1] = NIALIGN(src_width[1] * 2, 128);
+            src_stride[2] = NIALIGN(src_width[2] * 2, 128);
+
+            tenBit = 1;
+
+            /* horizontal padding needed for each plane in bytes */
+            hpad[0] = dst_stride[0] - src_width[0] * 2;
+            hpad[1] = dst_stride[1] - src_width[1] * 2;
+            hpad[2] = dst_stride[2] - src_width[2] * 2;
+
+            /* vertical padding needed for each plane in pixels */
+            vpad[0] = NI_MIN_HEIGHT - src_height[0];
+            vpad[1] = NI_MIN_HEIGHT / 2 - src_height[1];
+            vpad[2] = NI_MIN_HEIGHT / 2 - src_height[2];
+
+            break;
+
+        case NI_PIX_FMT_NV12:
+            /* width of source frame for each plane in pixels */
+            src_width[0] = NIALIGN(raw_width, 2);
+            src_width[1] = NIALIGN(raw_width, 2);
+            src_width[2] = 0;
+
+            /* height of source frame for each plane in pixels */
+            src_height[0] = NIALIGN(raw_height, 2);
+            src_height[1] = NIALIGN(raw_height, 2) / 2;
+            src_height[2] = 0;
+
+            /* stride of source frame for each plane in bytes */
+            src_stride[0] = NIALIGN(src_width[0], 128);
+            src_stride[1] = NIALIGN(src_width[1], 128);
+            src_stride[2] = 0;
+
+            tenBit = 0;
+
+            /* horizontal padding needed for each plane in bytes */
+            hpad[0] = dst_stride[0] - src_width[0];
+            hpad[1] = dst_stride[1] - src_width[1];
+            hpad[2] = 0;
+
+            /* vertical padding for each plane in pixels */
+            vpad[0] = NI_MIN_HEIGHT - src_height[0];
+            vpad[1] = NI_MIN_HEIGHT / 2 - src_height[1];
+            vpad[2] = 0;
+
+            break;
+
+        case NI_PIX_FMT_P010LE:
+            /* width of source frame for each plane in pixels */
+            src_width[0] = NIALIGN(raw_width, 2);
+            src_width[1] = NIALIGN(raw_width, 2);
+            src_width[2] = 0;
+
+            /* height of source frame for each plane in pixels */
+            src_height[0] = NIALIGN(raw_height, 2);
+            src_height[1] = NIALIGN(raw_height, 2) / 2;
+            src_height[2] = 0;
+
+            /* stride of source frame for each plane in bytes */
+            src_stride[0] = NIALIGN(src_width[0] * 2, 128);
+            src_stride[1] = NIALIGN(src_width[1] * 2, 128);
+            src_stride[2] = 0;
+
+            tenBit = 1;
+
+            /* horizontal padding needed for each plane in bytes */
+            hpad[0] = dst_stride[0] - src_width[0] * 2;
+            hpad[1] = dst_stride[1] - src_width[1] * 2;
+            hpad[2] = 0;
+
+            /* vertical padding for each plane in pixels */
+            vpad[0] = NI_MIN_HEIGHT - src_height[0];
+            vpad[1] = NI_MIN_HEIGHT / 2 - src_height[1];
+            vpad[2] = 0;
+
+            break;
+
+        default:
+            ni_log(NI_LOG_ERROR, "Invalid pixel format %d\n",ni_fmt);
+            return NI_RETCODE_FAILURE;
+    }
+
+    for (i = 0; i < nb_planes && nb_planes < NI_MAX_NUM_DATA_POINTERS; i++)
+    {
+        dst_line = dst->p_data[i];
+        src_line = src->p_data[i];
+
+        for (h = 0; i < 3 && h < src_height[i]; h++)
+        {
+            memcpy(dst_line, src_line, src_width[i] * (tenBit + 1));
+
+            /* Add horizontal padding */
+            if (hpad[i])
+            {
+                lastidx = src_width[i];
+
+                if (tenBit)
+                {
+                    sample = &src_line[(lastidx - 1) * 2];
+                    dest = &dst_line[lastidx * 2];
+
+                    /* two bytes per sample */
+                    for (j = 0; j < hpad[i] / 2; j++)
+                    {
+                        memcpy(dest, sample, 2);
+                        dest += 2;
+                    }
+                } else
+                {
+                    YUVsample = dst_line[lastidx - 1];
+                    memset(&dst_line[lastidx], YUVsample, hpad[i]);
+                }
+            }
+
+            src_line += src_stride[i];
+            dst_line += dst_stride[i];
+        }
+
+        /* Pad the height by duplicating the last line */
+        src_line = dst_line - dst_stride[i];
+
+        for (h = 0; h < vpad[i]; h++)
+        {
+            memcpy(dst_line, src_line, dst_stride[i]);
+            dst_line += dst_stride[i];
+        }
+    }
+
+    return 0;
 }

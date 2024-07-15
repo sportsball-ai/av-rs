@@ -22,9 +22,9 @@
 /*!*****************************************************************************
  *  \file   ni_p2p_test.c
  *
- *  \brief  Example code on how to programmatically work with NI Quadra using
- *          libxcoder API and P2P DMA communication
- *
+ *  \brief  Application for performing video processing using libxcoder API and
+ *          P2P DMA. Its code provides examples on how to programatically use
+ *          libxcoder API in conjunction with P2P DMA.
  ******************************************************************************/
 
 #include <stdio.h>
@@ -46,6 +46,7 @@
 
 // max YUV frame size
 #define MAX_YUV_FRAME_SIZE (7680 * 4320 * 3 / 2)
+#define MAX_ABGR_FRAME_SIZE (7680 * 4320 * 4)
 #define POOL_SIZE 2
 #define FILE_NAME_LEN 256
 
@@ -55,7 +56,7 @@ int enc_eos_sent = 0;
 
 uint32_t number_of_frames = 0;
 uint32_t number_of_packets = 0;
-uint32_t data_left_size = 0;
+uint64_t data_left_size = 0;
 int g_repeat = 1;
 
 struct timeval start_time;
@@ -66,10 +67,13 @@ time_t start_timestamp = 0;
 time_t previous_timestamp = 0;
 time_t current_timestamp = 0;
 
-unsigned int total_file_size = 0;
+unsigned long total_file_size = 0;
 
 uint8_t *g_curr_cache_pos = NULL;
 uint8_t *g_yuv_frame[POOL_SIZE] = {NULL, NULL};
+uint8_t *g_rgba_frame[POOL_SIZE] = {NULL, NULL};
+
+uint8_t g_rgb2yuv_csc = 0;
 
 /*!****************************************************************************
  *  \brief  Exit on argument error
@@ -99,8 +103,8 @@ int read_next_chunk_from_file(int fd, uint8_t *p_dst, uint32_t to_read)
 {
     uint8_t *tmp_dst = p_dst;
     ni_log(NI_LOG_DEBUG, 
-        "read_next_chunk_from_file:p_dst %p len %u totalSize %u left %u\n",
-        tmp_dst, to_read, total_file_size, data_left_size);
+        "read_next_chunk_from_file:p_dst %p len %u totalSize %llu left %llu\n",
+        tmp_dst, to_read, (unsigned long long)total_file_size, (unsigned long long)data_left_size);
     int to_copy = to_read;
     unsigned long tmpFileSize = to_read;
     if (data_left_size == 0)
@@ -143,7 +147,7 @@ int read_next_chunk_from_file(int fd, uint8_t *p_dst, uint32_t to_read)
  *  \return     0 on success
  *              < 0 on error
  ******************************************************************************/
-int load_input_file(const char *filename, unsigned int *bytes_read)
+int load_input_file(const char *filename, unsigned long *bytes_read)
 {
     struct stat info;
 
@@ -232,7 +236,7 @@ int p2p_upload_send_data(ni_session_context_t *p_upl_ctx, int fd,
     int Vsize;
     int total_size;
 
-    ni_log(NI_LOG_DEBUG, "===> p2p upload_send_data <===\n");
+    ni_log2(p_upl_ctx, NI_LOG_DEBUG,  "===> p2p upload_send_data <===\n");
 
     /* An 8-bit YUV420 planar frame occupies [(width x height x 3)/2] bytes */
     frame_size = input_video_height * input_video_width * 3 / 2;
@@ -241,7 +245,7 @@ int p2p_upload_send_data(ni_session_context_t *p_upl_ctx, int fd,
 
     if (chunk_size == 0)
     {
-        ni_log(NI_LOG_DEBUG, "p2p_upload_send_data: read chunk size 0, eos!\n");
+        ni_log2(p_upl_ctx, NI_LOG_DEBUG,  "p2p_upload_send_data: read chunk size 0, eos!\n");
         *input_exhausted = 1;
     }
 
@@ -253,7 +257,7 @@ int p2p_upload_send_data(ni_session_context_t *p_upl_ctx, int fd,
                           p_upl_ctx->bit_depth_factor, 0, dst_stride,
                           dst_height);
 
-    ni_log(NI_LOG_DEBUG, "p_dst alloc linesize = %d/%d/%d  src height=%d  "
+    ni_log2(p_upl_ctx, NI_LOG_DEBUG,  "p_dst alloc linesize = %d/%d/%d  src height=%d  "
                    "dst height aligned = %d/%d/%d  \n",
                    dst_stride[0], dst_stride[1], dst_stride[2],
                    input_video_height, dst_height[0], dst_height[1],
@@ -313,6 +317,94 @@ int p2p_upload_send_data(ni_session_context_t *p_upl_ctx, int fd,
 }
 
 /*!****************************************************************************
+ *  \brief  Reads RGBA data from input file then calls a special libxcoder API
+ *          function to transfer the RGBA data into the hardware frame on
+ *          the Quadra device.
+ *
+ *  \param  [in]    p_upl_ctx           pointer to upload session context
+ *          [in]    fd                  file descriptor of input file
+ *          [in]    p_rgba_frame        address of pointer to RGBA data
+ *          [in]    p_in_frame          pointer to hardware frame
+ *          [in]    input_video_width   video width
+ *          [in]    input_video_height  video height
+ *          [out]   bytes_sent          updated byte count of total data read
+ *          [out]   input_exhausted     set to 1 when we reach end-of-file
+ *
+ *  \return  0 on success
+ *          -1 on error
+ ******************************************************************************/
+int p2p_upload_rgba_send_data(ni_session_context_t *p_upl_ctx, int fd,
+                         uint8_t **p_rgba_frame, ni_frame_t *p_in_frame,
+                         int input_video_width, int input_video_height,
+                         unsigned long *bytes_sent, int *input_exhausted)
+{
+    static uint8_t tmp_buf[MAX_ABGR_FRAME_SIZE];
+    void *p_buffer;
+    uint8_t *p_src,*p_dst;
+    int linewidth;
+    int frame_size;
+    int chunk_size;
+    int total_size;
+    int row;
+
+    ni_log2(p_upl_ctx, NI_LOG_DEBUG,  "===> p2p upload_rgba_send_data <===\n");
+
+    /* An 8-bit RGBA frame is in a packed raster (or linear) format */
+    /* and occupies width * height * 4 bytes.                       */
+    frame_size = input_video_width * input_video_height * 4;
+
+    chunk_size = read_next_chunk_from_file(fd, tmp_buf, frame_size);
+
+    if (chunk_size == 0)
+    {
+        ni_log2(p_upl_ctx, NI_LOG_DEBUG,  "p2p_upload_rgba_send_data: eos!\n");
+        *input_exhausted = 1;
+    }
+
+    p_in_frame->video_width = input_video_width;
+    p_in_frame->video_height = input_video_height;
+    p_in_frame->extra_data_len = 0;
+
+    linewidth = input_video_width * 4;
+
+    // Round up to 4K
+    total_size = NI_VPU_ALIGN4096(frame_size);
+
+    if (*p_rgba_frame == NULL)
+    {
+        if (ni_posix_memalign(&p_buffer, sysconf(_SC_PAGESIZE), total_size))
+        {
+            fprintf(stderr, "Can't alloc memory\n");
+            return -1;
+        }
+
+        *p_rgba_frame = p_buffer;
+    }
+
+    p_src = tmp_buf;
+    p_dst = *p_rgba_frame;
+
+    for (row = 0; row < input_video_height; row++)
+    {
+        memcpy(p_dst, p_src, linewidth);
+        p_src += linewidth;
+        p_dst += linewidth;
+    }
+
+    if (ni_uploader_p2p_test_send(p_upl_ctx, *p_rgba_frame, total_size,
+                                  p_in_frame))
+    {
+        fprintf(stderr, "Error: failed ni_uploader_p2p_test_send()\n");
+        return -1;
+    } else
+    {
+        *bytes_sent = total_size;
+    }
+
+    return 0;
+}
+
+/*!****************************************************************************
  *  \brief  Prepare frames to simulate P2P transfers
  *
  *  \param [in] p_upl_ctx           pointer to caller allocated uploader
@@ -329,8 +421,6 @@ int p2p_prepare_frames(ni_session_context_t *p_upl_ctx, int input_video_width,
 {
     int i;
     int ret = 0;
-    int dst_stride[NI_MAX_NUM_DATA_POINTERS] = {0, 0, 0, 0};
-    int dst_height[NI_MAX_NUM_DATA_POINTERS] = {0, 0, 0, 0};
     ni_frame_t *p_in_frame;
 
     // Allocate memory for two hardware frames
@@ -342,10 +432,6 @@ int p2p_prepare_frames(ni_session_context_t *p_upl_ctx, int input_video_width,
         p_in_frame->end_of_stream = 0;
         p_in_frame->force_key_frame = 0;
         p_in_frame->extra_data_len = 0;
-
-        ni_get_hw_yuv420p_dim(input_video_width, input_video_height,
-                              p_upl_ctx->bit_depth_factor, 0, dst_stride,
-                              dst_height);
 
         // Allocate a hardware ni_frame structure for the encoder
         if (ni_frame_buffer_alloc_hwenc(
@@ -400,11 +486,11 @@ int encoder_encode_frame(ni_session_context_t *p_enc_ctx,
     int oneSent;
     ni_session_data_io_t in_data;
 
-    ni_log(NI_LOG_DEBUG, "===> encoder_encode_frame <===\n");
+    ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "===> encoder_encode_frame <===\n");
 
     if (enc_eos_sent == 1)
     {
-        ni_log(NI_LOG_DEBUG, "encoder_encode_frame: ALL data (incl. eos) sent "
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "encoder_encode_frame: ALL data (incl. eos) sent "
                        "already!\n");
         return 0;
     }
@@ -442,15 +528,15 @@ send_frame:
     } else if (oneSent == 0 && !p_enc_ctx->ready_to_close)
     {
         *need_to_resend = 1;
-        ni_log(NI_LOG_DEBUG, "NEEDED TO RESEND");
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "NEEDED TO RESEND");
     } else
     {
         *need_to_resend = 0;
 
-        ni_log(NI_LOG_DEBUG, "encoder_encode_frame: total sent data size=%u\n",
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "encoder_encode_frame: total sent data size=%u\n",
                        p_in_frame->data_len[3]);
 
-        ni_log(NI_LOG_DEBUG, "encoder_encode_frame: success\n");
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "encoder_encode_frame: success\n");
 
         if (p_enc_ctx->ready_to_close)
         {
@@ -488,18 +574,18 @@ int encoder_receive_data(ni_session_context_t *p_enc_ctx,
     ni_packet_t *p_out_pkt = &(p_out_data->data.packet);
     static int received_stream_header = 0;
 
-    ni_log(NI_LOG_DEBUG, "===> encoder_receive_data <===\n");
+    ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "===> encoder_receive_data <===\n");
 
     if (NI_INVALID_SESSION_ID == p_enc_ctx->session_id ||
         NI_INVALID_DEVICE_HANDLE == p_enc_ctx->blk_io_handle)
     {
-        ni_log(NI_LOG_DEBUG, "encode session not opened yet, return\n");
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "encode session not opened yet, return\n");
         return 0;
     }
 
     if (p_file == NULL)
     {
-        ni_log(NI_LOG_ERROR, "Bad file pointer, return\n");
+        ni_log2(p_enc_ctx, NI_LOG_ERROR,  "Bad file pointer, return\n");
         return -1;
     }
 
@@ -519,7 +605,7 @@ int encoder_receive_data(ni_session_context_t *p_enc_ctx,
         /* Read the encoded stream header */
         rc = ni_encoder_session_read_stream_header(p_enc_ctx, p_out_data);
 
-        if (rc > meta_size)
+        if (rc > 0)
         {
             /* Write out the stream header */
             if (fwrite((uint8_t *)p_out_pkt->p_data + meta_size,
@@ -567,7 +653,7 @@ receive_data:
     end_flag = p_out_pkt->end_of_stream;
     rx_size = rc;
 
-    ni_log(NI_LOG_DEBUG, "encoder_receive_data: received data size=%d\n", rx_size);
+    ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "encoder_receive_data: received data size=%d\n", rx_size);
 
     if (rx_size > meta_size)
     {
@@ -582,17 +668,17 @@ receive_data:
         *total_bytes_received += rx_size - meta_size;
         number_of_packets++;
 
-        ni_log(NI_LOG_DEBUG, "Got:   Packets= %u\n", number_of_packets);
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "Got:   Packets= %u\n", number_of_packets);
     } else if (rx_size != 0)
     {
         fprintf(stderr, "Error: received %d bytes, <= metadata size %d!\n",
                 rx_size, meta_size);
         return -1;
     } else if (!end_flag &&
-               ((ni_xcoder_params_t *)(p_enc_ctx->p_session_config))
-                   ->low_delay_mode)
+               (((ni_xcoder_params_t *)(p_enc_ctx->p_session_config))
+                   ->low_delay_mode))
     {
-        ni_log(NI_LOG_DEBUG, "low delay mode and NO pkt, keep reading...\n");
+        ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "low delay mode and NO pkt, keep reading...\n");
         goto receive_data;
     }
 
@@ -617,7 +703,7 @@ receive_data:
         return 2;
     }
 
-    ni_log(NI_LOG_DEBUG, "encoder_receive_data: success\n");
+    ni_log2(p_enc_ctx, NI_LOG_DEBUG,  "encoder_receive_data: success\n");
 
     return 0;
 }
@@ -659,12 +745,15 @@ int encoder_open_session(ni_session_context_t *p_enc_ctx, int dst_codec_format,
     p_enc_ctx->blk_io_handle = NI_INVALID_DEVICE_HANDLE;
     p_enc_ctx->hw_id = iXcoderGUID;
 
+    if (g_rgb2yuv_csc)
+        p_enc_ctx->pixel_format = NI_PIX_FMT_ABGR;
+
     ni_encoder_set_input_frame_format(p_enc_ctx, p_enc_params, width, height, 8,
                                       NI_FRAME_LITTLE_ENDIAN, 1);
 
     // Encoder will operate in P2P mode
     ret = ni_device_session_open(p_enc_ctx, NI_DEVICE_TYPE_ENCODER);
-    if (ret < 0)
+    if (ret != NI_RETCODE_SUCCESS)
     {
         fprintf(stderr, "Error: encoder open session failure\n");
     } else
@@ -689,6 +778,7 @@ int uploader_open_session(ni_session_context_t *p_upl_ctx, int *iXcoderGUID,
                           int width, int height)
 {
     int ret = 0;
+    ni_pix_fmt_t frame_format;
 
     p_upl_ctx->session_id = NI_INVALID_SESSION_ID;
 
@@ -699,12 +789,15 @@ int uploader_open_session(ni_session_context_t *p_upl_ctx, int *iXcoderGUID,
     // Assign the card id to specify the specific Quadra device
     p_upl_ctx->hw_id = *iXcoderGUID;
 
+    // Assign the pixel format we want to use
+    frame_format = g_rgb2yuv_csc ? NI_PIX_FMT_ABGR : NI_PIX_FMT_YUV420P;
+
     // Set the input frame format of the upload session
-    ni_uploader_set_frame_format(p_upl_ctx, width, height, NI_PIX_FMT_YUV420P,
+    ni_uploader_set_frame_format(p_upl_ctx, width, height, frame_format,
                                  1);
 
     ret = ni_device_session_open(p_upl_ctx, NI_DEVICE_TYPE_UPLOAD);
-    if (ret < 0)
+    if (ret != NI_RETCODE_SUCCESS)
     {
         fprintf(stderr, "Error: uploader_open_session failure!\n");
         return ret;
@@ -743,7 +836,7 @@ void print_usage(void)
            "Usage: xcoderp2p [options]\n"
            "\n"
            "options:\n"
-           "--------------------------------------------------------------------------------"
+           "--------------------------------------------------------------------------------\n"
            "  -h | --help        Show help.\n"
            "  -v | --version     Print version info.\n"
            "  -l | --loglevel    Set loglevel of libxcoder API.\n"
@@ -761,8 +854,8 @@ void print_usage(void)
            "                     (eg. '1920x1080')\n"
            "  -m | --mode        Input to output codec processing mode in "
            "format:\n"
-           "                     INTYPE2OUTTYPE. [p2a, p2h]\n"
-           "                     Type notation: p=P2P, a=AVC, h=HEVC\n"
+           "                     INTYPE2OUTTYPE. [p2a, p2h, r2a, r2h]\n"
+           "                     Type notation: p=P2P, a=AVC, h=HEVC, r=ABGR\n"
            "  -o | --output      Output file path.\n",
            NI_XCODER_REVISION);
 }
@@ -856,11 +949,14 @@ void parse_arguments(int argc, char *argv[], char *input_filename,
                 for (i = 0; i < strlen(optarg); i++)
                     optarg[i] = (char)tolower((unsigned char)optarg[i]);
 
-                if (strcmp(optarg, "p2a") != 0 && strcmp(optarg, "p2h") != 0)
+                if (strcmp(optarg, "p2a") != 0 && strcmp(optarg, "p2h") != 0 &&
+                    strcmp(optarg, "r2a") != 0 && strcmp(optarg, "r2h") != 0)
                     arg_error_exit("-, | --mode", optarg);
 
                 // determine codec
                 sprintf(mode_description, "P2P + Encoding");
+
+                g_rgb2yuv_csc = (optarg[0] == 'r') ? 1 : 0;
 
                 if (optarg[2] == 'a')
                 {
@@ -904,15 +1000,6 @@ void parse_arguments(int argc, char *argv[], char *input_filename,
     }
 }
 
-/*!****************************************************************************
- *  \brief   main
- *
- *  \param  [in]    argc    argument count
- *          [in]    argv    argument vector of parameters
- *
- *  \return  0 on success
- *          -1 on error
- ******************************************************************************/
 int main(int argc, char *argv[])
 {
     static char input_filename[FILE_NAME_LEN];
@@ -1071,15 +1158,30 @@ int main(int argc, char *argv[])
         goto end;
     }
 
-    /* send out a frame to do rendering */
-    if (p2p_upload_send_data(
-            &upl_ctx, input_file_fd, &g_yuv_frame[render_index],
-            &p2p_frame[render_index], input_video_width, input_video_height,
-            &total_bytes_sent, &input_exhausted))
+    if (g_rgb2yuv_csc)
     {
-        fprintf(stderr, "Error: upload frame error\n");
-        close(input_file_fd);
-        return -1;
+        // upload an rgba frame to quadra
+        if (p2p_upload_rgba_send_data(
+                &upl_ctx, input_file_fd, &g_rgba_frame[render_index],
+                &p2p_frame[render_index], input_video_width, input_video_height,
+                &total_bytes_sent, &input_exhausted))
+        {
+            fprintf(stderr, "Error: upload frame error\n");
+            ni_device_session_close(&upl_ctx, 1, NI_DEVICE_TYPE_UPLOAD);
+            goto end;
+        }
+    } else
+    {
+        /* send out a frame to do rendering */
+        if (p2p_upload_send_data(
+                &upl_ctx, input_file_fd, &g_yuv_frame[render_index],
+                &p2p_frame[render_index], input_video_width, input_video_height,
+                &total_bytes_sent, &input_exhausted))
+        {
+            fprintf(stderr, "Error: upload frame error\n");
+            close(input_file_fd);
+            return -1;
+        }
     }
 
     while (send_fin_flag == 0 || receive_fin_flag == 0)
@@ -1112,14 +1214,29 @@ int main(int argc, char *argv[])
         // Fill the frame buffer with YUV data while the previous frame is being encoded
         if (!input_exhausted && need_to_resend == 0)
         {
-            if (p2p_upload_send_data(
-                    &upl_ctx, input_file_fd, &g_yuv_frame[render_index],
-                    &p2p_frame[render_index], input_video_width,
-                    input_video_height, &total_bytes_sent, &input_exhausted))
+            if (g_rgb2yuv_csc)
             {
-                fprintf(stderr, "Error: upload frame error\n");
-                close(input_file_fd);
-                return -1;
+                if (p2p_upload_rgba_send_data(
+                        &upl_ctx, input_file_fd, &g_rgba_frame[render_index],
+                        &p2p_frame[render_index], input_video_width,
+                        input_video_height, &total_bytes_sent, &input_exhausted))
+                {
+                    fprintf(stderr, "Error: upload frame error\n");
+                    close(input_file_fd);
+                    return -1;
+                }
+            }
+            else
+            {
+                if (p2p_upload_send_data(
+                        &upl_ctx, input_file_fd, &g_yuv_frame[render_index],
+                        &p2p_frame[render_index], input_video_width,
+                        input_video_height, &total_bytes_sent, &input_exhausted))
+                {
+                    fprintf(stderr, "Error: upload frame error\n");
+                    close(input_file_fd);
+                    return -1;
+                }
             }
         }
 

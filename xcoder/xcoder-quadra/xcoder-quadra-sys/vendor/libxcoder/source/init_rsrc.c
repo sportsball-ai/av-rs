@@ -20,15 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
+ *  \file   init_rsrc.c
  *
- *   \file          init_rsrc.c
- *
- *   @date          April 1, 2018
- *
- *   \brief
- *
- *   @author        
- *
+ *  \brief  Application for registering Netint transcoding devices on system
+ *          for use by libxcoder
  ******************************************************************************/
 
 #include <stdio.h>
@@ -46,14 +41,6 @@
 #include "ni_rsrc_api.h"
 #include "ni_rsrc_priv.h"
 
-
-/*!******************************************************************************
- *  \brief  
- *
- *  \param  
- *
- *  \return
- *******************************************************************************/
 int main(int argc, char *argv[])
 {
     int should_match_rev = 1;

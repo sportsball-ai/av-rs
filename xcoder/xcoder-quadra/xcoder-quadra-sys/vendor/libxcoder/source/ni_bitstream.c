@@ -31,11 +31,10 @@
  ****************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_bitstream.c
-*
-*  \brief  Utility functions to operate on bits in a bitstream
-*
-*******************************************************************************/
+ *  \file   ni_bitstream.c
+ *
+ *  \brief  Utility definitions to operate on bits in a bitstream
+ ******************************************************************************/
 
 #include <stdio.h>
 #include <string.h>
@@ -211,7 +210,7 @@ void ni_bs_writer_put(ni_bitstream_writer_t *stream, uint32_t data,
 }
 
 /*!*****************************************************************************
- * \brief write unsigned Exp-Golomb bit string to bitstream
+ * \brief write unsigned Exp-Golomb bit string to bitstream, 2^32-2 at most.
  *
  * \param stream  bitstream
  * \param data    input data
@@ -225,7 +224,23 @@ void ni_bs_writer_put_ue(ni_bitstream_writer_t *stream, uint32_t data)
     unsigned num_bits = data_log2 * 2 + 1;
     unsigned value = prefix | suffix;
 
-    ni_bs_writer_put(stream, value, num_bits);
+    if (data > 0xFFFFFFFE) // 2^32-2 at most
+    {
+        ni_log(NI_LOG_ERROR, "%s error: data overflow: %u\n", __func__,
+               data);
+        return;
+    }
+
+    if (num_bits <= 32)
+    {
+      ni_bs_writer_put(stream, value, num_bits);
+    }
+    else
+    {
+      // big endian
+      ni_bs_writer_put(stream, 0, num_bits - 32); // high (num_bits - 32) bits
+      ni_bs_writer_put(stream, value, 32); // low 32 bits
+    }
 }
 
 /*!*****************************************************************************
@@ -235,7 +250,7 @@ void ni_bs_writer_put_ue(ni_bitstream_writer_t *stream, uint32_t data)
  * \param data    input data
  * \return        none
  ******************************************************************************/
-void ni_bitstream_put_se(ni_bitstream_writer_t *stream, int32_t data)
+void ni_bs_writer_put_se(ni_bitstream_writer_t *stream, int32_t data)
 {
     // map positive value to even and negative to odd value
     uint32_t data_num = data <= 0 ? (-data) << 1 : (data << 1) - 1;

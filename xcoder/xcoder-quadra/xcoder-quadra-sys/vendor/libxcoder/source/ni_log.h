@@ -20,15 +20,15 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_log.h
-*
-*  \brief  Exported logging routines definition
-*
-*******************************************************************************/
+ *  \file   ni_log.h
+ *
+ *  \brief  Logging definitions
+ ******************************************************************************/
 
 #pragma once
 
 #include <stdarg.h>
+#include <stdint.h>
 
 #ifdef LIBXCODER_OBJS_BUILD
 #include "../build/xcoder_auto_headers.h"
@@ -46,25 +46,6 @@
   #endif
 #elif __linux__ || __APPLE__
   #define LIB_API_LOG
-#endif
-
-#ifdef _ANDROID
-
-#include <android/log.h>
-
-#define LOG_TAG "libxcoder"
-
-#define ALOGV(fmt, ...)                                                        \
-    __android_log_vprint(ANDROID_LOG_VERBOSE, LOG_TAG, fmt, ##__VA_ARGS__)
-#define ALOGD(fmt, ...)                                                        \
-    __android_log_vprint(ANDROID_LOG_DEBUG, LOG_TAG, fmt, ##__VA_ARGS__)
-#define ALOGI(fmt, ...)                                                        \
-    __android_log_vprint(ANDROID_LOG_INFO, LOG_TAG, fmt, ##__VA_ARGS__)
-#define ALOGW(fmt, ...)                                                        \
-    __android_log_vprint(ANDROID_LOG_WARN, LOG_TAG, fmt, ##__VA_ARGS__)
-#define ALOGE(fmt, ...)                                                        \
-    __android_log_vprint(ANDROID_LOG_ERROR, LOG_TAG, fmt, ##__VA_ARGS__)
-
 #endif
 
 #ifdef __cplusplus
@@ -151,6 +132,48 @@ LIB_API_LOG ni_log_level_t ff_to_ni_log_level(int fflog_level);
  *  \return ni_log_level
  ******************************************************************************/
 LIB_API_LOG ni_log_level_t arg_to_ni_log_level(const char *fflog_level);
+
+/*!*****************************************************************************
+ *  \brief Get time for logs with microsecond timestamps
+ *
+ *
+ *  \return microsecond timestamp
+ ******************************************************************************/
+LIB_API_LOG uint64_t ni_log_get_utime();
+
+/*!*****************************************************************************
+ *  \brief  print log message and additional information using ni_log_callback,
+ *  \param[in] p_context a pointer to ni_session_context_t if p_context != NULL
+ *                       session_id/E2EID will be printed as extra information
+ *  \param[in] level  log level, if log_level == NI_LOG_ERROR timastamp will be 
+ *                    printed as extra information
+ *  \param[in] format printf format specifier
+ *  \param[in] ...    additional arguments
+ *
+ *  \return
+ ******************************************************************************/
+LIB_API_LOG void ni_log2(const void *p_context, ni_log_level_t level, const char *fmt, ...);
+
+/*!*****************************************************************************
+ *  \brief set whether to use a lock or not in ni_log2
+ *
+ *  \param[in] on whether to use a lock, 
+ *                1-->use a lock, 
+ *                0-->use extra buf(no lock)
+ *  \return
+ ******************************************************************************/
+void ni_log2_with_mutex(int on);
+
+#ifdef _ANDROID
+/*!******************************************************************************
+ *  \brief  Set ni_log_tag
+ *
+ *  \param  log tag
+ *
+ *  \return
+ *******************************************************************************/
+LIB_API_LOG void ni_log_set_log_tag(const char *log_tag);
+#endif
 
 #ifdef __cplusplus
 }

@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ni_rsrc_api.h
-*
-*  \brief  Exported definitions related to resource management of NI Quadra devices
-*
-*******************************************************************************/
+ *  \file   ni_rsrc_api.h
+ *
+ *  \brief  Public definitions for managing NETINT video processing devices
+ ******************************************************************************/
 
 #pragma once
 
@@ -56,24 +55,14 @@ typedef enum
     EN_CODEC_MAX
 } ni_codec_t;
 
-static const char *ni_codec_format_str[] = {"H.264", "H.265", "VP9", "JPEG",
-                                            "AV1"};
-static const char *ni_dec_name_str[] = {"h264_ni_quadra_dec", "h265_ni_quadra_dec",
-                                        "vp9_ni_quadra_dec", "jpeg_ni_quadra_dec"};
-static const char *ni_enc_name_str[] = {"h264_ni_quadra_enc", "h265_ni_quadra_enc", "empty",
-                                        "jpeg_ni_quadra_enc", "av1_ni_quadra_enc"};
+extern bool g_device_in_ctxt;
+extern ni_device_handle_t g_dev_handle;
 
 typedef enum
 {
     EN_IDLE,
     EN_ACTIVE
 } ni_sw_instance_status_t;
-
-typedef enum
-{
-    EN_ALLOC_LEAST_LOAD,
-    EN_ALLOC_LEAST_INSTANCE
-} ni_alloc_rule_t;
 
 typedef struct _ni_device_queue
 {
@@ -118,9 +107,12 @@ typedef struct _ni_device_info
   int                    module_id; /*! global unique id, assigned at creation */
   int                    load;       /*! p_load value retrieved from f/w */
   int                    model_load; /*! p_load value modelled internally */
-  unsigned long          xcode_load_pixel; /*! xcode p_load in pixels: encoder only */
+  uint64_t               xcode_load_pixel; /*! xcode p_load in pixels: encoder only */
   int                    fw_ver_compat_warning; // fw revision is not supported by this libxcoder
-  uint8_t                fw_rev[8]; // fw revision
+  uint8_t fl_ver_nor_flash[8]; // firmware loader version stored in nor flash
+  uint8_t fl_ver_last_ran[8];
+  uint8_t fw_rev_nor_flash[8]; // fw revision stored in nor flash
+  uint8_t fw_rev[8]; // fw revision loaded, i.e., running
   uint8_t                fw_branch_name[256];
   uint8_t fw_commit_time[26];
   uint8_t fw_commit_hash[41];
@@ -156,6 +148,110 @@ typedef struct _ni_device_context
   ni_lock_handle_t    lock;
   ni_device_info_t * p_device_info;
 } ni_device_context_t;
+
+typedef struct _ni_card_info_quadra
+{
+  int card_idx;
+  int load;
+  int model_load;
+  int task_num;
+  int max_task_num;
+  int shared_mem_usage;
+} ni_card_info_quadra_t;
+
+typedef struct _ni_hw_device_info_quadra
+{
+  int available_card_num;
+  int device_type_num;
+  int consider_mem;
+  ni_device_type_t *device_type;
+  ni_card_info_quadra_t **card_info; 
+  int card_current_card;
+  int err_code;
+} ni_hw_device_info_quadra_t;
+
+typedef struct _ni_hw_device_info_quadra_encoder_param
+{
+    uint32_t fps;/*! encoder fps*/
+    uint32_t h;/*! height*/
+    uint32_t w;/*! width*/
+    uint32_t code_format;/*! 1 for h264,2 for h265,3 for av1,4 for JPEG*/
+    uint32_t ui8enableRdoQuant;
+    uint32_t rdoLevel;
+    uint32_t lookaheadDepth;/*! lookaheadDepth [0:40]*/
+    uint32_t bit_8_10;/*! 8 for 8 bit,10 for 10 bit*/
+    int uploader;/*1 for uploader,0 for not uploader*/
+    int rgba;/*1 for rgba,0 for not*/
+}ni_hw_device_info_quadra_encoder_param_t;
+
+typedef struct _ni_hw_device_info_quadra_decoder_param
+{
+    uint32_t fps;/*! decoder fps*/
+    uint32_t h;/*! height*/
+    uint32_t w;/*! width*/
+    uint32_t bit_8_10;/*! 8 for 8 bit,10 for 10 bit*/
+    int rgba;/*!decoder for rgba? 1 for rgba,0 for not*/
+    int hw_frame;/*if out=hw,1 for out = hw_frame,0 for not*/
+}ni_hw_device_info_quadra_decoder_param_t;
+
+typedef struct _ni_hw_device_info_quadra_scaler_param
+{
+    uint32_t h;/*!output height*/
+    uint32_t w;/*!output width*/
+    uint32_t bit_8_10;/*! 8 for 8 bit,10 for 10 bit*/
+    int rgba;/*!output for rgba? 1 for rgba,0 for not*/
+}ni_hw_device_info_quadra_scaler_param_t;
+
+typedef struct _ni_hw_device_info_quadra_ai_param
+{
+    uint32_t h;/*!output height*/
+    uint32_t w;/*!output width*/
+    uint32_t bit_8_10;/*! 8 for 8 bit,10 for 10 bit*/
+    int rgba;/*!output for rgba? 1 for rgba,0 for not*/
+}ni_hw_device_info_quadra_ai_param_t;
+
+typedef struct _ni_hw_device_info_quadra_threshold_param
+{
+    ni_device_type_t device_type;
+    int load_threshold;
+    int task_num_threshold;
+}ni_hw_device_info_quadra_threshold_param_t;
+
+typedef struct _ni_hw_device_info_quadra_coder_param
+{
+    int hw_mode;
+    ni_hw_device_info_quadra_encoder_param_t *encoder_param;
+    ni_hw_device_info_quadra_decoder_param_t *decoder_param;
+    ni_hw_device_info_quadra_scaler_param_t *scaler_param;
+    ni_hw_device_info_quadra_ai_param_t *ai_param;
+}ni_hw_device_info_quadra_coder_param_t;
+typedef struct _ni_device_vf_ns_id
+{
+    uint16_t vf_id;
+    uint16_t ns_id;
+} ni_device_vf_ns_id_t;
+
+typedef struct _ni_device_temp
+{
+    int32_t composite_temp;
+    int32_t on_board_temp;
+    int32_t on_die_temp;
+} ni_device_temp_t;
+
+typedef struct _ni_device_extra_info
+{
+    int32_t composite_temp;
+    int32_t on_board_temp;
+    int32_t on_die_temp;
+    uint32_t power_consumption;
+    uint32_t reserve[4];
+} ni_device_extra_info_t;
+
+typedef enum
+{
+    EN_ALLOC_LEAST_LOAD,
+    EN_ALLOC_LEAST_INSTANCE
+} ni_alloc_rule_t;
 
 /*!******************************************************************************
  *  \brief   Initialize and create all resources required to work with NETINT NVMe
@@ -322,23 +418,15 @@ LIB_API void ni_rsrc_print_all_devices_capability2(bool list_uninitialized);
 LIB_API ni_device_info_t* ni_rsrc_get_device_info(ni_device_type_t device_type, int guid);
 
 /*!****************************************************************************
-
-*   \brief      Get the least used device that can handle decoding or encoding
-*               a video stream of certain resolution/frame-rate/codec.
+* \brief      Get GUID of the device by block device name and type
 *
-*   \param[in]  width      width of video resolution
-*   \param[in]  height     height of video resolution
-*   \param[in]  frame_rate video stream frame rate
-*   \param[in]  codec      EN_H264 or EN_H265
-*   \param[in]  type       NI_DEVICE_TYPE_DECODER or NI_DEVICE_TYPE_ENCODER
-*   \param[out] info       detailed device information. If is non-NULL, the
-*                          device info is stored in the memory pointed to by it.
+* \param[in]  blk_name   device's block name
+* \param[in]  type       device type
 *
-*   \return     device GUID (>= 0) if found , -1 otherwise
+* \return     device GUID (>= 0) if found, NI_RETCODE_FAILURE (-1) otherwise
 *******************************************************************************/
-LIB_API int ni_rsrc_get_available_device(int width, int height, int frame_rate,
-                            ni_codec_t codec, ni_device_type_t device_type,
-                            ni_device_info_t * p_device_info);
+LIB_API int ni_rsrc_get_device_by_block_name(const char *blk_name,
+                                             ni_device_type_t device_type);
 
 /*!*****************************************************************************
 *   \brief Update the load value and s/w instances info of a specific decoder or
@@ -353,67 +441,8 @@ LIB_API int ni_rsrc_get_available_device(int width, int height, int frame_rate,
 *               NI_RETCODE_SUCCESS
 *               NI_RETCODE_FAILURE
 *******************************************************************************/
-LIB_API int ni_rsrc_update_device_load(ni_device_context_t* p_ctxt, int load,
+int ni_rsrc_update_device_load(ni_device_context_t* p_ctxt, int load,
     int sw_instance_cnt, const ni_sw_instance_info_t sw_instance_info[]);
-
-/*!*****************************************************************************
-*   \brief      Allocate resources for decoding/encoding, based on the provided rule
-*
-*   \param[in]  device_type NI_DEVICE_TYPE_DECODER or NI_DEVICE_TYPE_ENCODER
-*   \param[in]  rule        allocation rule
-*   \param[in]  codec       EN_H264 or EN_H265
-*   \param[in]  width       width of video resolution
-*   \param[in]  height      height of video resolution
-*   \param[in]  frame_rate  video stream frame rate
-*   \param[out] p_load      the load that will be generated by this encoding
-*                           task. Returned *only* for encoder for now.
-*
-*   \return     pointer to ni_device_context_t if found, NULL otherwise
-*   
-*   Note:  codec, width, height, fps need to be supplied for NI_DEVICE_TYPE_ENCODER only,
-*          they are ignored otherwize.
-*   Note:  the returned ni_device_context_t content is not supposed to be used by 
-*          caller directly: should only be passed to API in the subsequent 
-*          calls; also after its use, the context should be released by
-*          calling ni_rsrc_free_device_context.
-*******************************************************************************/
-LIB_API ni_device_context_t* ni_rsrc_allocate_auto( ni_device_type_t device_type,
-                                                    ni_alloc_rule_t rule,
-                                                    ni_codec_t codec,
-                                                    int width, int height, 
-                                                    int frame_rate,
-                                                    unsigned long *p_load);
-
-/*!*****************************************************************************
-*   \brief      Allocate resources for decoding/encoding, by designating explicitly
-*               the device to use.
-*
-*   \param[in]  device_type  NI_DEVICE_TYPE_DECODER or NI_DEVICE_TYPE_ENCODER
-*   \param[in]  guid         unique device (decoder or encoder) module id
-*   \param[in]  codec        EN_H264 or EN_H265
-*   \param[in]  width        width of video resolution
-*   \param[in]  height       height of video resolution
-*   \param[in]  frame_rate   video stream frame rate
-*   \param[out] p_load       the load that will be generated by this encoding
-*                          task. Returned *only* for encoder for now.
-*
-*   \return     pointer to ni_device_context_t if found, NULL otherwise
-*
-*   Note:  codec, width, height, fps need to be supplied by encoder; they
-*          are ignored for decoder.
-*
-*   Note:  the returned ni_device_context_t content is not supposed to be used by 
-*          caller directly: should only be passed to API in the subsequent 
-*          calls; also after its use, the context should be released by
-*          calling ni_rsrc_free_device_context.
-*******************************************************************************/
-LIB_API ni_device_context_t* ni_rsrc_allocate_direct( ni_device_type_t device_type, 
-                                                      int guid,
-                                                      ni_codec_t codec,
-                                                      int width, 
-                                                      int height,
-                                                      int frame_rate,
-                                                      unsigned long *p_load);
 
 /*!*****************************************************************************
 *   \brief      Allocate resources for decoding/encoding, by designating explicitly
@@ -448,7 +477,7 @@ ni_device_context_t *ni_rsrc_allocate_simple_direct
 *   \return      None
 *******************************************************************************/
 LIB_API void ni_rsrc_release_resource(ni_device_context_t *p_ctxt,
-                                      unsigned long load);
+                                      uint64_t load);
 
 /*!*****************************************************************************
 *   \brief      check the NetInt h/w device in resource pool on the host.
@@ -473,6 +502,17 @@ LIB_API int ni_rsrc_check_hw_available(int guid, ni_device_type_t device_type);
 LIB_API int ni_rsrc_remove_device(const char* p_dev);
  
 /*!*****************************************************************************
+*   \brief      Remove all NetInt h/w devices from resource pool on the host.
+*
+*   \param      none
+*
+*   \return
+*               NI_RETCODE_SUCCESS
+*               NI_RETCODE_FAILURE
+*******************************************************************************/
+LIB_API int ni_rsrc_remove_all_devices(void);
+
+/*!*****************************************************************************
 *   \brief      Add an NetInt h/w device into resource pool on the host.
 *
 *   \param[in]  p_dev  the NVMe device name
@@ -482,6 +522,7 @@ LIB_API int ni_rsrc_remove_device(const char* p_dev);
 *
 *   \return
 *               NI_RETCODE_SUCCESS
+*               NI_RETCODE_INVALID_PARAM
 *               NI_RETCODE_FAILURE
 *******************************************************************************/
 LIB_API int ni_rsrc_add_device(const char* p_dev, int should_match_rev);
@@ -541,6 +582,117 @@ LIB_API int ni_rsrc_unlock(int device_type, ni_lock_handle_t lock);
 *  \return 1 for full compatibility, 2 for partial, 0 for none
 *******************************************************************************/
 LIB_API int ni_rsrc_is_fw_compat(uint8_t fw_rev[8]);
+
+/*!******************************************************************************
+ *  \brief  Create a pointer to  hw_device_info_coder_param_t instance .This instance will be created and 
+ *          set to default vaule by param mode.You may change the resolution fps bit_8_10 or other vaule you want to set.
+ *  
+ *  \param[in] mode:0:create instance with decoder_param ,encoder_param, scaler_param and ai_param will be set to NULL
+ *                  1:create instance with encoder_param ,decoder_param, scaler_param and ai_param will be set to NULL
+ *                  2:create instance with scaler_param ,decoder_param, encoder_param and ai_param will be set to NULL
+ *                  3:create instance with ai_param ,decoder_param, encoder_param and scaler_param will be set to NULL
+ *                  >= 4:create instance with decoder_param encoder_param scaler_param and ai_param for ni_check_hw_info() hw_mode
+ * 
+ *  \return  NULL-error,pointer to an instance when success
+ *******************************************************************************/
+LIB_API ni_hw_device_info_quadra_coder_param_t *ni_create_hw_device_info_quadra_coder_param(int mode);
+
+/*!******************************************************************************
+ *  \brief  Release a pointer to  hw_device_info_coder_param_t instance created by create_hw_device_info_coder_param
+ *
+ *  
+ *  \param[in] p_hw_device_info_coder_param:pointer to a hw_device_info_coder_param_t instance created by create_hw_device_info_coder_param
+ *                     
+ *******************************************************************************/
+LIB_API void ni_destory_hw_device_info_quadra_coder_param(ni_hw_device_info_quadra_coder_param_t *p_hw_device_info_quadra_coder_param);
+
+/*!******************************************************************************
+ *  \brief  Create a pointer to ni_hw_device_info_quadra_t instance .
+ *  
+ *  \param[in] device_type_num:number of device type to be allocated in this function
+ *                 
+ *  \param[in] avaliable_card_num:number of avaliable card per device to be allocated in this function
+ * 
+ *  \return  NULL-error,pointer to an instance when success
+ *******************************************************************************/
+LIB_API ni_hw_device_info_quadra_t *ni_hw_device_info_alloc_quadra(int device_type_num,int avaliable_card_num);
+
+/*!******************************************************************************
+ *  \brief  Release a pointer to  ni_hw_device_info_quadra_t instance created by create_hw_device_info_coder_param
+ *
+ *  
+ *  \param[in] p_hw_device_info:pointer to a ni_hw_device_info_quadra_t instance created by create_hw_device_info_coder_param
+ *                     
+ *******************************************************************************/
+LIB_API void ni_hw_device_info_free_quadra(ni_hw_device_info_quadra_t *p_hw_device_info);
+
+/*!*****************************************************************************
+ *  \brief  check hw info, return the appropriate card number to use depends on the load&task_num&used resource
+ *
+ *  \param[out] pointer_to_p_hw_device_info : pointer to user-supplied ni_hw_device_info_quadra_t (allocated by ni_hw_device_info_alloc).
+ *                                            May be a ponter to NULL ,in which case a ni_hw_device_info_quadra_coder_param_t is allocated by this function
+ *                                            and written to pointer_to_p_hw_device_info.
+ *                                            record the device info, including  available card num and which card to select,
+ *                                            and each card's informaton, such as, the load, task num, device type
+ *  \param[in] task_mode: affect the scheduling strategy,
+ *                        1 - both the load_num and task_num should consider, usually applied to live scenes
+ *                        0 - only consider the task_num, don not care the load_num
+ *  \param[in] hw_info_threshold_param : an array of threshold including device type task threshold and load threshold
+ *                                       in hw_mode fill the arry with both encoder and decoder threshold or 
+ *                                       fill the arry with preferential device type threshold when don not in hw_mode
+ *                                       load threshold in range[0:100] task num threshold in range [0:32]
+ *  \param[in] preferential_device_type : which device type is preferential 0:decode 1:encode .
+ *                                        This need to set to encoder/decoder even if in sw_mode to check whether coder_param is wrong.
+ *  \param[in] coder_param : encoder and decoder information that helps to choose card .This coder_param can be created and 
+ *                           set to default value by function hw_device_info_coder_param_t * create_hw_device_info_coder_param().
+ *                           You may change the resolution fps bit_8_10 or other vaule you want to use
+ *  \param[in] hw_mode:Set 1 then this function will choose encoder and decoder in just one card .
+ *                     When no card meets the conditions ,NO card will be choosed.
+ *                     You can try to use set hw_mode 0 to use sw_mode to do encoder/decoder in different card when hw_mode reports an error
+ *                     In hw_mode set both encoder_param and decoder_param in coder_param.
+ *                     Set 0 then just consider sw_mode to choose which card to do encode/decode,
+ *                     In sw_mode set one param in coder_param the other one will be set to NULL.
+ *  \param[in] consider_mem : set 1 this function will consider memory usage extra
+ *                            set 0 this function will not consider memory usage
+ *
+ *  \return  0-error 1-success
+ *******************************************************************************/
+LIB_API int ni_check_hw_info(ni_hw_device_info_quadra_t **pointer_to_p_hw_device_info, 
+                             int task_mode,
+                             ni_hw_device_info_quadra_threshold_param_t *hw_info_threshold_param,
+                             ni_device_type_t preferential_device_type,
+                             ni_hw_device_info_quadra_coder_param_t * coder_param,
+                             int hw_mode,
+                             int consider_mem);
+
+
+/*!*****************************************************************************
+*   \brief      Allocate resources for decoding/encoding, based on the provided rule
+*
+*   \param[in]  device_type NI_DEVICE_TYPE_DECODER or NI_DEVICE_TYPE_ENCODER
+*   \param[in]  rule        allocation rule
+*   \param[in]  codec       EN_H264 or EN_H265
+*   \param[in]  width       width of video resolution
+*   \param[in]  height      height of video resolution
+*   \param[in]  frame_rate  video stream frame rate
+*   \param[out] p_load      the load that will be generated by this encoding
+*                           task. Returned *only* for encoder for now.
+*
+*   \return     pointer to ni_device_context_t if found, NULL otherwise
+*   
+*   Note:  codec, width, height, fps need to be supplied for NI_DEVICE_TYPE_ENCODER only,
+*          they are ignored otherwize.
+*   Note:  the returned ni_device_context_t content is not supposed to be used by 
+*          caller directly: should only be passed to API in the subsequent 
+*          calls; also after its use, the context should be released by
+*          calling ni_rsrc_free_device_context.
+*******************************************************************************/
+LIB_API ni_device_context_t* ni_rsrc_allocate_auto( ni_device_type_t device_type,
+                                                    ni_alloc_rule_t rule,
+                                                    ni_codec_t codec,
+                                                    int width, int height, 
+                                                    int frame_rate,
+                                                    uint64_t *p_load);
 
 #ifdef __cplusplus
 }

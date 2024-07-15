@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_log.c
-*
-*  \brief  Exported logging routines definition
-*
-*******************************************************************************/
+ *  \file   ni_log.c
+ *
+ *  \brief  Logging definitions
+ ******************************************************************************/
 
 #include <string.h>
 #include <stdio.h>
@@ -37,10 +36,51 @@
 #include <sys/time.h>
 #endif
 #include "ni_log.h"
+#include "ni_defs.h"
+#include "ni_device_api.h"
+#include "ni_util.h"
+
 
 static ni_log_level_t ni_log_level = NI_LOG_INFO;
 static void (*ni_log_callback)(int, const char*, va_list) =
     ni_log_default_callback;
+
+#ifdef _WIN32
+static ni_pthread_mutex_t ni_log2_mutex;
+static int ni_log2_mutex_initialized = 0;
+INIT_ONCE g_InitOnce_ni_log2_mutex = INIT_ONCE_STATIC_INIT;
+#else
+static ni_pthread_mutex_t ni_log2_mutex = PTHREAD_MUTEX_INITIALIZER;
+//pthread
+#endif
+static int ni_log2_print_with_mutex = 0;
+
+#define NI_LOG2_SESSION_ID_TIMESTAMP_FMT "[SID=%x, TS=" "%" PRIu64 "]"
+#define NI_LOG2_TIMESTAMP_FMT "[TS=" "%" PRIu64 "]"
+#define NI_LOG2_SESSION_ID_FMT "[SID=%x]"
+#define NI_LOG2_E2EID_FMT "|%s|"
+#define NI_LOG2_FMT_FMT "%s"
+#define NI_LOG2_SPACE " "
+
+#define NI_LOG2_PRINT_BUFF_SIZE 512
+
+#ifdef _ANDROID
+#include <android/log.h>
+
+static char ni_log_tag[128] = "libxcoder";
+
+#define ALOGV(fmt, ...)                                                        \
+    __android_log_vprint(ANDROID_LOG_VERBOSE, ni_log_tag, fmt, ##__VA_ARGS__)
+#define ALOGD(fmt, ...)                                                        \
+    __android_log_vprint(ANDROID_LOG_DEBUG, ni_log_tag, fmt, ##__VA_ARGS__)
+#define ALOGI(fmt, ...)                                                        \
+    __android_log_vprint(ANDROID_LOG_INFO, ni_log_tag, fmt, ##__VA_ARGS__)
+#define ALOGW(fmt, ...)                                                        \
+    __android_log_vprint(ANDROID_LOG_WARN, ni_log_tag, fmt, ##__VA_ARGS__)
+#define ALOGE(fmt, ...)                                                        \
+    __android_log_vprint(ANDROID_LOG_ERROR, ni_log_tag, fmt, ##__VA_ARGS__)
+#endif
+
 
 /*!*****************************************************************************
  *  \brief Get time for logs with microsecond timestamps
@@ -88,6 +128,8 @@ int32_t ni_log_gettimeofday(struct timeval *p_tp, struct timezone *p_tzp)
  *  \param[in] vl     variadric args list
  *
  *  \return
+ *  \note This function doesn't automatically append a newline to the end of 
+ *       the log message.
  ******************************************************************************/
 void ni_log_default_callback(int level, const char* fmt, va_list vl)
 {
@@ -99,22 +141,18 @@ void ni_log_default_callback(int level, const char* fmt, va_list vl)
         {
             struct timeval tv;
             ni_log_gettimeofday(&tv, NULL);
-#ifdef _WIN32
-            fprintf(stderr, "[%lld] ", (long long) (tv.tv_sec * 1000000LL + tv.tv_usec));
-#else
             fprintf(stderr, "[%" PRIu64 "] ", (uint64_t) (tv.tv_sec * 1000000LL + tv.tv_usec));
-#endif
         }
 #endif
 #endif
 
 #ifdef _ANDROID
-        if (level == NI_LOG_INFO)
+        if (level >= NI_LOG_DEBUG)
+            ALOGD(fmt, vl);
+        else if (level == NI_LOG_INFO)
             ALOGI(fmt, vl);
-        else if (level >= NI_LOG_ERROR)
-            ALOGE(fmt, vl);
         else
-            ALOGV(fmt, vl);
+            ALOGE(fmt, vl);
 #else
         vfprintf(stderr, fmt, vl);
 #endif
@@ -249,5 +287,168 @@ ni_log_level_t arg_to_ni_log_level(const char *arg_str)
         return NI_LOG_TRACE;
     } else {
         return NI_LOG_INVALID;
+    }
+}
+
+#ifdef _ANDROID
+/*!******************************************************************************
+ *  \brief  Set ni_log_tag
+ *
+ *  \param  log tag
+ *
+ *  \return
+ *******************************************************************************/
+void ni_log_set_log_tag(const char *log_tag)
+{
+  strcpy(ni_log_tag, log_tag);
+  ni_log_tag[strlen(log_tag)] = '\0';
+}
+#endif
+
+uint64_t ni_log_get_utime()
+{
+    struct timeval tv;
+    ni_log_gettimeofday(&tv, NULL);
+    return (uint64_t) (tv.tv_sec * 1000000LL + tv.tv_usec);
+}
+
+#ifdef _WIN32
+static BOOL CALLBACK ni_log2_init_mutex_once_callback(PINIT_ONCE InitOnce,
+                                                 PVOID Parameter,
+                                                 PVOID *Context)
+{
+    ni_pthread_mutex_init(&ni_log2_mutex);
+    ni_log2_mutex_initialized = 1;
+    return true;
+}
+#endif
+
+void ni_log2_with_mutex(int on)
+{
+#ifdef _WIN32
+    if(!ni_log2_mutex_initialized && on)
+    {
+        InitOnceExecuteOnce(&g_InitOnce_ni_log2_mutex, ni_log2_init_mutex_once_callback, NULL, NULL);
+    }
+#endif
+    ni_log2_print_with_mutex = on;
+}
+
+void ni_log2(const void *p_context, ni_log_level_t level, const char *fmt, ...)
+{
+    const ni_session_context_t *p_session_context = (const ni_session_context_t *)p_context;
+
+    if(level > ni_log_level)
+    {
+        return;
+    }
+
+    if(ni_log2_print_with_mutex)
+    {
+        ni_pthread_mutex_lock(&ni_log2_mutex);
+
+        if(p_session_context && level == NI_LOG_ERROR)
+        {
+            ni_log(level, NI_LOG2_SESSION_ID_TIMESTAMP_FMT "" NI_LOG2_E2EID_FMT "" NI_LOG2_SPACE, 
+                   p_session_context->session_id, ni_log_get_utime(), p_session_context->E2EID);
+        }
+        else if(p_session_context)
+        {
+            ni_log(level, NI_LOG2_SESSION_ID_FMT "" NI_LOG2_E2EID_FMT "" NI_LOG2_SPACE, 
+                   p_session_context->session_id, p_session_context->E2EID);
+        }
+        else if (level == NI_LOG_ERROR)
+        {
+            ni_log(level, NI_LOG2_TIMESTAMP_FMT "" NI_LOG2_SPACE, 
+                   ni_log_get_utime());
+        }
+
+        va_list vl;
+        va_start(vl, fmt);
+        if (ni_log_callback)
+        {
+            ni_log_callback(level, fmt, vl);
+        }
+        va_end(vl);
+
+        ni_pthread_mutex_unlock(&ni_log2_mutex);
+    }
+    else
+    {
+        if(!p_session_context && level != NI_LOG_ERROR)
+        {
+            va_list vl;
+            va_start(vl, fmt);
+            if (ni_log_callback)
+            {
+                ni_log_callback(level, fmt, vl);
+            }
+            va_end(vl);
+
+            return;
+        }
+
+        char printbuf[NI_LOG2_PRINT_BUFF_SIZE];
+        // int used_size = 0;
+        // size_t free_size = NI_LOG2_PRINT_BUFF_SIZE;
+        int this_used_size = 0;
+
+        if(p_session_context && level == NI_LOG_ERROR)
+        {
+            this_used_size = snprintf(printbuf, NI_LOG2_PRINT_BUFF_SIZE, 
+                                      NI_LOG2_SESSION_ID_TIMESTAMP_FMT "" NI_LOG2_E2EID_FMT "" NI_LOG2_SPACE "" NI_LOG2_FMT_FMT,
+                                      p_session_context->session_id, ni_log_get_utime(), p_session_context->E2EID, fmt);
+        }
+        else if(p_session_context)
+        {
+            this_used_size = snprintf(printbuf, NI_LOG2_PRINT_BUFF_SIZE, 
+                                      NI_LOG2_SESSION_ID_FMT "" NI_LOG2_E2EID_FMT "" NI_LOG2_SPACE "" NI_LOG2_FMT_FMT,
+                                      p_session_context->session_id, p_session_context->E2EID, fmt);
+        }
+        else if (level == NI_LOG_ERROR)
+        {
+            this_used_size = snprintf(printbuf, NI_LOG2_PRINT_BUFF_SIZE, 
+                                      NI_LOG2_TIMESTAMP_FMT "" NI_LOG2_SPACE "" NI_LOG2_FMT_FMT,
+                                      ni_log_get_utime(), fmt);
+        }
+
+        if(this_used_size < 0)
+        {
+            ni_log(NI_LOG_ERROR,"ni_log2: an error occurd in snprintf\n");
+
+            va_list vl;
+            va_start(vl, fmt);
+            if (ni_log_callback)
+            {
+                ni_log_callback(level, fmt, vl);
+            }
+            va_end(vl);
+
+            return;
+        }
+
+        if(this_used_size >= NI_LOG2_PRINT_BUFF_SIZE)
+        {
+            ni_log(NI_LOG_ERROR,"ni_log2: too many characters for output\n");
+
+            va_list vl;
+            va_start(vl, fmt);
+            if (ni_log_callback)
+            {
+                ni_log_callback(level, fmt, vl);
+            }
+            va_end(vl);
+
+            return;
+        }
+
+        va_list vl;
+        va_start(vl, fmt);
+        if (ni_log_callback)
+        {
+            ni_log_callback(level, printbuf, vl);
+        }
+        va_end(vl);  
+        
     }
 }

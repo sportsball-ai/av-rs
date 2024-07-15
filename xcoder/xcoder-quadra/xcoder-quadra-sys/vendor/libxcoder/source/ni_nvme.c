@@ -20,11 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ni_nvme.c
-*
-*  \brief  Private routines related to working with NI Quadra over NVME interface
-*
-*******************************************************************************/
+ *  \file   ni_nvme.c
+ *
+ *  \brief  Private definitions for interfacing with NETINT video processing
+ *          devices over NVMe
+ ******************************************************************************/
 
 #include <stdint.h>
 #include <string.h>
@@ -62,40 +62,44 @@
 ni_retcode_t ni_nvme_check_error_code(int rc, int opcode, uint32_t xcoder_type,
                                       uint32_t hw_id, uint32_t *p_instance_id)
 {
+    const char* type_str = GET_XCODER_DEVICE_TYPE_STR(xcoder_type);
+
     switch (rc)
     {
-        case NI_RETCODE_NVME_SC_RESOURCE_UNAVAILABLE:
-        case NI_RETCODE_NVME_SC_RESOURCE_IS_EMPTY:
-        case NI_RETCODE_NVME_SC_RESOURCE_NOT_FOUND:
-        case NI_RETCODE_NVME_SC_REQUEST_NOT_COMPLETED:
-        case NI_RETCODE_NVME_SC_REQUEST_IN_PROGRESS:
-        case NI_RETCODE_NVME_SC_INVALID_PARAMETER:
-        case NI_RETCODE_NVME_SC_VPU_RECOVERY:
-        case NI_RETCODE_NVME_SC_VPU_RSRC_INSUFFICIENT:
-        case NI_RETCODE_NVME_SC_VPU_GENERAL_ERROR:
+    case NI_RETCODE_SUCCESS:
+        return NI_RETCODE_SUCCESS;
+    case NI_RETCODE_NVME_SC_VPU_RSRC_INSUFFICIENT:
+        ni_log(NI_LOG_ERROR,
+               "Hardware %u %s experiencing insufficient resource (instance %u opcode %x)!\n",
+               hw_id, type_str, *p_instance_id, opcode);
+        return NI_RETCODE_ERROR_RESOURCE_UNAVAILABLE;
+    case NI_RETCODE_NVME_SC_INVALID_PARAMETER:
+        ni_log(NI_LOG_ERROR,
+               "Hardware %u %s failed to open session due to invalid "
+               "combination of "
+               "parameter values given (instance %u opcode %x)!\n",
+               hw_id, type_str, *p_instance_id, opcode);
+        return NI_RETCODE_INVALID_PARAM;
+    case NI_RETCODE_NVME_SC_STREAM_ERROR:
+        ni_log(NI_LOG_ERROR,
+               "Hardware %u %s got stream error (instance %u opcode %x)!\n",
+               hw_id, type_str, *p_instance_id, opcode);
+        return NI_RETCODE_ERROR_STREAM_ERROR;
+    default:
+        if (xcoder_type == NI_DEVICE_TYPE_AI)
+        {
+            ni_log(NI_LOG_ERROR, "Error rc = %d, %s, op = %02x, %s %u.0x%x\n",
+                   rc, ni_ai_errno_to_str(rc), opcode,
+                   type_str, hw_id, *p_instance_id);
+        } else
         {
             ni_log(NI_LOG_ERROR,
-                   "Error rc = 0x%x, op = %02x, %s %u.%u terminating?"
-                   "\n",
-                   rc, opcode, device_type_str[xcoder_type], hw_id,
+                   "Error rc = 0x%x, op = %02x, %s %u.%u terminating?\n", rc,
+                   opcode, type_str, hw_id,
                    *p_instance_id);
-
-            if (NI_RETCODE_NVME_SC_RESOURCE_IS_EMPTY == rc ||
-                NI_RETCODE_NVME_SC_RESOURCE_NOT_FOUND == rc ||
-                NI_RETCODE_NVME_SC_VPU_RSRC_INSUFFICIENT == rc ||
-                NI_RETCODE_NVME_SC_VPU_GENERAL_ERROR == rc)
-            {
-                return NI_RETCODE_FAILURE;
-            }
-            break;
         }
-        default:
-        {
-            break;   // nothing
-        }
+        return NI_RETCODE_FAILURE;
     }
-
-    return NI_RETCODE_SUCCESS;
 }
 
 #ifdef __linux__
@@ -202,7 +206,7 @@ int ni_nvme_enumerate_devices
     CHAR model_name[40] = {0};
     ni_nvme_identity_t *p_ni_identity = NULL;
 
-    printf("Searching for NETINT NVMe devices ...\n\n");
+    ni_log(NI_LOG_DEBUG, "Searching for NETINT NVMe devices ...\n\n");
 
     if (ni_posix_memalign((void **)(&p_buffer), sysconf(_SC_PAGESIZE),
                           data_len))
@@ -293,7 +297,7 @@ int ni_nvme_enumerate_devices
 
     if (p_buffer)
     {
-        free(p_buffer);
+        ni_aligned_free(p_buffer);
     }
 
     ni_log(NI_LOG_INFO,
@@ -415,7 +419,6 @@ int32_t ni_nvme_send_io_cmd_thru_admin_queue(ni_nvme_admin_opcode_t opcode,
 {
     int32_t rc;
     ni_nvme_passthrough_cmd_t nvme_cmd = {0};
-    int32_t *p_addr = NULL;
 
     nvme_cmd.opcode = opcode;
     nvme_cmd.nsid = ni_htonl(1);
@@ -462,7 +465,7 @@ void ni_parse_lba(uint64_t lba)
         ni_log(NI_LOG_DEBUG,
                "encoder lba:0x%" PRIx64 "(4K-aligned), 0x%" PRIx64
                "(512B-aligned), session ID:%u\n",
-               lba, (lba << 3), session_id);
+               lba, ((uint64_t)lba << 3), session_id);
         if (lba_low >= WR_OFFSET_IN_4K)
         {
             ni_log(NI_LOG_ERROR, "encoder send frame failed\n");
@@ -486,7 +489,7 @@ void ni_parse_lba(uint64_t lba)
         ni_log(NI_LOG_DEBUG,
                "decoder lba:0x%" PRIx64 "(4K-aligned), 0x%" PRIx64
                "(512B-aligned), session ID:%u\n",
-               lba, (lba << 3), session_id);
+               lba, ((uint64_t)lba << 3), session_id);
         if (lba_low >= WR_OFFSET_IN_4K)
         {
             ni_log(NI_LOG_ERROR, "decoder send packet failed\n");
@@ -523,13 +526,20 @@ int32_t ni_nvme_send_read_cmd(ni_device_handle_t handle,
 {
     int32_t rc;
     uint64_t offset = (uint64_t)lba << LBA_BIT_OFFSET;
+
+    if (!p_data)
+    {
+        ni_log(NI_LOG_ERROR, "%s: ERROR: invalid parameter: p_data=%p\n", __func__, p_data);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
 #ifdef _WIN32
     uint32_t offset_l = (uint32_t)(offset & 0xFFFFFFFF);
     DWORD offset_h = (DWORD)(offset >> 32);
     OVERLAPPED overlap;
     ni_log(NI_LOG_TRACE,
-           "%s: handle=%" PRIx64 ", lba=0x%x, len=%d,offset:0x%x,0x%x\n",
-           __func__, (int64_t)handle, (lba << 3), data_len, offset_l, offset_h);
+           "%s: handle=%" PRIx64 ", lba=0x%lx, len=%d,offset:0x%x,0x%x\n",
+           __func__, (int64_t)handle, ((uint64_t)lba << 3), data_len, offset_l, offset_h);
     memset(&overlap, 0, sizeof(overlap));
     overlap.Offset = offset_l;
     overlap.OffsetHigh = offset_h;
@@ -542,19 +552,24 @@ int32_t ni_nvme_send_read_cmd(ni_device_handle_t handle,
         rc = NI_ERRNO;
         ni_log(NI_LOG_DEBUG,
                "%s() ReadFile handle=%" PRIx64 ", event_handle="
-               "%" PRIx64 ", lba=0x%x, len=%d, rc=%d\n",
-               __func__, (int64_t)handle, (int64_t)event_handle, (lba << 3),
+               "%" PRIx64 ", lba=0x%lx, len=%d, rc=%d\n",
+               __func__, (int64_t)handle, (int64_t)event_handle, ((uint64_t)lba << 3),
                data_len, rc);
         ni_log(NI_LOG_ERROR, "ERROR %d: %s() failed\n", rc, __func__);
         rc = NI_RETCODE_ERROR_NVME_CMD_FAILED;
     } else
     {
-        ni_log(NI_LOG_DEBUG, "%s() wait success\n", __func__);
         rc = NI_RETCODE_SUCCESS;
     }
 #else
-    if (handle != 0 && p_data != NULL)
+    if (!handle || handle == NI_INVALID_DEVICE_HANDLE)
     {
+        //if we can make sure that all handles are initialized to NI_INVALID_DEVICE_HANDLE
+        //we can remove the condition !handle
+        ni_log(NI_LOG_ERROR, "%s: ERROR: invalid parameters: handle=%" PRId32 "\n", __func__, handle);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
         if (((uintptr_t)p_data) % NI_MEM_PAGE_ALIGNMENT)
         {
             ni_log(NI_LOG_DEBUG,
@@ -584,23 +599,19 @@ int32_t ni_nvme_send_read_cmd(ni_device_handle_t handle,
         }
         ni_log(NI_LOG_TRACE,
                "%s: handle=%" PRIx64
-               ", offset 0x%lx, lba=0x%x, len=%d, rc=%d\n",
-               __func__, (int64_t)handle, offset, (lba << 3), data_len, rc);
+               ", offset 0x%lx, lba=0x%lx, len=%d, rc=%d\n",
+               __func__, (int64_t)handle, offset, ((uint64_t)lba << 3), data_len, rc);
         if (rc < 0 || rc != data_len)
         {
             ni_log(NI_LOG_ERROR,
-                   "ERROR %d: %s failed, lba=0x%x, len=%u, rc=%d, error=%d\n",
-                   NI_ERRNO, __func__, (lba << 3), data_len, rc, NI_ERRNO);
+                   "ERROR %d: %s failed, lba=0x%lx, len=%u, rc=%d, error=%d\n",
+                   NI_ERRNO, __func__, ((uint64_t)lba << 3), data_len, rc, NI_ERRNO);
             ni_parse_lba(lba);
             rc = NI_RETCODE_ERROR_NVME_CMD_FAILED;
         } else
         {
             rc = NI_RETCODE_SUCCESS;
         }
-    } else
-    {
-        rc = NI_RETCODE_ERROR_NVME_CMD_FAILED;
-    }
 #endif
     return rc;
 }
@@ -621,6 +632,13 @@ int32_t ni_nvme_send_write_cmd(ni_device_handle_t handle,
 {
     int32_t rc;
     uint64_t offset = (uint64_t)lba << LBA_BIT_OFFSET;
+
+    if (!p_data)
+    {
+        ni_log(NI_LOG_ERROR, "%s: ERROR: invalid parameter: p_data=%p\n", __func__, p_data);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
 #ifdef _WIN32
     uint32_t offset_l = (uint32_t)(offset & 0xFFFFFFFF);
     DWORD offset_h = (DWORD)(offset >> 32);
@@ -628,8 +646,8 @@ int32_t ni_nvme_send_write_cmd(ni_device_handle_t handle,
     OVERLAPPED overlap;
 
     ni_log(NI_LOG_TRACE,
-           "%s: handle=%" PRIx64 ", lba=0x%x, len=%d,offset:0x%x,0x%x\n",
-           __func__, (int64_t)handle, (lba << 3), data_len, offset_l, offset_h);
+           "%s: handle=%" PRIx64 ", lba=0x%lx, len=%d,offset:0x%x,0x%x\n",
+           __func__, (int64_t)handle, ((uint64_t)lba << 3), data_len, offset_l, offset_h);
 
     memset(&overlap, 0, sizeof(overlap));
     overlap.Offset = offset_l;
@@ -642,26 +660,27 @@ int32_t ni_nvme_send_write_cmd(ni_device_handle_t handle,
         rc = NI_ERRNO;
         ni_log(NI_LOG_DEBUG,
                "%s() WriteFile handle=%" PRIx64 ", event_handle="
-               "%" PRIx64 ", lba=0x%x, len=%d, rc=%d\n",
-               __func__, (int64_t)handle, (int64_t)event_handle, (lba << 3),
+               "%" PRIx64 ", lba=0x%lx, len=%d, rc=%d\n",
+               __func__, (int64_t)handle, (int64_t)event_handle, ((uint64_t)lba << 3),
                data_len, rc);
         ni_log(NI_LOG_ERROR, "ERROR %d: ni_nvme_send_write_cmd() failed\n", rc);
         rc = NI_RETCODE_ERROR_NVME_CMD_FAILED;
     } else
     {
-        ni_log(NI_LOG_DEBUG,
-               "%s() ReadFile success handle=%" PRIx64 ", event_handle="
-               "%" PRIx64 ", lba=0x%x, len=%d, rc=%d\n",
-               __func__, (int64_t)handle, (int64_t)event_handle, (lba << 3),
-               data_len, rc);
         rc = NI_RETCODE_SUCCESS;
     }
 #else
-    if (handle != 0 && p_data != NULL)
+    if (!handle || handle == NI_INVALID_DEVICE_HANDLE)
     {
+        //if we can make sure that all handles are initialized to NI_INVALID_DEVICE_HANDLE
+        //we can remove the condition !handle
+        ni_log(NI_LOG_ERROR, "%s: ERROR: invalid parameters: handle=%" PRId32 "\n", __func__, handle);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
         if (((uintptr_t)p_data) % NI_MEM_PAGE_ALIGNMENT)
         {
-            ni_log(NI_LOG_DEBUG,
+            ni_log(NI_LOG_ERROR,
                    "%s: Buffer not %d aligned = %p! Copying to aligned memory "
                    "and writing.\n",
                    __func__, NI_MEM_PAGE_ALIGNMENT, p_data);
@@ -685,23 +704,19 @@ int32_t ni_nvme_send_write_cmd(ni_device_handle_t handle,
             rc = pwrite(handle, p_data, data_len, offset);
         }
         ni_log(NI_LOG_TRACE,
-               "%s: handle=%" PRIx64 ", lba=0x%x, len=%d, rc=%d\n", __func__,
-               (int64_t)handle, (lba << 3), data_len, rc);
+               "%s: handle=%" PRIx64 ", lba=0x%lx, len=%d, rc=%d\n", __func__,
+               (int64_t)handle, ((uint64_t)lba << 3), data_len, rc);
         if ((rc < 0) || (rc != data_len))
         {
             ni_log(NI_LOG_ERROR,
-                   "ERROR %d: %s failed, lba=0x%x, len=%u, rc=%d, error=%d\n",
-                   NI_ERRNO, __func__, (lba << 3), data_len, rc, NI_ERRNO);
+                   "ERROR %d: %s failed, lba=0x%lx, len=%u, rc=%d, error=%d\n",
+                   NI_ERRNO, __func__, ((uint64_t)lba << 3), data_len, rc, NI_ERRNO);
             ni_parse_lba(lba);
             rc = NI_RETCODE_ERROR_NVME_CMD_FAILED;
         } else
         {
             rc = NI_RETCODE_SUCCESS;
         }
-    } else
-    {
-        rc = NI_RETCODE_ERROR_NVME_CMD_FAILED;
-    }
 #endif
     return rc;
 }

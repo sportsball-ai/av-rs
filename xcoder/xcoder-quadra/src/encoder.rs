@@ -18,10 +18,11 @@ type Result<T> = std::result::Result<T, XcoderEncoderError>;
 struct EncodedFrame {
     data_io: sys::ni_session_data_io_t,
     parameter_sets: Option<Vec<u8>>,
+    meta_size: usize,
 }
 
 impl EncodedFrame {
-    pub fn new() -> Result<Self> {
+    pub fn new(meta_size: usize) -> Result<Self> {
         let packet = unsafe {
             let mut packet = mem::zeroed();
             let code = sys::ni_packet_buffer_alloc(&mut packet as _, sys::NI_MAX_TX_SZ as _);
@@ -39,12 +40,13 @@ impl EncodedFrame {
                 data: sys::_ni_session_data_io__bindgen_ty_1 { packet },
             },
             parameter_sets: None,
+            meta_size,
         })
     }
 
     pub fn as_slice(&self) -> &[u8] {
         let data = unsafe { &std::slice::from_raw_parts(self.data_io.data.packet.p_data as _, self.data_io.data.packet.data_len as _) };
-        &data[sys::NI_FW_ENC_BITSTREAM_META_DATA_SIZE as usize..]
+        &data[self.meta_size as usize..]
     }
 
     /// When parameter sets are emitted by the encoder, they're provided here.
@@ -295,7 +297,7 @@ impl<F> XcoderEncoder<F> {
                 sys::ni_frame_buffer_free(&mut frame_data_io.data.frame as _);
             });
 
-            let encoded_frame = EncodedFrame::new()?;
+            let encoded_frame = EncodedFrame::new((**session).meta_size as usize)?;
 
             Ok(Self {
                 config,
