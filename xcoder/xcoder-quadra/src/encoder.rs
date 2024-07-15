@@ -1,8 +1,12 @@
-use super::{fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
-use std::{collections::VecDeque, mem};
+use std::{
+    collections::VecDeque,
+    mem::{self, MaybeUninit},
+    os::raw::c_void,
+};
 use xcoder_quadra_sys as sys;
 
 #[derive(Debug, Snafu)]
@@ -46,7 +50,7 @@ impl EncodedFrame {
 
     pub fn as_slice(&self) -> &[u8] {
         let data = unsafe { &std::slice::from_raw_parts(self.data_io.data.packet.p_data as _, self.data_io.data.packet.data_len as _) };
-        &data[self.meta_size as usize..]
+        &data[self.meta_size..]
     }
 
     /// When parameter sets are emitted by the encoder, they're provided here.
@@ -141,9 +145,9 @@ impl<F> XcoderEncoder<F> {
         let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
 
         unsafe {
-            let mut params: sys::ni_xcoder_params_t = mem::zeroed();
+            let mut params = alloc_zeroed::<sys::ni_xcoder_params_t>();
             let code = sys::ni_encoder_init_default_params(
-                &mut params as _,
+                params.as_mut_ptr(),
                 fps_numerator,
                 fps_denominator,
                 // There's nothing special about this default bitrate. It's not used unless
@@ -162,7 +166,7 @@ impl<F> XcoderEncoder<F> {
                     operation: "initializing parameters",
                 });
             }
-
+            let mut params = mem::transmute::<Box<MaybeUninit<sys::ni_xcoder_params_t>>, Box<sys::ni_xcoder_params_t>>(params);
             let cfg_enc_params = &mut params.__bindgen_anon_1.cfg_enc_params;
             cfg_enc_params.planar = 1;
             cfg_enc_params.rc.enable_rate_control = if config.bitrate.is_some() { 1 } else { 0 };
@@ -234,8 +238,6 @@ impl<F> XcoderEncoder<F> {
                 params.hwframes = 1;
             }
 
-            let params = Box::new(params);
-
             let session = sys::ni_device_session_context_alloc_init();
             if session.is_null() {
                 return Err(XcoderEncoderError::UnableToAllocateDeviceSessionContext);
@@ -250,7 +252,7 @@ impl<F> XcoderEncoder<F> {
                 (**session).sender_handle = hw.device_handle;
                 (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
             }
-            (**session).p_session_config = &*params as *const sys::ni_xcoder_params_t as _;
+            (**session).p_session_config = params.as_mut() as *mut sys::ni_xcoder_params_t as *mut c_void;
             (**session).codec_format = match config.codec {
                 XcoderEncoderCodec::H264 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
                 XcoderEncoderCodec::H265 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,

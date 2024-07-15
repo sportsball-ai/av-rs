@@ -2,10 +2,7 @@ use mpeg2::{pes, ts};
 use mpeg4::AudioDataTransportStream;
 use vecmap::VecMap;
 
-use std::{
-    collections::VecDeque,
-    error::Error,
-};
+use std::{collections::VecDeque, error::Error};
 
 pub type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 

@@ -90,6 +90,17 @@ mod linux_impl {
         let num = (fps * den as f64).round() as _;
         (num, den)
     }
+
+    fn alloc_zeroed<T>() -> Box<std::mem::MaybeUninit<T>> {
+        use std::alloc::GlobalAlloc as _;
+        unsafe {
+            let raw = std::alloc::System.alloc_zeroed(std::alloc::Layout::from_size_align_unchecked(
+                std::mem::size_of::<T>(),
+                std::mem::align_of::<T>(),
+            ));
+            Box::from_raw(raw as *mut std::mem::MaybeUninit<T>)
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]
