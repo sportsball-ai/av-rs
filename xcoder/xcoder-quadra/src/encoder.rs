@@ -5,9 +5,7 @@ use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
 use std::{
-    collections::VecDeque,
-    mem::{self, MaybeUninit},
-    os::raw::c_void,
+    array, collections::VecDeque, mem::{self, MaybeUninit}, os::raw::c_void, ptr::null_mut
 };
 use xcoder_quadra_sys::{self as sys, ni_packet_t, ni_xcoder_params_t};
 
@@ -233,7 +231,7 @@ impl<F> XcoderEncoder<F> {
             sys::ni_get_frame_dim(
                 config.width as _,
                 config.height as _,
-                if config.bit_depth > 8 { 2 } else { 1 }, // bit depth factor
+                config.pixel_format.repr(),
                 frame_data_strides.as_mut_ptr(),
                 frame_data_heights.as_mut_ptr(),
             );
@@ -462,23 +460,22 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             }
 
             let mut dst_data = [frame.p_data[0], frame.p_data[1], frame.p_data[2]];
-
-            let mut src_data = [
-                f.samples(0).as_ptr() as *mut u8,
-                f.samples(1).as_ptr() as *mut u8,
-                f.samples(2).as_ptr() as *mut u8,
-            ];
-            let mut src_strides = [self.config.width as i32, self.config.width as i32 / 2, self.config.width as i32 / 2];
-            let mut src_heights = [self.config.height as i32, self.config.height as i32 / 2, self.config.height as i32 / 2];
-
+            let mut src_data: [*mut u8; 3] = array::from_fn(|i| if i < self.config.pixel_format.plane_count() {
+                f.samples(i).as_ptr() as *mut u8
+            } else {
+                null_mut()
+            });
+            let mut src_strides = self.config.pixel_format.strides(self.config.width as i32);
+            let mut src_heights = self.config.pixel_format.heights(self.config.height as i32);
+            let factor = if self.config.pixel_format.ten_bit() { 2 } else { 1 };
             unsafe {
-                sys::ni_copy_hw_yuv420p(
+                sys::ni_copy_frame_data(
                     dst_data.as_mut_ptr(),
                     src_data.as_mut_ptr(),
                     self.config.width as _,
                     self.config.height as _,
-                    1,
-                    0,
+                    factor,
+                    self.config.pixel_format.repr(),
                     0,
                     self.frame_data_strides.as_mut_ptr(),
                     self.frame_data_heights.as_mut_ptr(),
