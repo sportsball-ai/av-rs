@@ -7,3 +7,7 @@ edition = "2021"
 av-traits = { path = "../av-traits" }
 snafu = { version = "0.8.0", default-features = false }
 rkmpp-sys = { path = "rkmpp-sys" }
+
+[dev-dependencies]
+clap = { version = "4.5.9", features = ["derive"] }
+indicatif = "0.17.8"
