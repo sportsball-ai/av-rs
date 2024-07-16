@@ -7,7 +7,7 @@ use std::{
     mem::{self, MaybeUninit},
     os::raw::c_void,
 };
-use xcoder_quadra_sys as sys;
+use xcoder_quadra_sys::{self as sys, ni_packet_t, ni_xcoder_params_t};
 
 #[derive(Debug, Snafu)]
 pub enum XcoderEncoderError {
@@ -28,15 +28,15 @@ struct EncodedFrame {
 impl EncodedFrame {
     pub fn new(meta_size: usize) -> Result<Self> {
         let packet = unsafe {
-            let mut packet = mem::zeroed();
-            let code = sys::ni_packet_buffer_alloc(&mut packet as _, sys::NI_MAX_TX_SZ as _);
+            let mut packet = MaybeUninit::<ni_packet_t>::zeroed();
+            let code = sys::ni_packet_buffer_alloc(packet.as_mut_ptr(), sys::NI_MAX_TX_SZ as _);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderEncoderError::Unknown {
                     code,
                     operation: "allocating packet buffer",
                 });
             }
-            packet
+            packet.assume_init()
         };
 
         Ok(Self {
@@ -90,6 +90,7 @@ pub struct XcoderEncoder<F> {
     encoded_frame: EncodedFrame,
     frame_data_io: sys::ni_session_data_io_t,
     frame_data_io_has_next_frame: bool,
+    _params: Box<ni_xcoder_params_t>,
     frame_data_strides: [i32; sys::NI_MAX_NUM_DATA_POINTERS as usize],
     frame_data_heights: [i32; sys::NI_MAX_NUM_DATA_POINTERS as usize],
     input_frames: VecDeque<F>,
@@ -313,6 +314,7 @@ impl<F> XcoderEncoder<F> {
                 frame_data_strides,
                 frame_data_heights,
                 frames_copied: 0,
+                _params: params,
                 input_frames: VecDeque::new(),
                 output_frames: VecDeque::new(),
                 hardware_frames: {
