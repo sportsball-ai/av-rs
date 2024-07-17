@@ -1,9 +1,13 @@
-use super::{fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use crate::XcoderPixelFormat;
+
+use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
-use std::{collections::VecDeque, mem};
-use xcoder_quadra_sys as sys;
+use std::{
+    array, collections::VecDeque, mem::{self, MaybeUninit}, os::raw::c_void, ptr::null_mut
+};
+use xcoder_quadra_sys::{self as sys, ni_packet_t, ni_xcoder_params_t};
 
 #[derive(Debug, Snafu)]
 pub enum XcoderEncoderError {
@@ -18,20 +22,21 @@ type Result<T> = std::result::Result<T, XcoderEncoderError>;
 struct EncodedFrame {
     data_io: sys::ni_session_data_io_t,
     parameter_sets: Option<Vec<u8>>,
+    meta_size: usize,
 }
 
 impl EncodedFrame {
-    pub fn new() -> Result<Self> {
+    pub fn new(meta_size: usize) -> Result<Self> {
         let packet = unsafe {
-            let mut packet = mem::zeroed();
-            let code = sys::ni_packet_buffer_alloc(&mut packet as _, sys::NI_MAX_TX_SZ as _);
+            let mut packet = MaybeUninit::<ni_packet_t>::zeroed();
+            let code = sys::ni_packet_buffer_alloc(packet.as_mut_ptr(), sys::NI_MAX_TX_SZ as _);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderEncoderError::Unknown {
                     code,
                     operation: "allocating packet buffer",
                 });
             }
-            packet
+            packet.assume_init()
         };
 
         Ok(Self {
@@ -39,12 +44,13 @@ impl EncodedFrame {
                 data: sys::_ni_session_data_io__bindgen_ty_1 { packet },
             },
             parameter_sets: None,
+            meta_size,
         })
     }
 
     pub fn as_slice(&self) -> &[u8] {
         let data = unsafe { &std::slice::from_raw_parts(self.data_io.data.packet.p_data as _, self.data_io.data.packet.data_len as _) };
-        &data[sys::NI_FW_ENC_BITSTREAM_META_DATA_SIZE as usize..]
+        &data[self.meta_size..]
     }
 
     /// When parameter sets are emitted by the encoder, they're provided here.
@@ -84,6 +90,7 @@ pub struct XcoderEncoder<F> {
     encoded_frame: EncodedFrame,
     frame_data_io: sys::ni_session_data_io_t,
     frame_data_io_has_next_frame: bool,
+    _params: Box<ni_xcoder_params_t>,
     frame_data_strides: [i32; sys::NI_MAX_NUM_DATA_POINTERS as usize],
     frame_data_heights: [i32; sys::NI_MAX_NUM_DATA_POINTERS as usize],
     input_frames: VecDeque<F>,
@@ -127,6 +134,7 @@ pub struct XcoderEncoderConfig {
     pub fps: f64,
     pub bitrate: Option<u32>,
     pub codec: XcoderEncoderCodec,
+    pub pixel_format: XcoderPixelFormat,
     pub bit_depth: u8,
     pub multicore_joint_mode: bool,
 
@@ -139,9 +147,9 @@ impl<F> XcoderEncoder<F> {
         let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
 
         unsafe {
-            let mut params: sys::ni_xcoder_params_t = mem::zeroed();
+            let mut params = alloc_zeroed::<sys::ni_xcoder_params_t>();
             let code = sys::ni_encoder_init_default_params(
-                &mut params as _,
+                params.as_mut_ptr(),
                 fps_numerator,
                 fps_denominator,
                 // There's nothing special about this default bitrate. It's not used unless
@@ -160,7 +168,7 @@ impl<F> XcoderEncoder<F> {
                     operation: "initializing parameters",
                 });
             }
-
+            let mut params = mem::transmute::<Box<MaybeUninit<sys::ni_xcoder_params_t>>, Box<sys::ni_xcoder_params_t>>(params);
             let cfg_enc_params = &mut params.__bindgen_anon_1.cfg_enc_params;
             cfg_enc_params.planar = 1;
             cfg_enc_params.rc.enable_rate_control = if config.bitrate.is_some() { 1 } else { 0 };
@@ -220,11 +228,10 @@ impl<F> XcoderEncoder<F> {
 
             let mut frame_data_strides = [0; sys::NI_MAX_NUM_DATA_POINTERS as usize];
             let mut frame_data_heights = [0; sys::NI_MAX_NUM_DATA_POINTERS as usize];
-            sys::ni_get_hw_yuv420p_dim(
+            sys::ni_get_frame_dim(
                 config.width as _,
                 config.height as _,
-                if config.bit_depth > 8 { 2 } else { 1 }, // bit depth factor
-                0,                                        // is nv12
+                config.pixel_format.repr(),
                 frame_data_strides.as_mut_ptr(),
                 frame_data_heights.as_mut_ptr(),
             );
@@ -232,7 +239,7 @@ impl<F> XcoderEncoder<F> {
                 params.hwframes = 1;
             }
 
-            let params = Box::new(params);
+            let pixel_format = i32::try_from(config.pixel_format.repr()).expect("cast should never fail");
 
             let session = sys::ni_device_session_context_alloc_init();
             if session.is_null() {
@@ -248,11 +255,12 @@ impl<F> XcoderEncoder<F> {
                 (**session).sender_handle = hw.device_handle;
                 (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
             }
-            (**session).p_session_config = &*params as *const sys::ni_xcoder_params_t as _;
+            (**session).p_session_config = params.as_mut() as *mut sys::ni_xcoder_params_t as *mut c_void;
             (**session).codec_format = match config.codec {
                 XcoderEncoderCodec::H264 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
                 XcoderEncoderCodec::H265 { .. } => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
             };
+            (**session).pixel_format = pixel_format;
             (**session).src_bit_depth = config.bit_depth as _;
             (**session).src_endian = sys::NI_FRAME_LITTLE_ENDIAN as _;
             (**session).bit_depth_factor = if config.bit_depth > 8 { 2 } else { 1 };
@@ -272,14 +280,14 @@ impl<F> XcoderEncoder<F> {
 
             let frame_data_io = {
                 let mut frame: sys::ni_frame_t = mem::zeroed();
-                let code = sys::ni_encoder_frame_buffer_alloc(
+                let code = sys::ni_frame_buffer_alloc_pixfmt(
                     &mut frame as _,
+                    pixel_format,
                     config.width as _,
-                    frame_data_heights[0],
+                    config.height as _,
                     frame_data_strides.as_mut_ptr(),
                     if matches!(config.codec, XcoderEncoderCodec::H264 { .. }) { 1 } else { 0 },
                     sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _,
-                    false,
                 );
                 if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                     return Err(XcoderEncoderError::Unknown {
@@ -295,7 +303,7 @@ impl<F> XcoderEncoder<F> {
                 sys::ni_frame_buffer_free(&mut frame_data_io.data.frame as _);
             });
 
-            let encoded_frame = EncodedFrame::new()?;
+            let encoded_frame = EncodedFrame::new((**session).meta_size as usize)?;
 
             Ok(Self {
                 config,
@@ -309,6 +317,7 @@ impl<F> XcoderEncoder<F> {
                 frame_data_strides,
                 frame_data_heights,
                 frames_copied: 0,
+                _params: params,
                 input_frames: VecDeque::new(),
                 output_frames: VecDeque::new(),
                 hardware_frames: {
@@ -451,23 +460,22 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             }
 
             let mut dst_data = [frame.p_data[0], frame.p_data[1], frame.p_data[2]];
-
-            let mut src_data = [
-                f.samples(0).as_ptr() as *mut u8,
-                f.samples(1).as_ptr() as *mut u8,
-                f.samples(2).as_ptr() as *mut u8,
-            ];
-            let mut src_strides = [self.config.width as i32, self.config.width as i32 / 2, self.config.width as i32 / 2];
-            let mut src_heights = [self.config.height as i32, self.config.height as i32 / 2, self.config.height as i32 / 2];
-
+            let mut src_data: [*mut u8; 3] = array::from_fn(|i| if i < self.config.pixel_format.plane_count() {
+                f.samples(i).as_ptr() as *mut u8
+            } else {
+                null_mut()
+            });
+            let mut src_strides = self.config.pixel_format.strides(self.config.width as i32);
+            let mut src_heights = self.config.pixel_format.heights(self.config.height as i32);
+            let factor = if self.config.pixel_format.ten_bit() { 2 } else { 1 };
             unsafe {
-                sys::ni_copy_hw_yuv420p(
+                sys::ni_copy_frame_data(
                     dst_data.as_mut_ptr(),
                     src_data.as_mut_ptr(),
                     self.config.width as _,
                     self.config.height as _,
-                    1,
-                    0,
+                    factor,
+                    self.config.pixel_format.repr(),
                     0,
                     self.frame_data_strides.as_mut_ptr(),
                     self.frame_data_heights.as_mut_ptr(),
@@ -524,6 +532,8 @@ impl<F: RawVideoFrame<u8>> VideoEncoder for XcoderEncoder<F> {
 
 #[cfg(test)]
 mod test {
+    use crate::XcoderPixelFormat;
+
     use super::*;
 
     struct TestFrame {
@@ -548,6 +558,7 @@ mod test {
                 level_idc: Some(41),
             },
             bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
             hardware: None,
             multicore_joint_mode: false,
         })
@@ -571,6 +582,59 @@ mod test {
             }
             let frame = TestFrame {
                 samples: vec![y, u.clone(), v.clone()],
+            };
+            if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+                encoded_frames += 1;
+            }
+        }
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+            encoded_frames += 1;
+        }
+
+        assert_eq!(encoded_frames, 90);
+        assert!(encoded.len() > 5000);
+
+        // To inspect the output, uncomment these lines:
+        //use std::io::Write;
+        //std::fs::File::create("tmp.h264").unwrap().write_all(&encoded).unwrap();
+    }
+
+    #[test]
+    fn test_video_encoder_bgra() {
+        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+            width: 1920,
+            height: 1080,
+            fps: 29.97,
+            bitrate: None,
+            codec: XcoderEncoderCodec::H264 {
+                profile: Some(XcoderH264Profile::Main),
+                level_idc: Some(41),
+            },
+            bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Bgra,
+            hardware: None,
+            multicore_joint_mode: false,
+        })
+        .unwrap();
+
+        let mut encoded = vec![];
+        let mut encoded_frames = 0;
+
+        for i in 0..90 {
+            let mut bgra = Vec::<[u8; 4]>::with_capacity(1920 * 1080);
+            for line in 0..1080 {
+                let sample = if line / 12 == i {
+                    // add some motion by drawing a line that moves from top to bottom
+                    0
+                } else {
+                    ((line as f64 / 1080.0) * 255.0).round() as u8
+                };
+                bgra.resize(bgra.len() + 1920, [sample, sample, sample, 255]);
+            }
+            let frame = TestFrame {
+                samples: vec![bytemuck::cast_slice(&bgra).to_vec()],
             };
             if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);

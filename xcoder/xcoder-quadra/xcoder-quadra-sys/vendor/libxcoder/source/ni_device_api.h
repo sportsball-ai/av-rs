@@ -20,13 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ni_device_api.h
-*
-*  \brief  Main NETINT device API header file
-*           provides the ability to communicate with NI Quadra type hardware
-*           transcoder devices
-*
-*******************************************************************************/
+ *  \file   ni_device_api.h
+ *
+ *  \brief  Public definitions for operating NETINT video processing devices for
+ *          video processing
+ ******************************************************************************/
 
 #pragma once
 
@@ -37,6 +35,11 @@ extern "C"
 #endif
 
 #include "ni_defs.h"
+#include "ni_rsrc_api.h"
+
+// resource allocation strategy names
+#define NI_BEST_MODEL_LOAD_STR "bestmodelload"
+#define NI_BEST_REAL_LOAD_STR "bestload"
 
 #define NI_DATA_FORMAT_VIDEO_PACKET 0
 #define NI_DATA_FORMAT_YUV_FRAME    1
@@ -44,6 +47,8 @@ extern "C"
 #define NI_DATA_FORMAT_CB_FRAME     3
 #define NI_DATA_FORMAT_CR_FRAME     4
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_NOPTS_VALUE in ni_quadra_filter_api.h
 #define NI_NOPTS_VALUE ((int64_t)UINT64_C(0x8000000000000000))
 
 // the following are the default values from FFmpeg
@@ -53,11 +58,18 @@ extern "C"
 
 #define NI_MAX_REF_PIC 4
 
-#define NI_MAX_VUI_SIZE 32
+NI_DEPRECATE_MACRO(NI_MAX_VUI_SIZE)
+#define NI_MAX_VUI_SIZE NI_DEPRECATED_MACRO 32
 
 #define NI_MAX_TX_RETRIES 1000
 
 #define NI_MAX_ENCODER_QUERY_RETRIES 5000
+
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_SUPPORT_DRAWBOX_NUM, NI_MAX_SUPPORT_WATERMARK_NUM
+// in ni_quadra_filter_api.h
+#define NI_MAX_SUPPORT_DRAWBOX_NUM 5
+#define NI_MAX_SUPPORT_WATERMARK_NUM 6
 
 // Number of pixels for main stream resolutions
 #define NI_NUM_OF_PIXELS_360P          (640*360)
@@ -73,10 +85,23 @@ extern "C"
 
 #define NI_MIN_RESOLUTION_WIDTH 144
 #define NI_MIN_RESOLUTION_HEIGHT 144
+#define NI_ENC_MIN_RESOLUTION_WIDTH 144
+#define NI_ENC_MIN_RESOLUTION_HEIGHT 128
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_MIN_RESOLUTION_WIDTH_SCALER,
+// NI_MIN_RESOLUTION_HEIGHT_SCALER in ni_quadra_filter_api.h
+#define NI_MIN_RESOLUTION_WIDTH_SCALER 16
+#define NI_MIN_RESOLUTION_HEIGHT_SCALER 16
+
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_RESOLUTION_WIDTH,
+// NI_QUADRA_MAX_RESOLUTION_HEIGHT in ni_quadra_filter_api.h
 #define NI_MAX_RESOLUTION_WIDTH 8192
 #define NI_MAX_RESOLUTION_HEIGHT 8192
 #define NI_MAX_RESOLUTION_AREA 8192*8192
+#define NI_MAX_RESOLUTION_RGBA_WIDTH 7040
+#define NI_MAX_RESOLUTION_RGBA_HEIGHT 7040
 
 #define NI_MAX_RESOLUTION_LINESIZE (NI_MAX_RESOLUTION_WIDTH*2)
 
@@ -92,12 +117,15 @@ extern "C"
 #define NI_MAX_ASPECTRATIO 65535
 
 /*Values below used for VPU resolution range checking*/
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_WIDTH, NI_QUADRA_MIN_WIDTH,
+// NI_QUADRA_MAX_HEIGHT, NI_QUADRA_MIN_HEIGHT in ni_quadra_filter_api.h
 #define NI_MAX_WIDTH 8192
 #define NI_MIN_WIDTH 144
 #define NI_MAX_HEIGHT 8192
 #define NI_MIN_HEIGHT 128
 
-#define NI_2PASS_ENCODE_MIN_WIDTH 272
+#define NI_2PASS_ENCODE_MIN_WIDTH ((272 + 31) / 32 * 32)
 #define NI_2PASS_ENCODE_MIN_HEIGHT 256
 
 #define NI_MULTICORE_ENCODE_MIN_WIDTH 256
@@ -121,7 +149,7 @@ extern "C"
 
 #define NI_MAX_GOP_SIZE 8
 #define NI_MIN_GOP_SIZE 1
-#define NI_MAX_GOP_PRESET_IDX 9
+#define NI_MAX_GOP_PRESET_IDX 10
 #define NI_MIN_GOP_PRESET_IDX -1
 #define NI_MAX_DECODING_REFRESH_TYPE 2
 #define NI_MIN_DECODING_REFRESH_TYPE 0
@@ -148,12 +176,15 @@ extern "C"
 #define NI_MAX_NUM_SESSIONS 32
 #define NI_MIN_FRAME_SIZE 0
 #define NI_MAX_FRAME_SIZE (7680*4320*3)
+#define NI_AV1_INVALID_BUFFER_INDEX (-1)
 
 #define    RC_SUCCESS           true
 #define    RC_ERROR             false
 
 #define MAX_CHAR_IN_DEVICE_NAME 32
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change MAX_QUADRA_NUM_FRAMEPOOL_HWAVFRAME in ni_quadra_filter_api.h
 #define MAX_NUM_FRAMEPOOL_HWAVFRAME 128
 
 /* These constants are the values used by the GC620 2D engine */
@@ -162,12 +193,12 @@ extern "C"
 #define GC620_I420          0x103
 #define GC620_P010_MSB      0x108
 #define GC620_I010          0x10A
-#define GC620_YUYV 0x100
-#define GC620_UYVY 0x101
-#define GC620_NV16 0x106
+#define GC620_YUYV          0x100
+#define GC620_UYVY          0x101
+#define GC620_NV16          0x106
 #define GC620_RGBA8888      0
 #define GC620_BGRA8888      4
-#define GC620_BGRX8888 5
+#define GC620_BGRX8888      5
 #define GC620_ABGR8888      12
 #define GC620_ARGB8888      15
 #define GC620_RGB565        3
@@ -176,6 +207,33 @@ extern "C"
 #define GC620_RGB888_PLANAR 0x10C
 
 #define NI_ENABLE_AUD_FOR_GLOBAL_HEADER 2
+
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_FIFO_CAPACITY in ni_quadra_filter_api.h
+#define NI_MAX_FIFO_CAPACITY 120
+
+/* These are Namespace and QOS configuration related */
+#define NI_NAMESPACE_MAX_NUM 64
+
+/*!*
+* Operation modes for QOS
+*/
+typedef enum ni_qos_modes
+{
+    QOS_MODE_DISABLED = 0,
+    QOS_MODE_ENABLED_NO_SHARE = 1,
+    QOS_MODE_ENABLED_SHARE = 2,
+} ni_qos_modes_t;
+
+/*!*
+* Operation codes for ni_device_config_ns_qos
+*/
+typedef enum ni_qos_codes
+{
+    QOS_NAMESPACE_CODE = NI_NAMESPACE_MAX_NUM + 1,
+    QOS_OP_CONFIG_REC_OP_CODE,
+    QOS_OP_CONFIG_CODE,
+} ni_qos_codes_t;
 
 // XCODER STATE
 typedef enum
@@ -207,25 +265,52 @@ typedef enum
     NI_PIX_FMT_ARGB = 6,        /* 32-bit ARGB packed        */
     NI_PIX_FMT_ABGR = 7,        /* 32-bit ABGR packed        */
     NI_PIX_FMT_BGR0 = 8,        /* 32-bit RGB packed         */
-    NI_PIX_FMT_BGRP = 9,        /* 24bit RGB packed          */
+    NI_PIX_FMT_BGRP = 9,        /* 24-bit RGB packed         */
     NI_PIX_FMT_NV16 = 10,       /* 8-bit YUV422 semi-planar  */
     NI_PIX_FMT_YUYV422 = 11,    /* 8-bit YUV422              */
     NI_PIX_FMT_UYVY422 = 12,    /* 8-bit YUV422              */
-    NI_PIX_FMT_NONE = 13,       /* invalid format            */
+    NI_PIX_FMT_8_TILED4X4 = 13, /* 8 bit tiled4x4            */
+    NI_PIX_FMT_10_TILED4X4 = 14,/* 10 bit tiled4x4           */
+    NI_PIX_FMT_NONE = 15,       /* invalid format            */
 } ni_pix_fmt_t;
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_SCALER_FLAG_* in ni_quadra_filter_api.h
 #define NI_SCALER_FLAG_IO   0x0001  /* 0 = source frame, 1 = destination frame */
 #define NI_SCALER_FLAG_PC   0x0002  /* 0 = single allocation, 1 = create pool */
 #define NI_SCALER_FLAG_PA   0x0004  /* 0 = straight alpha, 1 = premultiplied alpha */
-#define NI_SCALER_FLAG_P2 0x0008 /* 0 = normal allocation, 1 = P2P allocation */
+#define NI_SCALER_FLAG_P2   0x0008  /* 0 = normal allocation, 1 = P2P allocation */
 #define NI_SCALER_FLAG_FCE  0x0010  /* 0 = no fill color, 1 = fill color enabled */
+#define NI_SCALER_FLAG_CS   0x0020  /* 0 = BT.709, 1 = BT.2020 */
+#define NI_SCALER_FLAG_LM   0x0040  /* 0 == no memory acquisition limit, 1 == limit memory acquisition */
+#define NI_SCALER_FLAG_CMP  0x0800  /* 0 = no compress, 1 = compress*/
 
+#define NI_AI_FLAG_IO 0x0001 /* 0 = source frame, 1 = destination frame */
+#define NI_AI_FLAG_PC 0x0002 /* 0 = single allocation, 1 = create pool */
+#define NI_AI_FLAG_LM 0x0004 /* 0 == no memory acquisition limit; 1 == limit memory acquisition */
+
+#define NI_UPLOADER_FLAG_LM 0x0010 /* 0 == no memory acquisition limit, 1 == limit memory acquisition */
+
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_KEEP_ALIVE_TIMEOUT,
+// NI_QUADRA_MIN_KEEP_ALIVE_TIMEOUT,NI_QUADRA_DEFAULT_KEEP_ALIVE_TIMEOUT in ni_quadra_filter_api.h
 #define NI_MAX_KEEP_ALIVE_TIMEOUT 100
 #define NI_MIN_KEEP_ALIVE_TIMEOUT 1
 #define NI_DEFAULT_KEEP_ALIVE_TIMEOUT 3
 
+#define NI_MIN_CUSTOM_SEI_PASSTHRU -1
+#define NI_MAX_CUSTOM_SEI_PASSTHRU 254
+#define NI_DISABLE_USR_DATA_SEI_PASSTHRU 0
+#define NI_ENABLE_USR_DATA_SEI_PASSTHRU 1
+#define NI_INVALID_SVCT_DECODING_LAYER -1
+#define NI_EC_POLICY_TOLERANT        1
+#define NI_EC_POLICY_IGNORE          2
+#define NI_EC_POLICY_SKIP            3
+#define NI_EC_POLICY_BEST_EFFORT     4
+#define NI_EC_POLICY_DEFAULT         NI_EC_POLICY_BEST_EFFORT
+
 // Picked from the xcoder firmware, commit e3b882e7
-#define NI_VPU_CEIL(_data, _align)     (((_data)+(_align-1))&~(_align-1))
+#define NI_VPU_CEIL(_data, _align)     (((_data)+((_align)-1))&~((_align)-1))
 #define NI_VPU_ALIGN4(_x)              (((_x)+0x03)&~0x03)
 #define NI_VPU_ALIGN8(_x)              (((_x)+0x07)&~0x07)
 #define NI_VPU_ALIGN16(_x)             (((_x)+0x0f)&~0x0f)
@@ -324,6 +409,8 @@ typedef enum
 // while #entries (same value as SEI buffer byte0) and entry 1's header are notified
 // separately via metadata.
 #define NI_MAX_SEI_DATA     (NI_ENC_MAX_SEI_BUF_SIZE) // sync with decoder_manager
+// Custom SEI only applies to software delivery
+#define NI_MAX_CUSTOM_SEI_DATA     (8192)
 
 #else // QUADRA_SEI_FMT
 #define NI_MAX_SEI_ENTRIES      32
@@ -361,7 +448,25 @@ typedef enum
 #define NI_CC_SEI_TRAILER_LEN  2
 #define NI_RBSP_TRAILING_BITS_LEN 1
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_NUM_AUX_DATA_PER_FRAME in ni_quadra_filter_api.h
 #define NI_MAX_NUM_AUX_DATA_PER_FRAME 16
+
+///Max number of lines supported for the bitrate reconfig file
+#define NI_BITRATE_RECONFIG_FILE_MAX_LINES 50000
+///Max number of entries per line supported for the bitrate reconfig file.
+///Note the first entry is the key(frame) value, the remaining are bitrate values
+#define NI_BITRATE_RECONFIG_FILE_MAX_ENTRIES_PER_LINE 10
+
+/*!*
+* \brief Frame pool type.
+*/
+typedef enum _ni_frame_pool_type
+{
+  NI_POOL_TYPE_NONE = -1, /* frame pool not inited or allocated */
+  NI_POOL_TYPE_NORMAL = 0,
+  NI_POOL_TYPE_P2P = 1,
+} ni_frame_pool_type_t;
 
 // frame auxiliary data; mostly used for SEI data associated with frame
 typedef enum _ni_frame_aux_data_type
@@ -400,13 +505,16 @@ typedef enum _ni_frame_aux_data_type
     // payload Bytes.
     NI_FRAME_AUX_DATA_CUSTOM_SEI,
 
-    // NETINT: custom bitrate adjustment, which takes int32_t type data as
+    // NETINT: bitrate adjustment, which takes int32_t type data as
     // payload that indicates the new target bitrate value.
     NI_FRAME_AUX_DATA_BITRATE,
 
+    // NETINT: custom INTRAPRD adjustment, which takes int32_t type data
+    // as payload that specifies the new intra period
+    NI_FRAME_AUX_DATA_INTRAPRD,
+
     // NETINT: custom VUI adjustment, which is a struct of
-    // ni_long_term_ref_t that specifies a frame's support of long term
-    // reference frame.
+    // ni_vui_hrd_t that specifies a frame's support of vui
     NI_FRAME_AUX_DATA_VUI,
 
     // NETINT: long term reference frame support, which is a struct of
@@ -424,9 +532,37 @@ typedef enum _ni_frame_aux_data_type
     // shall be invalidated.
     NI_FRAME_AUX_DATA_INVALID_REF_FRAME,
 
-    // NETINT: custom framerate adjustment, which takes int32_t type data as
+    // NETINT: framerate adjustment, which takes int32_t type data as
     // payload that indicates the new target framerate numerator and denominator values.
     NI_FRAME_AUX_DATA_FRAMERATE,
+
+    // NETINT: maxFrameSize adjustment, which takes int16_t type data as
+    // payload that indicates the new maxFrameSize value
+    NI_FRAME_AUX_DATA_MAX_FRAME_SIZE,    
+
+    // NETINT: max&min QP adjustment, which is a struct of
+    // payload that indicate the new max&min QP values
+    NI_FRAME_AUX_DATA_MAX_MIN_QP,
+
+    // NETINT: crf adjustment, which takes int32_t type data
+    // as payload that indicates the new crf value.
+    NI_FRAME_AUX_DATA_CRF,
+
+    // NETINT: crf adjustment, which takes float type data
+    // as payload that indicates the new crf value.
+    NI_FRAME_AUX_DATA_CRF_FLOAT,
+
+    // NETINT: VbvMaxRate adjust, which takes int32_t type
+    // as payload that indicates the VbvMaxRate value.
+    NI_FRAME_AUX_DATA_VBV_MAX_RATE,
+
+    // NETINT: VbvBufferSize adjust, which takes int32_t type
+    // as payload that indicates the vbvBufferSize value.
+    NI_FRAME_AUX_DATA_VBV_BUFFER_SIZE,
+
+    // NETINT: sliceArg adjust, which takes int16_t type
+    // as payload that indicates the sliceArg value.
+    NI_FRAME_AUX_DATA_SLICE_ARG,
 } ni_aux_data_type_t;
 
 // rational number (pair of numerator and denominator)
@@ -453,7 +589,7 @@ static inline double ni_q2d(ni_rational_t a)
 typedef struct _ni_aux_data
 {
     ni_aux_data_type_t type;
-    uint8_t *data;
+    void *data;
     int size;
 } ni_aux_data_t;
 
@@ -528,6 +664,15 @@ typedef struct _ni_framerate
     int32_t framerate_denom;
 } ni_framerate_t;
 
+typedef struct _ni_rc_min_max_qp
+{
+  int32_t minQpI;
+  int32_t maxQpI;
+  int32_t maxDeltaQp;
+  int32_t minQpPB;
+  int32_t maxQpPB;
+}ni_rc_min_max_qp;
+
 typedef struct _ni_dec_win
 {
     int16_t left;
@@ -535,6 +680,23 @@ typedef struct _ni_dec_win
     int16_t top;
     int16_t bottom;
 } ni_dec_win_t;
+
+typedef struct _ni_extended_dec_metadata
+{
+    uint32_t num_units_in_tick;
+    uint32_t time_scale;
+    uint8_t color_primaries;
+    uint8_t color_trc;
+    uint8_t color_space;
+    uint8_t video_full_range_flag;
+    // 48 bytes reserved for receiving more header info
+    uint64_t rsvd0;
+    uint64_t rsvd1;
+    uint64_t rsvd2;
+    uint64_t rsvd3;
+    uint64_t rsvd4;
+    uint64_t rsvd5;
+} ni_extended_dec_metadata_t;
 
 /*!*
 * \brief decoded payload format of H.265 VUI
@@ -719,7 +881,9 @@ typedef enum _ni_codec_format
 typedef enum _ni_pixel_planar_format
 {
   NI_PIXEL_PLANAR_FORMAT_SEMIPLANAR = 0,
-  NI_PIXEL_PLANAR_FORMAT_PLANAR = 1
+  NI_PIXEL_PLANAR_FORMAT_PLANAR = 1,
+  NI_PIXEL_PLANAR_FORMAT_TILED4X4 = 2,
+  NI_PIXEL_PLANAR_MAX
 } ni_pixel_planar_format;
 
 typedef enum _ni_dec_crop_mode
@@ -753,8 +917,9 @@ typedef enum _ni_param_change_flags
     //NI_SET_CHANGE_PARAM_INTRA_PARAM = (1 << 1), // not required by customer
     NI_SET_CHANGE_PARAM_RC_TARGET_RATE = (1 << 8),
     //NI_SET_CHANGE_PARAM_RC = (1 << 9), // not required by customer
-    //NI_SET_CHANGE_PARAM_RC_MIN_MAX_QP = (1 << 10), // not required by customer
+    NI_SET_CHANGE_PARAM_RC_MIN_MAX_QP = (1 << 10), // not required by customer
     NI_SET_CHANGE_PARAM_RC_BIT_RATIO_LAYER = (1 << 11),
+    NI_SET_CHANGE_PARAM_SLICE_ARG = (1<<12),
     NI_SET_CHANGE_PARAM_INDEPEND_SLICE = (1 << 16),
     NI_SET_CHANGE_PARAM_DEPEND_SLICE = (1 << 17),
     NI_SET_CHANGE_PARAM_RDO = (1 << 18),
@@ -767,7 +932,11 @@ typedef enum _ni_param_change_flags
     NI_SET_CHANGE_PARAM_INVALID_REF_FRAME = (1 << 25),
     NI_SET_CHANGE_PARAM_LTR_INTERVAL = (1 << 26),
     NI_SET_CHANGE_PARAM_RC_FRAMERATE = (1 << 27),
-
+    NI_SET_CHANGE_PARAM_MAX_FRAME_SIZE = (1 << 28),
+    NI_SET_CHANGE_PARAM_CRF       = (1<<29),
+    NI_SET_CHANGE_PARAM_VBV       = (1<<30),
+    NI_SET_CHANGE_PARAM_INTRA_PERIOD = ((unsigned int)1 << 31),
+    //bit [2,7] and [13,15] is still unused 
 } ni_param_change_flags_t;
 
 /**
@@ -819,7 +988,20 @@ typedef struct _ni_encoder_change_params_t
   uint8_t videoFullRange;                 /**< Input video signal sample range [0,1]. 0 = Y range in [16..235] Cb,Cr in [16..240]. 1 = Y,Cb,Cr in [0..255] */
 
   // RESERVED FOR FUTURE USE
-  uint8_t reserved[15];
+  uint8_t reserved[5];
+
+  // NI_SET_CHANGE_PARAM_SLICE_ARG
+  int16_t sliceArg;
+  //NI_SET_CHANGE_PARAM_VBV also reconfig for ni_vbvBufferSize
+  int32_t vbvMaxRate;
+  
+  // NI_SET_CHANGE_PARAM_CRF
+  // crf reconfig (range in [0.00 .. 51.00])
+  uint8_t crfDecimal;              // crf decimal fraction * 100 (range in [0 .. 99])
+  uint8_t crf;                     // crf integer (range in [0 .. 51])
+  
+  // NI_SET_CHANGE_PARAM_MAX_FRAME_SIZE
+  uint16_t maxFrameSize; // maxFrameSize reconfig (in unit of 2000 bytes)
 
   // NI_SET_CHANGE_PARAM_INVALID_REF_FRAME
   int32_t invalidFrameNum;
@@ -888,7 +1070,7 @@ typedef struct _ni_custom_sei
   uint8_t type;
   ni_custom_sei_location_t location;
   uint32_t size;
-  uint8_t data[NI_MAX_SEI_DATA];
+  uint8_t data[NI_MAX_CUSTOM_SEI_DATA];
 } ni_custom_sei_t;
 
 typedef struct _ni_custom_sei_set
@@ -965,13 +1147,56 @@ typedef struct _ni_load_query
 {
   uint32_t current_load;
   uint32_t fw_model_load;
+  uint32_t fw_load;
   uint32_t total_contexts;
-  uint32_t fw_video_mem_usage;
+  union{
+	  uint32_t fw_video_mem_usage;
+	  uint32_t pcie_throughput; //PCIe throughput - ni_query_nvme_status
+  };
+  union {
+      uint32_t fw_video_shared_mem_usage;
+      uint32_t pcie_load; //PCIe load - ni_query_nvme_status
+  };
   uint32_t fw_share_mem_usage;
   uint32_t fw_p2p_mem_usage;
-  uint32_t active_hwuploaders;
+  union {
+      uint32_t active_hwuploaders;
+      uint32_t tp_fw_load; //TP FW load - ni_query_nvme_status
+  };
   ni_context_query_t context_status[NI_MAX_CONTEXTS_PER_HW_INSTANCE];
 } ni_load_query_t;
+
+typedef struct _ni_overall_load_query
+{
+  uint32_t overall_current_load;
+  uint32_t overall_fw_model_load;
+  uint32_t overall_instance_count;
+  uint32_t admin_queried;
+} ni_overall_load_query_t;
+
+typedef struct _ni_instance_mgr_detail_status
+{
+    uint8_t ui8AvgCost;
+    uint8_t ui8MaxCost;
+    uint16_t ui16FrameRate;
+    uint32_t ui32BitRate;
+    uint32_t ui32AvgBitRate;
+    uint32_t ui32NumIDR;
+    uint32_t ui32NumInFrame;
+    uint32_t ui32NumOutFrame;
+} ni_instance_mgr_detail_status_t;
+
+typedef struct _ni_instance_mgr_detail_status_append{
+    uint32_t ui32Width;
+    uint32_t ui32Height;
+    uint32_t ui32UserIDR;
+    uint32_t reserved[8];
+}ni_instance_mgr_detail_status_append_t;
+
+typedef struct _ni_instance_mgr_detail_status_v1{
+    ni_instance_mgr_detail_status_t sInstDetailStatus[NI_MAX_CONTEXTS_PER_HW_INSTANCE];
+    ni_instance_mgr_detail_status_append_t sInstDetailStatusAppend[NI_MAX_CONTEXTS_PER_HW_INSTANCE];
+}ni_instance_mgr_detail_status_v1_t;
 
 typedef struct _ni_thread_arg_struct_t
 {
@@ -983,7 +1208,9 @@ typedef struct _ni_thread_arg_struct_t
   ni_device_handle_t device_handle;       // block device handler
   ni_event_handle_t thread_event_handle;  // only for Windows asynchronous read and write
   void *p_buffer;                         // only be used when regular-io.
+  ni_pthread_mutex_t *p_mutex;            // referring to mutex of session context.
   uint32_t keep_alive_timeout;            // keep alive timeout setting
+  volatile uint64_t *plast_access_time;   // shared variable for main thread to verify timeout. Keep alive thread will update last_access_time
 } ni_thread_arg_struct_t;
 
 typedef struct _ni_buf_t
@@ -1040,13 +1267,83 @@ typedef struct _ni_timestamp_table_t
     ni_queue_t list;
 } ni_timestamp_table_t;
 
+typedef struct _ni_network_layer_params_t
+{
+    uint32_t num_of_dims; /* The number of dimensions specified in *sizes */
+    uint32_t sizes[6];    /* The pointer to an array of dimension */
+    int32_t
+        data_format; /* Data format for the tensor, see ni_ai_buffer_format_e */
+    int32_t
+        quant_format; /* Quantized format see ni_ai_buffer_quantize_format_e */
+    union
+    {
+        struct
+        {
+            int32_t
+                fixed_point_pos; /* Specifies the fixed point position when the input element type is int16, if 0 calculations are performed in integer math */
+        } dfp;
+
+        struct
+        {
+            float scale;       /* Scale value for the quantized value */
+            int32_t zeroPoint; /* A 32 bit integer, in range [0, 255] */
+        } affine;
+    } quant_data; /* The union of quantization information */
+    /* The type of this buffer memory. */
+    uint32_t memory_type;
+} ni_network_layer_params_t;
+
+typedef struct _ni_network_layer_info
+{
+    ni_network_layer_params_t *in_param;
+    ni_network_layer_params_t *out_param;
+} ni_network_layer_info_t;
+
+typedef struct _ni_network_layer_offset
+{
+    int32_t offset;
+} ni_network_layer_offset_t;
+
+typedef struct _ni_network_data
+{
+    uint32_t input_num;
+    uint32_t output_num;
+    ni_network_layer_info_t linfo;
+    ni_network_layer_offset_t
+        *inset; /* point to each input layer start offset from p_frame */
+    ni_network_layer_offset_t
+        *outset; /* point to each output layer start offset from p_packet */
+} ni_network_data_t;
+
+// if change this structure, you need to change ni_quadra_filter_api.h ni_quadra_frameclone_desc_t
+typedef struct _ni_frameclone_desc
+{
+    uint16_t ui16SrcIdx;
+    uint16_t ui16DstIdx;
+    uint32_t ui32Offset;
+    uint32_t ui32Size;
+    uint32_t reserved;
+} ni_frameclone_desc_t;
+
+typedef struct _ni_network_perf_metrics
+{
+    uint32_t total_cycles;
+    uint32_t total_idle_cycles;
+    uint64_t read_bw;
+    uint64_t write_bw;
+    uint64_t ocb_read_bw;
+    uint64_t ocb_write_bw;
+    uint64_t ddr_read_bw;
+    uint64_t ddr_write_bw;
+} ni_network_perf_metrics_t;
+
 typedef struct _ni_session_context
 {
     /*! MEASURE_LATENCY queue */
     /* frame_time_q is pointer to ni_lat_meas_q_t but reserved as void pointer
        here as ni_lat_meas_q_t is part of private API */
     void *frame_time_q;
-    uint64_t prev_read_frame_time;
+    NI_DEPRECATED uint64_t prev_read_frame_time;
 
     /*! close-caption/HDR10+ header and trailer template, used for encoder */
     uint8_t itu_t_t35_cc_sei_hdr_hevc[NI_CC_SEI_HDR_HEVC_LEN];
@@ -1085,6 +1382,9 @@ typedef struct _ni_session_context
     int pkt_index;
     uint64_t pkt_offsets_index[NI_FIFO_SZ];
     uint64_t pkt_offsets_index_min[NI_FIFO_SZ];
+    uint64_t pkt_pos[NI_FIFO_SZ];
+    uint64_t last_pkt_pos;
+    uint64_t last_frame_offset;
     ni_custom_sei_set_t *pkt_custom_sei_set[NI_FIFO_SZ];
 
     /*! if session is on a decoder handling incoming pkt 512-aligned */
@@ -1131,6 +1431,9 @@ typedef struct _ni_session_context
     /*! Context Query */
     ni_load_query_t load_query;
 
+    /* Overall resource use among namespaces */
+    ni_overall_load_query_t overall_load_query;
+
     /*! Leftover Buffer */
     uint8_t *p_leftover;
     int prev_size;
@@ -1159,7 +1462,7 @@ typedef struct _ni_session_context
     int keyframe_factor;
     uint64_t frame_num;
     uint64_t pkt_num;
-    int rc_error_count;
+    int rc_error_count; // Unused
 
     uint32_t hwd_Frame_Idx;
     uint32_t hwd_src_cpu;
@@ -1191,7 +1494,7 @@ typedef struct _ni_session_context
     int ori_width, ori_height, ori_bit_depth_factor, ori_pix_fmt;
 
     // a muxter for Xcoder API, to keep the thread-safety.
-    ni_pthread_mutex_t *xcoder_mutex;
+    ni_pthread_mutex_t mutex;
 
     // Xcoder running state
     uint32_t xcoder_state;
@@ -1209,11 +1512,19 @@ typedef struct _ni_session_context
     ni_region_of_interest_t *av_rois;
     int nb_rois;
     ni_enc_quad_roi_custom_map *roi_map;   // actual AVC/HEVC QP map
+    
+    // only for H.264 test roi buffer for up to 8k resolution H.264 - 32 x 32 sub CTUs
+    ni_enc_avc_roi_custom_map_t *avc_roi_map;
+    // only for H.265 custom map buffer for up to 8k resolution  - 64x64 CTU Regions
+    uint8_t *hevc_sub_ctu_roi_buf;
+    // only for hevc actual ROI map is stored in individual session context !
+    ni_enc_hevc_roi_custom_map_t *hevc_roi_map;
 
     // encoder reconfig parameters
     ni_encoder_change_params_t *enc_change_params;
     // decoder lowDelay mode for All I packets or IPPP packets
     int decoder_low_delay;
+    int enable_low_delay_check;
 
     // wrapper API request data, to be sent out once with the next input frame
     // to encoder
@@ -1258,6 +1569,7 @@ typedef struct _ni_session_context
 
     uint32_t meta_size;
     int64_t last_dts_interval;
+    int64_t last_pts_interval;
     int pic_reorder_delay;
 
     // flags_array to save packet flags
@@ -1265,6 +1577,65 @@ typedef struct _ni_session_context
 
     // for decoder: store currently returned decoded frame's pkt offset
     uint64_t frame_pkt_offset;
+    uint32_t force_idr_intra_offset;
+
+    ni_session_statistic_t session_statistic;
+
+    uint32_t count_frame_num_in_sec; //used in the vfr mode, indicate the frame count in seconds
+    uint32_t passed_time_in_timebase_unit; //used in the vfr mode, indicate how long it has passed
+
+    int32_t max_frame_size;   // maxFrameSize (in bytes) to reconfig, 0 if inactive
+
+    // block device name requested by caller to open: when specified this block
+    // device has priority over hw_id which is device specified by index.
+    char blk_dev_name[NI_MAX_DEVICE_NAME_LEN];
+
+    // decoder low delay send/recv sync; async_mode = 0 by default, i.e.
+    // codec send-to/recv-from FW is in synchrounous mode by default.
+    int async_mode;
+    int low_delay_sync_flag;
+    ni_pthread_mutex_t low_delay_sync_mutex;
+    ni_pthread_cond_t low_delay_sync_cond;
+    
+    // muxtex default from source session
+    // required pointer to external if used by hwdl
+    ni_pthread_mutex_t* pext_mutex;
+    bool mutex_initialized;
+
+    // required parameters for slow sequence change
+    int32_t last_bitrate;
+    ni_framerate_t last_framerate;
+
+    // AI embedded network parameters data
+    ni_network_data_t *network_data;
+
+    int ori_luma_linesize;
+    int ori_chroma_linesize;
+    //shared variable for main thread to read and keepalive thread to update
+    volatile uint64_t last_access_time;
+
+    int reconfig_crf;   // crf value to reconfig (range in [0..51]), -1 if inactive
+    int reconfig_crf_decimal;   // crf decimal fration value to reconfig
+                                // (range in [0..99]), -1 if inactive
+    int reconfig_vbv_buffer_size; // vbv buffer size value to reconfig
+    int reconfig_vbv_max_rate; // vbv max rate value to reconfig
+
+    int last_gop_size;
+    int initial_frame_delay;
+    int current_frame_delay;
+    int max_frame_delay;
+    uint64_t av1_pkt_num;
+
+    ni_frame_pool_type_t pool_type;
+    int reconfigCount;
+    bool force_low_delay;
+    uint32_t force_low_delay_cnt;
+    int max_retry_fail_count[2];
+    uint32_t pkt_delay_cnt;
+    char E2EID[128];
+    int reconfig_intra_period;
+    int pixel_format_changed; // only for decoder now
+    int16_t reconfig_slice_arg;
 } ni_session_context_t;
 
 typedef struct _ni_split_context_t
@@ -1284,24 +1655,39 @@ typedef enum _ni_reconfig
 {
     XCODER_TEST_RECONF_OFF = 0,
     XCODER_TEST_RECONF_BR = 1,
-    //XCODER_TEST_RECONF_INTRAPRD = 2, // not required by customer
+    XCODER_TEST_RECONF_INTRAPRD = 2, 
     XCODER_TEST_RECONF_VUI_HRD = 3,
     XCODER_TEST_RECONF_LONG_TERM_REF = 4,
 //XCODER_TEST_RECONF_RC = 5,   // // not required by customer
-//XCODER_TEST_RECONF_RC_MIN_MAX_QP = 6, // // not required by customer
+    XCODER_TEST_RECONF_RC_MIN_MAX_QP = 6, // reconfig min&max QP
 #ifdef QUADRA
     XCODER_TEST_RECONF_LTR_INTERVAL = 7,
     XCODER_TEST_INVALID_REF_FRAME = 8,
     XCODER_TEST_RECONF_FRAMERATE = 9,
+    XCODER_TEST_RECONF_MAX_FRAME_SIZE = 10,
+    XCODER_TEST_RECONF_RC_MIN_MAX_QP_REDUNDANT  = 11,   // reconfig min&max QP through libxcoder API (redundant demo mode index)
+    XCODER_TEST_RECONF_CRF = 14,
+    XCODER_TEST_RECONF_CRF_FLOAT = 15,
+    XCODER_TEST_RECONF_VBV = 16,
+    XCODER_TEST_RECONF_MAX_FRAME_SIZE_RATIO = 17,
+    XCODER_TEST_RECONF_SLICE_ARG = 18,
     XCODER_TEST_FORCE_IDR_FRAME = 100,   // force IDR through libxcoder API
     XCODER_TEST_RECONF_BR_API = 101,     // reconfig BR through libxcoder API
+    XCODER_TEST_RECONF_INTRAPRD_API = 102,   // reconfig intraperiod through libxcoder API
     XCODER_TEST_RECONF_VUI_HRD_API = 103,    // reconfig VUI through libxcoder API
     XCODER_TEST_RECONF_LTR_API = 104,    // reconfig LTR through libxcoder API
+    XCODER_TEST_RECONF_RC_MIN_MAX_QP_API_REDUNDANT  = 106,   // reconfig min&max QP through libxcoder API (redundant demo mode index)
     XCODER_TEST_RECONF_LTR_INTERVAL_API = 107,   // reconf LTR interval thru API
     XCODER_TEST_INVALID_REF_FRAME_API = 108,   // invalidate ref frame thru API
-    XCODER_TEST_RECONF_FRAMERATE_API =
-        109,   // reconfig framerate through libxcoder API
-    XCODER_TEST_RECONF_END = 110,
+    XCODER_TEST_RECONF_FRAMERATE_API = 109,   // reconfig framerate through libxcoder API
+    XCODER_TEST_RECONF_MAX_FRAME_SIZE_API = 110,   // reconfig maxFrameSize through libxcoder API
+    XCODER_TEST_RECONF_RC_MIN_MAX_QP_API  = 111,   // reconfig min&max QP through libxcoder API 
+    XCODER_TEST_CRF_API = 114,   // reconfig crf through libxcoder API
+    XCODER_TEST_CRF_FLOAT_API = 115,   // reconfig crf float type through libxcoder API
+    XCODER_TEST_RECONF_VBV_API = 116,   // reconfig vbv buffer size and vbv max rate through libxcoder API
+    XCODER_TEST_RECONF_MAX_FRAME_SIZE_RATIO_API = 117,   // reconfig maxFrameSize ratio through libxcoder API
+    XCODER_TEST_RECONF_SLICE_ARG_API = 118,   // reconfig sliceArg through libxcoder API
+    XCODER_TEST_RECONF_END = 119,
 #endif
 } ni_reconfig_t;
 
@@ -1348,57 +1734,15 @@ typedef enum _ni_ai_buffer_quantize_format_e
     NI_AI_BUFFER_QUANTIZE_MAX,
 } ni_ai_buffer_quantize_format_e;
 
-#define NI_MAX_NETWORK_INPUT_NUM 4
-#define NI_MAX_NETWORK_OUTPUT_NUM 4
-
-typedef struct _ni_network_layer_params_t
+typedef enum _ni_ddr_priority_mode_t
 {
-    uint32_t num_of_dims; /* The number of dimensions specified in *sizes */
-    uint32_t sizes[6];    /* The pointer to an array of dimension */
-    int32_t
-        data_format; /* Data format for the tensor, see ni_ai_buffer_format_e */
-    int32_t
-        quant_format; /* Quantized format see ni_ai_buffer_quantize_format_e */
-    union
-    {
-        struct
-        {
-            int32_t
-                fixed_point_pos; /* Specifies the fixed point position when the input element type is int16, if 0 calculations are performed in integer math */
-        } dfp;
-
-        struct
-        {
-            float scale;       /* Scale value for the quantized value */
-            int32_t zeroPoint; /* A 32 bit integer, in range [0, 255] */
-        } affine;
-    } quant_data; /* The union of quantization information */
-    /* The type of this buffer memory. */
-    uint32_t memory_type;
-} ni_network_layer_params_t;
-
-typedef struct _ni_network_layer_info
-{
-    ni_network_layer_params_t in_param[NI_MAX_NETWORK_INPUT_NUM];
-    ni_network_layer_params_t out_param[NI_MAX_NETWORK_OUTPUT_NUM];
-} ni_network_layer_info_t;
-
-typedef struct _ni_network_data
-{
-    uint32_t input_num;
-    uint32_t output_num;
-    ni_network_layer_info_t linfo;
-    struct
-    {
-        int32_t
-            offset; /* point to each input layer start offset from p_frame */
-    } inset[NI_MAX_NETWORK_INPUT_NUM];
-    struct
-    {
-        int32_t
-            offset; /* point to each output layer start offset from p_packet */
-    } outset[NI_MAX_NETWORK_OUTPUT_NUM];
-} ni_network_data_t;
+    NI_DDR_PRIORITY_NONE = -1, // Do not change DDR priorities
+    NI_DDR_PRIORITY_RESET,     // Reset DDR priorities to default
+    NI_DDR_PRIORITY_DECENC,    // DDR prioritize decoder and encoder
+    NI_DDR_PRIORITY_FILT,      // DDR prioritize filter
+    NI_DDR_PRIORITY_AI,        // DDR prioritize AI
+    NI_DDR_PRIORITY_MAX
+} ni_ddr_priority_mode_t;
 
 #ifdef QUADRA
 #define NI_ENC_GOP_PARAMS_G0_POC_OFFSET     "g0pocOffset"
@@ -1646,6 +1990,7 @@ typedef struct _ni_encoder_cfg_params
 #define NI_ENC_PARAM_LOG "log"
 #define NI_ENC_PARAM_GOP_PRESET_IDX "gopPresetIdx"
 #define NI_ENC_PARAM_LOW_DELAY "lowDelay"
+#define NI_ENC_PARAM_MIN_FRAMES_DELAY "minFramesDelay"
 #define NI_ENC_PARAM_USE_RECOMMENDED_ENC_PARAMS "useRecommendEncParam"
 #define NI_ENC_PARAM_USE_LOW_DELAY_POC_TYPE "useLowDelayPocType"
 #define NI_ENC_PARAM_CU_SIZE_MODE "cuSizeMode"
@@ -1673,17 +2018,17 @@ typedef struct _ni_encoder_cfg_params
 #define NI_ENC_PARAM_FRAME_RATE_DENOM "frameRateDenom"
 #define NI_ENC_PARAM_INTRA_QP "intraQP"
 #define NI_ENC_PARAM_DECODING_REFRESH_TYPE "decodingRefreshType"
+#define NI_ENC_PARAM_INTRA_REFRESH_RESET "intraRefreshResetOnForceIDR"
 // Rev. B: H.264 only parameters.
 #define NI_ENC_PARAM_ENABLE_8X8_TRANSFORM "transform8x8Enable"
-#define NI_ENC_PARAM_AVC_SLICE_MODE "avcSliceMode"
-#define NI_ENC_PARAM_AVC_SLICE_ARG "avcSliceArg"
 #define NI_ENC_PARAM_ENTROPY_CODING_MODE "entropyCodingMode"
 // Rev. B: shared between HEVC and H.264
+#define NI_ENC_PARAM_SLICE_MODE "sliceMode"
+#define NI_ENC_PARAM_SLICE_ARG "sliceArg"
 #define NI_ENC_PARAM_INTRA_MB_REFRESH_MODE "intraMbRefreshMode"
 #define NI_ENC_PARAM_INTRA_MB_REFRESH_ARG "intraMbRefreshArg"
 #define NI_ENC_PARAM_INTRA_REFRESH_MODE "intraRefreshMode"
 #define NI_ENC_PARAM_INTRA_REFRESH_ARG "intraRefreshArg"
-// TBD Rev. B: could be shared for HEVC and H.264
 #define NI_ENC_PARAM_ENABLE_MB_LEVEL_RC "mbLevelRcEnable"
 #define NI_ENC_PARAM_PREFERRED_TRANSFER_CHARACTERISTICS "prefTRC"
 
@@ -1693,10 +2038,13 @@ typedef struct _ni_encoder_cfg_params
 #define NI_ENC_PARAM_INTRA_REFRESH_MIN_PERIOD "intraRefreshMinPeriod"
 
 //QUADRA
-#define NI_ENC_PARAM_CONSTANT_RATE_FACTOR "crf"
+NI_DEPRECATE_MACRO(NI_ENC_PARAM_CONSTANT_RATE_FACTOR)
+#define NI_ENC_PARAM_CONSTANT_RATE_FACTOR NI_DEPRECATED_MACRO "crf"
+#define NI_ENC_PARAM_CONSTANT_RATE_FACTOR_FLOAT "crfFloat"
 #define NI_ENC_PARAM_RDO_LEVEL "rdoLevel"
 #define NI_ENC_PARAM_RDO_QUANT "EnableRdoQuant"
 #define NI_ENC_PARAM_MAX_CLL "maxCLL"
+#define NI_ENC_PARAM_MASTER_DISPLAY "masterDisplay"
 #define NI_ENC_PARAM_LOOK_AHEAD_DEPTH "lookAheadDepth"
 #define NI_ENC_PARAM_ENABLE_AUD "enableAUD"
 #define NI_ENC_PARAM_CTB_RC_MODE "ctbRcMode"
@@ -1706,9 +2054,13 @@ typedef struct _ni_encoder_cfg_params
 #define NI_ENC_PARAM_HRD_ENABLE "hrdEnable"
 #define NI_ENC_PARAM_DOLBY_VISION_PROFILE "dolbyVisionProfile"
 #define NI_ENC_PARAM_VBV_BUFFER_SIZE "vbvBufferSize"
+#define NI_ENC_PARAM_VBV_MAXRAE "vbvMaxRate"
 #define NI_ENC_PARAM_ENABLE_FILLER "fillerEnable"
 #define NI_ENC_PARAM_ENABLE_PIC_SKIP "picSkip"
-#define NI_ENC_PARAM_MAX_FRAME_SIZE_LOW_DELAY "maxFrameSize"
+NI_DEPRECATE_MACRO(NI_ENC_PARAM_MAX_FRAME_SIZE_LOW_DELAY)
+#define NI_ENC_PARAM_MAX_FRAME_SIZE_LOW_DELAY NI_DEPRECATED_MACRO "maxFrameSize"
+#define NI_ENC_PARAM_MAX_FRAME_SIZE_BITS_LOW_DELAY "maxFrameSize-Bits"
+#define NI_ENC_PARAM_MAX_FRAME_SIZE_BYTES_LOW_DELAY "maxFrameSize-Bytes"
 #define NI_ENC_PARAM_LTR_REF_INTERVAL "ltrRefInterval"
 #define NI_ENC_PARAM_LTR_REF_QPOFFSET "ltrRefQpOffset"
 #define NI_ENC_PARAM_LTR_FIRST_GAP "ltrFirstGap"
@@ -1722,10 +2074,16 @@ typedef struct _ni_encoder_cfg_params
 #define NI_ENC_INLOOP_DS_RATIO "inLoopDSRatio"
 #define NI_ENC_BLOCK_RC_SIZE "blockRCSize"
 #define NI_ENC_RC_QP_DELTA_RANGE "rcQpDeltaRange"
+#define NI_ENC_CTB_ROW_QP_STEP "ctbRowQpStep"
+#define NI_ENC_NEW_RC_ENABLE "newRcEnable"
 #define NI_ENC_PARAM_INTRA_QP_DELTA "intraQpDelta"
 #define NI_ENC_PARAM_LONG_TERM_REFERENCE_ENABLE "longTermReferenceEnable"
 #define NI_ENC_PARAM_LONG_TERM_REFERENCE_COUNT "longTermReferenceCount"
 #define NI_ENC_PARAM_LONG_TERM_REFERENCE_INTERVAL "longTermReferenceInterval"
+#define NI_ENC_PARAM_SKIP_FRAME_ENABLE "skipFrameEnable"
+#define NI_ENC_PARAM_MAX_CONSUTIVE_SKIP_FRAME_NUMBER "maxConsecutiveSkipFrameNum"
+#define NI_ENC_PARAM_SKIP_FRAME_INTERVAL "skipFrameInterVal"
+#define NI_ENC_PARAM_IFRAME_SIZE_RATIO "iFrameSizeRatio"
 // stream color info
 #define NI_ENC_PARAM_COLOR_PRIMARY "colorPri"
 #define NI_ENC_PARAM_COLOR_TRANSFER_CHARACTERISTIC "colorTrc"
@@ -1738,6 +2096,41 @@ typedef struct _ni_encoder_cfg_params
 // VFR related
 #define NI_ENC_PARAM_ENABLE_VFR "enableVFR"
 #define NI_ENC_ENABLE_SSIM "enableSSIM"
+#define NI_ENC_PARAM_AV1_ERROR_RESILIENT_MODE "av1ErrorResilientMode"
+// set memory allocation parameters, M_MMAP_THRESHOLD and M_TRIM_THRESHOLD
+#define NI_ENC_PARAM_STATIC_MMAP_THRESHOLD "staticMmapThreshold"
+#define NI_ENC_PARAM_TEMPORAL_LAYERS_ENABLE "temporalLayersEnable"
+#define NI_ENC_PARAM_ENABLE_AI_ENHANCE "enableAIEnhance"
+#define NI_ENC_PARAM_ENABLE_2PASS_GOP "enable2PassGop"
+#define NI_ENC_PARAM_ZEROCOPY_MODE "zeroCopyMode"
+#define NI_ENC_PARAM_AI_ENHANCE_LEVEL "AIEnhanceLevel"
+#define NI_ENC_PARAM_CROP_WIDTH "cropWidth"
+#define NI_ENC_PARAM_CROP_HEIGHT "cropHeight"
+#define NI_ENC_PARAM_HORIZONTAL_OFFSET "horOffset"
+#define NI_ENC_PARAM_VERTICAL_OFFSET "verOffset"
+#define NI_ENC_PARAM_CONSTANT_RATE_FACTOR_MAX "crfMax"
+#define NI_ENC_PARAM_QCOMP "qcomp"
+#define NI_ENC_PARAM_NO_MBTREE "noMbtree"
+#define NI_ENC_PARAM_NO_HW_MULTIPASS_SUPPORT "noHWMultiPassSupport"
+#define NI_ENC_PARAM_CU_TREE_FACTOR "cuTreeFactor"
+#define NI_ENC_PARAM_IP_RATIO "ipRatio"
+#define NI_ENC_PARAM_ENABLE_IP_RATIO "enableipRatio"
+#define NI_ENC_PARAM_PB_RATIO "pbRatio"
+#define NI_ENC_PARAM_CPLX_DECAY "cplxDecay"
+#define NI_ENC_PARAM_PPS_INIT_QP "ppsInitQp"
+#define NI_ENC_PARAM_DDR_PRIORITY_MODE "ddrPriorityMode"
+#define NI_ENC_PARAM_BITRATE_MODE "bitrateMode"
+#define NI_ENC_PARAM_PASS1_QP "pass1Qp"
+#define NI_ENC_PARAM_HVS_BASE_MB_COMPLEXITY "hvsBaseMbComplexity"
+#define NI_ENC_PARAM_STATISTIC_OUTPUT_LEVEL "statisticOutputLevel"
+#define NI_ENC_PARAM_ENABLE_ALL_SEI_PASSTHRU "enableAllSeiPassthru"
+#define NI_ENC_PARAM_CRF_MAX_IFRAME_ENABLE "crfMaxIframeEnable"
+#define NI_ENC_PARAM_VBV_MINRATE "vbvMinRate"
+#define NI_ENC_PARAM_DISABLE_ADAPTIVE_BUFFERS "disableAdaptiveBuffers"
+#define NI_ENC_PARAM_DISABLE_BFRAME_RDOQ "disableBframeRDOQ"
+#define NI_ENC_PARAM_FORCE_BFRAME_QPFACTOR "forceBframeQpfactor"
+#define NI_ENC_PARAM_TUNE_BFRAME_VISUAL "tuneBframeVisual"
+#define NI_ENC_PARAM_ENABLE_ACQUIRE_LIMIT "enableAcqLimit"
 
     //----- Start supported by all codecs -----
     int frame_rate;
@@ -1745,6 +2138,7 @@ typedef struct _ni_encoder_cfg_params
     int aspectRatioHeight;
     int planar;
     int maxFrameSize;
+    int maxFrameSizeRatio;
     //----- End supported by all codecs -----
 
     //----- Start supported by AV1, AVC, HEVC only -----
@@ -1773,6 +2167,17 @@ typedef struct _ni_encoder_cfg_params
     int HDR10MaxLight;
     int HDR10AveLight;
     int HDR10CLLEnable;
+    int HDR10Enable;
+    int HDR10dx0;
+    int HDR10dy0;
+    int HDR10dx1;
+    int HDR10dy1;
+    int HDR10dx2;
+    int HDR10dy2;
+    int HDR10wx;
+    int HDR10wy;
+    int HDR10maxluma;
+    int HDR10minluma;
     int gdrDuration;
     int ltrRefInterval;
     int ltrRefQpOffset;
@@ -1837,8 +2242,8 @@ typedef struct _ni_encoder_cfg_params
     // Rev. B: H.264 only parameters, in ni_t408_config_t
     // - for H.264 on T408:
     int enable_transform_8x8;
-    int avc_slice_mode;
-    int avc_slice_arg;
+    int slice_mode;
+    int slice_arg;
 
     int decoding_refresh_type;
     //----- end DEPRECATED or for T408 -----
@@ -1858,6 +2263,7 @@ typedef struct _ni_encoder_cfg_params
         int hvs_qp_scale; /*!*< A QP scaling factor for CU QP adjustment when hvcQpenable = 1 */
         int enable_filler;
         int vbv_buffer_size;
+        int vbv_max_rate;
 
         //deprecated
         int enable_hvs_qp_scale; /*!*< It enable QP scaling factor for CU QP adjustment when enable_hvs_qp = 1 */
@@ -1867,6 +2273,48 @@ typedef struct _ni_encoder_cfg_params
     } rc;
     int keep_alive_timeout; /* keep alive timeout setting */
     int enable_ssim;
+    int av1_error_resilient_mode;
+    int intra_reset_refresh;
+    int ctbRowQpStep;
+    int newRcEnable;
+    int temporal_layers_enable;
+    int enable_ai_enhance;
+    int ai_enhance_level;
+    int crop_width;
+    int crop_height;
+    int hor_offset;
+    int ver_offset;
+    int crfMax;
+    float qcomp;
+    int noMbtree;
+    int noHWMultiPassSupport;
+    int cuTreeFactor;
+    float ipRatio;
+    float pbRatio;
+    float cplxDecay;  
+    int pps_init_qp;
+    int bitrateMode;
+    int pass1_qp;
+    float crfFloat;
+    int hvsBaseMbComplexity;
+    // 0: no extra output encoder information
+    // 1: Frame Level output encoder information
+    // 2: Cu Level Output encoder information
+    // 3: Frame&Cu Level encoder information
+    int statistic_output_level;
+    int skip_frame_enable;
+    int max_consecutive_skip_num;
+    int skip_frame_interval;
+    int enableipRatio;
+    bool enable_all_sei_passthru;
+    int iframe_size_ratio;
+    int crf_max_iframe_enable;
+    int vbv_min_rate;
+    bool disable_adaptive_buffers;
+    int disableBframeRdoq;
+    float forceBframeQpfactor;
+    int tune_bframe_visual;
+    int enable_acq_limit;
 } ni_encoder_cfg_params_t;
 
 typedef struct _ni_decoder_input_params_t
@@ -1889,9 +2337,35 @@ typedef struct _ni_decoder_input_params_t
 #define NI_DEC_PARAM_SCALE_0                      "scale0"
 #define NI_DEC_PARAM_SCALE_1                      "scale1"
 #define NI_DEC_PARAM_SCALE_2                      "scale2"
+#define NI_DEC_PARAM_SCALE_0_LONG_SHORT_ADAPT     "scale0LongShortAdapt"
+#define NI_DEC_PARAM_SCALE_1_LONG_SHORT_ADAPT     "scale1LongShortAdapt"
+#define NI_DEC_PARAM_SCALE_2_LONG_SHORT_ADAPT     "scale2LongShortAdapt"
+#define NI_DEC_PARAM_SCALE_0_RES_CEIL             "scale0ResCeil"
+#define NI_DEC_PARAM_SCALE_1_RES_CEIL             "scale1ResCeil"
+#define NI_DEC_PARAM_SCALE_2_RES_CEIL             "scale2ResCeil"
+#define NI_DEC_PARAM_SCALE_0_ROUND                "scale0Round"
+#define NI_DEC_PARAM_SCALE_1_ROUND                "scale1Round"
+#define NI_DEC_PARAM_SCALE_2_ROUND                "scale2Round"
 #define NI_DEC_PARAM_MULTICORE_JOINT_MODE "multicoreJointMode"
 #define NI_DEC_PARAM_SAVE_PKT "savePkt"
 #define NI_DEC_PARAM_LOW_DELAY "lowDelay"
+#define NI_DEC_PARAM_FORCE_LOW_DELAY "forceLowDelay"
+#define NI_DEC_PARAM_MIN_PACKETS_DELAY "minPacketsDelay"
+#define NI_DEC_PARAM_ENABLE_LOW_DELAY_CHECK "enableLowDelayCheck"
+#define NI_DEC_PARAM_ENABLE_USR_DATA_SEI_PASSTHRU "enableUserDataSeiPassthru"
+#define NI_DEC_PARAM_ENABLE_CUSTOM_SEI_PASSTHRU "customSeiPassthru"
+#define NI_DEC_PARAM_SVC_T_DECODING_LAYER "svctDecodingLayer"
+#define NI_DEC_PARAM_DDR_PRIORITY_MODE "ddrPriorityMode"
+#define NI_DEC_PARAM_EC_POLICY "ecPolicy"
+#define NI_DEC_PARAM_ENABLE_ADVANCED_EC "enableAdvancedEc"
+#define NI_DEC_PARAM_ENABLE_PPU_SCALE_ADAPT "enablePpuScaleAdapt"
+#define NI_DEC_PARAM_ENABLE_PPU_SCALE_LIMIT "enablePpuScaleLimit"
+#define NI_DEC_PARAM_MAX_EXTRA_HW_FRAME_CNT "maxExtraHwFrameCnt"
+#define NI_DEC_PARAM_SKIP_PTS_GUESS "skipPtsGuess"
+#define NI_DEC_PARAM_PKT_PTS_UNCHANGE       "pktPtsUnchange"
+#define NI_DEC_PARAM_ENABLE_ALL_SEI_PASSTHRU "enableAllSeiPassthru"
+#define NI_DEC_PARAM_ENABLE_FOLLOW_IFRAME "enableFollowIFrame"
+#define NI_DEC_PARAM_DISABLE_ADAPTIVE_BUFFERS "disableAdaptiveBuffers"
 
     int hwframes;
     int enable_out1;
@@ -1912,6 +2386,26 @@ typedef struct _ni_decoder_input_params_t
     int keep_alive_timeout; /* keep alive timeout setting */
     // decoder lowDelay mode for All I packets or IPPP packets
     int decoder_low_delay;
+    bool force_low_delay;
+    int enable_low_delay_check;
+    int enable_user_data_sei_passthru;
+    int custom_sei_passthru;
+    int svct_decoding_layer;
+    int ec_policy;
+    int enable_advanced_ec;
+    int enable_ppu_scale_adapt; // 0: disabled; 1: adapt to long edge; 2: adapt to short edge.
+    int enable_ppu_scale_limit;
+    int max_extra_hwframe_cnt;
+    int skip_pts_guess;
+    int pkt_pts_unchange;
+    bool enable_all_sei_passthru;
+    bool min_packets_delay;
+    // 0: disabled; 1: adapt to long edge; 2: adapt to short edge.
+    int scale_long_short_edge[NI_MAX_NUM_OF_DECODER_OUTPUTS];
+    int scale_resolution_ceil[NI_MAX_NUM_OF_DECODER_OUTPUTS]; // Rounding value
+    int scale_round[NI_MAX_NUM_OF_DECODER_OUTPUTS]; // 0 up align 1 dowm align
+    int enable_follow_iframe;
+    int disable_adaptive_buffers;
 } ni_decoder_input_params_t;
 
 typedef struct _ni_scaler_input_params_t
@@ -1941,6 +2435,32 @@ typedef struct _ni_scaler_params_t
     int filterblit;
     int nb_inputs;
 } ni_scaler_params_t;
+
+typedef struct _ni_scaler_drawbox_params_t
+{
+    uint32_t start_x;
+    uint32_t start_y;
+    uint32_t end_x;
+    uint32_t end_y;
+    uint32_t rgba_c;
+} ni_scaler_drawbox_params_t;
+
+typedef struct _ni_scaler_watermark_params_t{
+    uint32_t ui32StartX;
+    uint32_t ui32StartY;
+    uint32_t ui32Width;
+    uint32_t ui32Height;
+    uint32_t ui32Valid;
+} ni_scaler_watermark_params_t;
+
+typedef struct _ni_scaler_multi_drawbox_params_t
+{
+    ni_scaler_drawbox_params_t multi_drawbox_params[NI_MAX_SUPPORT_DRAWBOX_NUM];
+}ni_scaler_multi_drawbox_params_t;
+
+typedef struct _ni_scaler_multi_watermark_params_t{
+    ni_scaler_watermark_params_t multi_watermark_params[NI_MAX_SUPPORT_WATERMARK_NUM];
+}ni_scaler_multi_watermark_params_t;
 
 typedef struct _ni_frame
 {
@@ -2034,6 +2554,23 @@ typedef struct _ni_frame
     uint32_t vui_time_scale;
 
     int flags;   // flags of demuxed packet
+
+    // for encoder: metadata buffer info if not contiguous with YUV
+    uint8_t *p_metadata_buffer;
+    uint32_t metadata_buffer_size;
+    // for encoder: whether metadata should be sent separately for frame
+    uint8_t separate_metadata;
+    uint64_t pkt_pos;
+
+    // for encoder: non-4k-aligned part at the start of YUV data
+    uint8_t *p_start_buffer;
+    uint32_t start_buffer_size;
+    uint32_t start_len[NI_MAX_NUM_DATA_POINTERS];
+    uint32_t total_start_len;
+    // for encoder: whether the start of non-4k-aligned YUV data should be sent separately for frame
+    uint8_t separate_start;
+    uint8_t inconsecutive_transfer;
+    long long orignal_pts;
 } ni_frame_t;
 
 typedef struct _ni_xcoder_params
@@ -2072,12 +2609,12 @@ typedef struct _ni_xcoder_params
 
     int cacheRoi;   // enables caching of ROIs applied to subsequent frames
 
-    uint32_t ui32VuiDataSizeBits; /**< size of VUI RBSP in bits **/
-    uint32_t
+    NI_DEPRECATED uint32_t ui32VuiDataSizeBits; /**< size of VUI RBSP in bits **/
+    NI_DEPRECATED uint32_t
         ui32VuiDataSizeBytes; /**< size of VUI RBSP in bytes up to MAX_VUI_SIZE **/
-    uint8_t ui8VuiRbsp[NI_MAX_VUI_SIZE]; /**< VUI raw byte sequence **/
-    uint32_t pos_num_units_in_tick;
-    uint32_t pos_time_scale;
+    NI_DEPRECATED  uint8_t ui8VuiRbsp[NI_MAX_VUI_SIZE]; /**< VUI raw byte sequence **/
+    NI_DEPRECATED uint32_t pos_num_units_in_tick;
+    NI_DEPRECATED uint32_t pos_time_scale;
 
     int color_primaries;
     int color_transfer_characteristic;
@@ -2094,13 +2631,24 @@ typedef struct _ni_xcoder_params
 
     // NETINT_INTERNAL - currently only for internal testing of reconfig, saving
     // key:val1,val2,val3,...val9 (max 9 values) in the demo reconfig data file
-    // this supports max 100 lines in reconfig file, max 10 key/values per line
-    int reconf_hash[100][10];
+    // this supports max 50000 lines in reconfig file, max 10 key/values per line
+    int reconf_hash[NI_BITRATE_RECONFIG_FILE_MAX_LINES]
+                   [NI_BITRATE_RECONFIG_FILE_MAX_ENTRIES_PER_LINE];
     int hwframes;
     int rootBufId;
     ni_frame_t *p_first_frame;
 
     int enable_vfr;   //enable the vfr
+
+    int staticMmapThreshold;
+    int enable_ai_enhance;
+    int enable2PassGop;
+    int zerocopy_mode;   
+    int luma_linesize;
+    int chroma_linesize;
+    int ai_enhance_level;
+    ni_ddr_priority_mode_t ddr_priority_mode;
+    int minFramesDelay;
 } ni_xcoder_params_t;
 
 typedef struct _niFrameSurface1
@@ -2112,7 +2660,7 @@ typedef struct _niFrameSurface1
     uint32_t ui32nodeAddress;   //currently not in use, formerly offset
     int32_t device_handle;      //handle to access device
     int8_t bit_depth;           //1 == 8bit per pixel, 2 == 10bit
-    int8_t encoding_type;       //0 = semiplanar, 1 = semiplanar
+    int8_t encoding_type;       //0 = semiplanar, 1 = planar, 2 = tiled4x4
     int8_t output_idx;          // 0-2 for decoder output index
     int8_t src_cpu;             // frame origin location
     int32_t dma_buf_fd;         // P2P dma buffer file descriptor
@@ -2132,6 +2680,7 @@ typedef struct _ni_frame_config
     uint16_t frame_index;
     uint16_t session_id;
     uint8_t output_index;
+    uint8_t orientation; // 0 <= n <= 3, (n * 90°) clockwise rotation
 } ni_frame_config_t;
 
 typedef struct _ni_packet
@@ -2139,6 +2688,7 @@ typedef struct _ni_packet
   long long dts;
   long long pts;
   long long pos;
+  uint64_t pkt_pos;
   uint32_t end_of_stream;
   uint32_t start_of_stream;
   uint32_t video_width;
@@ -2238,7 +2788,7 @@ LIB_API void ni_device_session_context_free(ni_session_context_t *p_ctx);
  *  \return On success returns a event handle
  *          On failure returns NI_INVALID_EVENT_HANDLE
  ******************************************************************************/
-LIB_API ni_event_handle_t ni_create_event();
+LIB_API ni_event_handle_t ni_create_event(void);
 
 /*!*****************************************************************************
  *  \brief  Close event and release resources (Windows only)
@@ -2333,9 +2883,9 @@ LIB_API ni_retcode_t ni_device_session_close(ni_session_context_t *p_ctx,
 
 /*!*****************************************************************************
  *  \brief  Send a flush command to the device
- *          If device_type is NI_DEVICE_TYPE_DECODER sends flush command to
+ *          If device_type is NI_DEVICE_TYPE_DECODER sends EOS command to
  *          decoder
- *          If device_type is NI_DEVICE_TYPE_ENCODER sends flush command to
+ *          If device_type is NI_DEVICE_TYPE_ENCODER sends EOS command to
  *          encoder
  *
  *  \param[in] p_ctx        Pointer to a caller allocated
@@ -2475,6 +3025,95 @@ LIB_API int ni_device_session_read(ni_session_context_t *p_ctx,
  ******************************************************************************/
 LIB_API ni_retcode_t ni_device_session_query(ni_session_context_t *p_ctx,
                                              ni_device_type_t device_type);
+/*!*****************************************************************************
+ *  \brief  Query detail session data from the device -
+ *          If device_type is valid, will query session data
+ *          from specified device type
+ *
+ *  \param[in] p_ctx        Pointer to a caller allocated
+ *                          ni_session_context_t struct
+ *  \param[in] device_type  NI_DEVICE_TYPE_DECODER or
+ *                          NI_DEVICE_TYPE_ENCODER or
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_INVALID_SESSION
+ ******************************************************************************/
+ LIB_API ni_retcode_t ni_device_session_query_detail(ni_session_context_t* p_ctx, 
+                                             ni_device_type_t device_type, ni_instance_mgr_detail_status_t *detail_data);
+
+/*!*****************************************************************************
+ *  \brief  Query detail session data from the device -
+ *          If device_type is valid, will query session data
+ *          from specified device type
+ *
+ *  \param[in] p_ctx        Pointer to a caller allocated
+ *                          ni_session_context_t struct
+ *  \param[in] device_type  NI_DEVICE_TYPE_DECODER or
+ *                          NI_DEVICE_TYPE_ENCODER or
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_INVALID_SESSION
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_device_session_query_detail_v1(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_instance_mgr_detail_status_v1_t *detail_data);
+
+/*!*****************************************************************************
+ *  \brief  Send namespace num and SRIOv index to the device with specified logic block
+ *          address.
+ *
+ *  \param[in] device_handle  Device handle obtained by calling ni_device_open
+ *  \param[in] namespace_num  Set the namespace number with designated sriov
+ *  \param[in] sriov_index    Identify which sriov need to be set
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_device_config_namespace_num(ni_device_handle_t device_handle,
+                                           uint32_t namespace_num, uint32_t sriov_index);
+
+/*!*****************************************************************************
+ *  \brief  Send qos mode to the device with specified logic block
+ *          address.
+ *
+ *  \param[in] device_handle  Device handle obtained by calling ni_device_open
+ *  \param[in] mode           The requested qos mode
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_device_config_qos(ni_device_handle_t device_handle,
+                                          uint32_t mode);
+
+    /*!*****************************************************************************
+ *  \brief  Send qos over provisioning mode to target namespace with specified logic 
+ *          block address.
+ *
+ *  \param[in] device_handle   Device handle obtained by calling ni_device_open
+ *  \param[in] device_handle_t Target device handle of namespace required for OP
+ *  \param[in] over_provision  The request overprovision percent
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_device_config_qos_op(ni_device_handle_t device_handle,
+                                             ni_device_handle_t device_handle_t,
+                                             uint32_t over_provision);
 
 /*!*****************************************************************************
  *  \brief  Allocate preliminary memory for the frame buffer based on provided
@@ -2503,6 +3142,36 @@ LIB_API ni_retcode_t ni_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
                                            int video_height, int alignment,
                                            int metadata_flag, int factor,
                                            int hw_frame_count, int is_planar);
+
+/*!*****************************************************************************
+ *  \brief  Wrapper function for ni_frame_buffer_alloc. Meant to handle RGBA min.
+ * resoulution considerations for encoder.
+ *
+ *  \param[in] p_frame       Pointer to a caller allocated
+ *                           ni_frame_t struct
+ *  \param[in] video_width   Width of the video frame
+ *  \param[in] video_height  Height of the video frame
+ *  \param[in] alignment     Allignment requirement
+ *  \param[in] metadata_flag Flag indicating if space for additional metadata
+ *                                               should be allocated
+ *  \param[in] factor        1 for 8 bits/pixel format, 2 for 10 bits/pixel,
+ *                           4 for 32 bits/pixel (RGBA)
+ *  \param[in] hw_frame_count Number of hw descriptors stored
+ *  \param[in] is_planar     0 if semiplanar else planar
+ *  \param[in] pix_fmt       pixel format to distinguish between planar types
+ *                            and/or components
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_enc_frame_buffer_alloc(ni_frame_t *p_frame, int video_width,
+                                               int video_height, int alignment,
+                                               int metadata_flag, int factor,
+                                               int hw_frame_count, int is_planar, 
+                                               ni_pix_fmt_t pix_fmt);
 
 LIB_API ni_retcode_t ni_frame_buffer_alloc_dl(ni_frame_t *p_frame,
                                                  int video_width, int video_height,
@@ -2715,9 +3384,9 @@ LIB_API ni_retcode_t ni_packet_buffer_alloc(ni_packet_t *ppacket,
  *                          NI_RETCODE_INVALID_PARAM
  *                          NI_RETCODE_ERROR_MEM_ALOC
  ******************************************************************************/
-ni_retcode_t ni_custom_packet_buffer_alloc(void *p_buffer,
-                                           ni_packet_t *p_packet,
-                                           int buffer_size);
+LIB_API ni_retcode_t ni_custom_packet_buffer_alloc(void *p_buffer,
+                                                   ni_packet_t *p_packet,
+                                                   int buffer_size);
 
 /*!*****************************************************************************
  *  \brief  Free packet buffer that was previously allocated with
@@ -2947,6 +3616,27 @@ LIB_API int ni_device_session_init_framepool(ni_session_context_t *p_ctx,
                                              uint32_t pool_size, uint32_t pool);
 
 /*!*****************************************************************************
+*  \brief  Sends frame pool change info to device
+*
+*  \param[in] p_ctx        Pointer to a caller allocated
+*                                              ni_session_context_t struct
+*  \param[in] pool_size    if pool_size = 0, free allocated device memory buffers
+*                          if pool_size > 0, expand device frame buffer pool of
+*                                 current instance with pool_size more frame buffers
+*
+*  \return On success      Return code
+*          On failure
+*                          NI_RETCODE_FAILURE
+*                          NI_RETCODE_INVALID_PARAM
+*                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+*                          NI_RETCODE_ERROR_INVALID_SESSION
+*                          NI_RETCODE_ERROR_MEM_ALOC
+*                          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+*******************************************************************************/
+LIB_API ni_retcode_t ni_device_session_update_framepool(ni_session_context_t *p_ctx,
+                                                        uint32_t pool_size);
+
+/*!*****************************************************************************
 *  \brief  Read data from the device
 *          If device_type is NI_DEVICE_TYPE_DECODER reads data hwdesc from
 *          decoder
@@ -3035,7 +3725,7 @@ LIB_API ni_retcode_t ni_frame_buffer_alloc_hwenc(ni_frame_t *pframe,
                                                  int extra_len);
 
 /*!*****************************************************************************
-*  \brief  Recycle a frame buffer on card
+*  \brief  Recycle a hwframe buffer on card
 *
 *  \param[in] surface   Struct containing device and frame location to clear out
 *  \param[in] device_handle  handle to access device memory buffer is stored in
@@ -3045,6 +3735,17 @@ LIB_API ni_retcode_t ni_frame_buffer_alloc_hwenc(ni_frame_t *pframe,
 *******************************************************************************/
 LIB_API ni_retcode_t ni_hwframe_buffer_recycle(niFrameSurface1_t *surface,
                                                int32_t device_handle);
+
+
+/*!*****************************************************************************
+*  \brief  Recycle a hwframe buffer on card
+*
+*  \param[in] surface   Struct containing device and frame location to clear out
+*
+*  \return On success    NI_RETCODE_SUCCESS
+*          On failure    NI_RETCODE_INVALID_PARAM
+*******************************************************************************/
+LIB_API ni_retcode_t ni_hwframe_buffer_recycle2(niFrameSurface1_t *surface);
 
 /*!*****************************************************************************
  *  \brief  Set parameters on the device for the 2D engine
@@ -3100,6 +3801,38 @@ LIB_API ni_retcode_t ni_device_alloc_frame(ni_session_context_t* p_ctx,
                                    ni_device_type_t device_type);
 
 /*!*****************************************************************************
+ *  \brief  Allocate a frame on the device and return the frame index
+ *
+ *  \param[in]  p_ctx  pointer to session context
+ *  \param[in]  p_out_surface  pointer to output frame surface
+ *  \param[in]  device_type    currently only NI_DEVICE_TYPE_AI
+ *
+ *  \return         NI_RETCODE_INVALID_PARAM
+ *                  NI_RETCODE_ERROR_INVALID_SESSION
+ *                  NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *                  NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                  NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_device_alloc_dst_frame(ni_session_context_t *p_ctx,
+                                      niFrameSurface1_t *p_out_surface,
+                                      ni_device_type_t device_type);
+
+/*!*****************************************************************************
+ *  \brief  Copy the data of src hwframe to dst hwframe
+ *
+ *  \param[in]  p_ctx  pointer to session context
+ *  \param[in]  p_frameclone_desc  pointer to the frameclone descriptor
+ *
+ *  \return         NI_RETCODE_INVALID_PARAM
+ *                  NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *                  NI_RETCODE_ERROR_INVALID_SESSION
+ *                  NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                  NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_device_clone_hwframe(ni_session_context_t *p_ctx,
+                                     ni_frameclone_desc_t *p_frameclone_desc);
+
+/*!*****************************************************************************
  *  \brief  Config a frame on the device for 2D engined
  *          to work on based on provided parameters
  *
@@ -3113,6 +3846,12 @@ LIB_API ni_retcode_t ni_device_alloc_frame(ni_session_context_t* p_ctx,
  ******************************************************************************/
 LIB_API ni_retcode_t ni_device_config_frame(ni_session_context_t *p_ctx,
                                             ni_frame_config_t *p_cfg);
+
+LIB_API ni_retcode_t ni_scaler_set_drawbox_params(ni_session_context_t *p_ctx,
+                                            ni_scaler_drawbox_params_t *p_params);
+
+LIB_API ni_retcode_t ni_scaler_set_watermark_params(ni_session_context_t *p_ctx,
+                                            ni_scaler_watermark_params_t *p_params);
 
 /*!*****************************************************************************
  *  \brief  Config multiple frame on the device for 2D engined
@@ -3220,6 +3959,22 @@ LIB_API ni_retcode_t ni_reconfig_bitrate(ni_session_context_t *p_ctx,
                                          int32_t bitrate);
 
 /*!*****************************************************************************
+ *  \brief  Reconfigure intraPeriod dynamically during encoding.
+ *
+ *  \param[in] p_ctx          Pointer to caller allocated ni_session_context_t
+ *  \param[in] intra_period    Target intra period to set
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ *
+ *  NOTE - the frame upon which intra period is reconfigured is encoded as IDR frame
+ *  NOTE - reconfigure intra period is not allowed if intraRefreshMode is enabled or if gopPresetIdx is 1
+ *
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_intraprd(ni_session_context_t *p_ctx,
+                                          int32_t intra_period);
+
+/*!*****************************************************************************
  *  \brief  Reconfigure VUI dynamically during encoding.
  *
  *  \param[in] p_ctx      Pointer to caller allocated ni_session_context_t
@@ -3289,6 +4044,96 @@ LIB_API ni_retcode_t ni_set_frame_ref_invalid(ni_session_context_t *p_ctx,
 LIB_API ni_retcode_t ni_reconfig_framerate(ni_session_context_t *p_ctx,
                                            ni_framerate_t *framerate);
 
+/*!*****************************************************************************
+ *  \brief  Reconfigure maxFrameSize dynamically during encoding.
+ *
+ *  \param[in] p_ctx      Pointer to caller allocated ni_session_context_t
+ *  \param[in] max_frame_size        the new maxFrameSize value
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ *
+ *  NOTE - maxFrameSize_Bytes value less than ((bitrate / 8) / framerate) will be rejected
+ *
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_max_frame_size(ni_session_context_t *p_ctx, 
+                                           int32_t max_frame_size);
+
+/*!*****************************************************************************
+ *  \brief  Reconfigure min&max qp dynamically during encoding.
+ *
+ *  \param[in] p_ctx      Pointer to caller allocated ni_session_context_t
+ *  \param[in] ni_rc_min_max_qp Target min&max qp to set
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_min_max_qp(ni_session_context_t *p_ctx,
+                                    ni_rc_min_max_qp *p_min_max_qp);
+
+
+/*!*****************************************************************************
+ *  \brief  Reconfigure crf value dynamically during encoding.
+ *
+ *  \param[in] p_ctx         Pointer to caller allocated ni_session_context_t
+ *  \param[in] crf             crf value to reconfigure
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_crf(ni_session_context_t *p_ctx,
+                                 int32_t crf);
+
+/*!*****************************************************************************
+ *  \brief  Reconfigure crf float point value dynamically during encoding.
+ *
+ *  \param[in] p_ctx         Pointer to caller allocated ni_session_context_t
+ *  \param[in] crf           crf float point value to reconfigure
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_crf2(ni_session_context_t *p_ctx,
+                                      float crf);
+
+
+/*!*****************************************************************************
+ *  \brief  Reconfigure vbv buffer size and vbv max rate dynamically during encoding.
+ *
+ *  \param[in] p_ctx      Pointer to caller allocated ni_session_context_t
+ *  \param[in] vbvBufferSize Target vbvBufferSize to set
+ *  \param[in] vbvMaxRate    Target vbvMaxRate to set
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_vbv_value(ni_session_context_t *p_ctx,
+                                           int32_t vbvMaxRate, int32_t vbvBufferSize);
+
+/*!*****************************************************************************
+ *  \brief  Reconfigure maxFrameSizeRatio dynamically during encoding.
+ *
+ *  \param[in] p_ctx      Pointer to caller allocated ni_session_context_t
+ *  \param[in] max_frame_size_ratio        the new maxFrameSizeRatio value
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_max_frame_size_ratio(ni_session_context_t *p_ctx, 
+                                                      int32_t max_frame_size_ratio);
+
+/*!*****************************************************************************
+ *  \brief  Reconfigure sliceArg dynamically during encoding.
+ *
+ *  \param[in] p_ctx      Pointer to caller allocated ni_session_context_t
+ *  \param[in] sliceArg        the new sliceArg value
+ *
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_reconfig_slice_arg(ni_session_context_t *p_ctx, 
+                                                      int16_t sliceArg);
+
 #ifndef _WIN32
 /*!*****************************************************************************
 *  \brief  Acquire a P2P frame buffer from the hwupload session
@@ -3354,6 +4199,7 @@ LIB_API ni_retcode_t ni_uploader_p2p_test_send(ni_session_context_t *p_upl_ctx,
                                                uint8_t *p_data, uint32_t len,
                                                ni_frame_t *p_hwframe);
 
+
 /*!*****************************************************************************
  *  \brief  Set the incoming frame format for the encoder
  *
@@ -3376,24 +4222,18 @@ LIB_API ni_retcode_t ni_encoder_set_input_frame_format(
     int width, int height, int bit_depth, int src_endian, int planar);
 
 /*!*****************************************************************************
- *  \brief  Set the frame format for the uploader
+ *  \brief  Acquire the scaler P2P DMA buffer for read/write
  *
- *  \param[in]  p_upl_ctx       pointer to uploader context
- *        [in]  width           width
- *        [in]  height          height
- *        [in]  pixel_format    pixel format
- *        [in]  isP2P           0 = normal, 1 = P2P
+ *  \param [in] p_ctx       pointer to caller allocated upload context
+ *         [in] p_surface   pointer to a caller allocated hardware frame
+ *         [in] data_len    scaler frame buffer data length
  *
  *  \return on success
- *          NI_RETCODE_SUCCESS
+ *              NI_RETCODE_SUCCESS
  *
  *          on failure
- *          NI_RETCODE_INVALID_PARAM
+ *              NI_RETCODE_FAILURE
 *******************************************************************************/
-LIB_API ni_retcode_t
-ni_uploader_set_frame_format(ni_session_context_t *p_upl_ctx, int width,
-                             int height, ni_pix_fmt_t pixel_format, int isP2P);
-
 LIB_API ni_retcode_t ni_scaler_p2p_frame_acquire(ni_session_context_t *p_ctx,
                                                  niFrameSurface1_t *p_surface,
                                                  int data_len);
@@ -3411,6 +4251,25 @@ LIB_API ni_retcode_t ni_scaler_p2p_frame_acquire(ni_session_context_t *p_ctx,
 *******************************************************************************/
 LIB_API ni_retcode_t ni_hwframe_p2p_buffer_recycle(ni_frame_t *p_frame);
 #endif
+
+/*!*****************************************************************************
+ *  \brief  Set the frame format for the uploader
+ *
+ *  \param[in]  p_upl_ctx       pointer to uploader context
+ *        [in]  width           width
+ *        [in]  height          height
+ *        [in]  pixel_format    pixel format
+ *        [in]  isP2P           0 = normal, 1 = P2P
+ *
+ *  \return on success
+ *          NI_RETCODE_SUCCESS
+ *
+ *          on failure
+ *          NI_RETCODE_INVALID_PARAM
+*******************************************************************************/
+LIB_API ni_retcode_t
+ni_uploader_set_frame_format(ni_session_context_t *p_upl_ctx, int width,
+                             int height, ni_pix_fmt_t pixel_format, int isP2P);
 
 /*!*****************************************************************************
  *  \brief  Read encoder stream header from the device
@@ -3464,6 +4323,297 @@ LIB_API int32_t ni_get_dma_buf_file_descriptor(const ni_frame_t* p_frame);
 LIB_API ni_retcode_t ni_device_session_sequence_change(ni_session_context_t *p_ctx,
                                             int width, int height, int bit_depth_factor, ni_device_type_t device_type);
 
+/*!*****************************************************************************
+ *  \brief  Fetch perf metrics of inferences from device
+ *
+ *  \param[in] p_ctx        Pointer to a caller allocated
+ *                          ni_session_context_t struct
+ *  \param[in] p_metrics    Pointer to network metrics
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_ai_session_read_metrics(
+    ni_session_context_t *p_ctx, ni_network_perf_metrics_t *p_metrics);
+
+/*!*****************************************************************************
+ *  \brief  Query firmware loader and firmware versions from the device
+ *
+ *  \param[in] device_handle Device handle obtained by calling ni_device_open()
+ *  \param[in] device_info
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_query_fl_fw_versions(ni_device_handle_t device_handle,
+                                             ni_device_info_t *p_dev_info);
+
+/*!*****************************************************************************
+ *  \brief  Query NVMe load from the device
+ *
+ *  \param[in] p_ctx        Pointer to a caller allocated
+ *                          ni_session_context_t struct
+ *  \param[in] p_load_query Pointer to a caller allocated
+ *                          ni_load_query_t struct
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_query_nvme_status(
+    ni_session_context_t *p_ctx, ni_load_query_t *p_load_query);
+
+/*!*****************************************************************************
+ *  \brief  Query VF and NS id from device
+ *
+ *  \param[in] device_handle Device handle obtained by calling ni_device_open()
+ *  \param[in] p_dev_ns_vf   Pointer to a ni_device_vf_ns_id_t struct
+ *  \param[in] fw_rev[]      Fw version to check if this function is supported
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_query_vf_ns_id(ni_device_handle_t device_handle,
+                                       ni_device_vf_ns_id_t *p_dev_ns_vf,
+                                       uint8_t fw_rev[]);
+
+/*!*****************************************************************************
+ *  \brief  Query CompositeTemp from device
+ *
+ *  \param[in] device_handle Device handle obtained by calling ni_device_open()
+ *  \param[in] p_dev_temp    Pointer to device temperature
+ *  \param[in] fw_rev[]      Fw version to check if this function is supported
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_query_temperature(ni_device_handle_t device_handle,
+                                          ni_device_temp_t *p_dev_temp,
+                                          uint8_t fw_rev[]);
+
+/*!*****************************************************************************
+ *  \brief  Query CompositeTemp from device
+ *
+ *  \param[in] device_handle       Device handle obtained by calling ni_device_open()
+ *  \param[in] p_dev_extra_info    Pointer to device extra info
+ *  \param[in] fw_rev[]            Fw version to check if this function is supported
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_INVALID_PARAM
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ *                          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ ******************************************************************************/
+LIB_API ni_retcode_t ni_query_extra_info(ni_device_handle_t device_handle,
+                                         ni_device_extra_info_t *p_dev_extra_info,
+                                         uint8_t fw_rev[]);
+
+/*!*****************************************************************************
+ *  \brief  Check if incoming frame is encoder zero copy compatible or not
+ *
+ *  \param[in] p_enc_ctx    pointer to encoder context
+ *        [in] p_enc_params pointer to encoder parameters
+ *        [in] width        input width
+ *        [in] height       input height
+ *        [in] linesize      input linesizes (pointer to array)
+ *        [in] set_linesize   setup linesizes 0 means not setup linesizes, 1 means setup linesizes (before encoder open)
+ *
+ *  \return on success and can do zero copy
+ *          NI_RETCODE_SUCCESS
+ *
+ *          cannot do zero copy
+ *          NI_RETCODE_ERROR_UNSUPPORTED_FEATURE
+ *          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *          NI_RETCODE_INVALID_PARAM
+ *
+*******************************************************************************/
+LIB_API ni_retcode_t ni_encoder_frame_zerocopy_check(ni_session_context_t *p_enc_ctx,
+                                               ni_xcoder_params_t *p_enc_params,
+                                               int width, int height,
+                                               const int linesize[],
+                                               bool set_linesize);
+
+/*!*****************************************************************************
+  *  \brief  Allocate memory for encoder zero copy (metadata, etc.)
+  *          for encoding based on given
+  *          parameters, taking into account pic linesize and extra data.
+  *          Applicable to YUV planr / semi-planar 8 or 10 bit and RGBA pixel formats.
+  *
+  *
+  *  \param[in] p_frame       Pointer to a caller allocated ni_frame_t struct
+  *  \param[in] video_width   Width of the video frame
+  *  \param[in] video_height  Height of the video frame
+  *  \param[in] linesize      Picture line size
+  *  \param[in] data         Picture data pointers (for each of YUV planes)
+  *  \param[in] extra_len     Extra data size (incl. meta data)
+  *
+  *  \return On success
+  *                          NI_RETCODE_SUCCESS
+  *          On failure
+  *                          NI_RETCODE_INVALID_PARAM
+  *                          NI_RETCODE_ERROR_MEM_ALOC
+  *****************************************************************************/
+LIB_API ni_retcode_t ni_encoder_frame_zerocopy_buffer_alloc(ni_frame_t *p_frame, 
+                                           int video_width, int video_height,
+                                           const int linesize[], const uint8_t *data[],
+                                           int extra_len);
+
+/*!*****************************************************************************
+ *  \brief  Check if incoming frame is hwupload zero copy compatible or not
+ *
+ *  \param[in] p_upl_ctx    pointer to uploader context
+ *        [in] width        input width
+ *        [in] height       input height
+ *        [in] linesize      input linesizes (pointer to array)
+ *        [in] pixel_format   input pixel format
+ *
+ *  \return on success and can do zero copy
+ *          NI_RETCODE_SUCCESS
+ *
+ *          cannot do zero copy
+ *          NI_RETCODE_ERROR_UNSUPPORTED_FEATURE
+ *          NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *          NI_RETCODE_INVALID_PARAM
+ *
+*******************************************************************************/
+LIB_API ni_retcode_t ni_uploader_frame_zerocopy_check(ni_session_context_t *p_upl_ctx,
+                                               int width, int height,
+                                               const int linesize[], int pixel_format);
+
+/*!*****************************************************************************
+ *  \brief  Allocate log buffer if needed and retrieve firmware logs from device
+ *
+ *  \param[in] p_ctx        Pointer to a caller allocated
+ *                          ni_session_context_t struct
+ *  \param[in] p_log_buffer        Reference to pointer to a log buffer
+ *                          If log buffer pointer is NULL, this function will allocate log buffer
+ *                          NOTE caller is responsible for freeing log buffer after calling this function
+ *  \param[in] gen_log_file        Indicating whether it is required to generate log files
+ *
+ *
+ *  \return on success
+ *              NI_RETCODE_SUCCESS
+ *
+ *          on failure
+ *              NI_RETCODE_ERROR_MEM_ALOC
+ *              NI_RETCODE_INVALID_PARAM
+*******************************************************************************/
+LIB_API ni_retcode_t ni_device_alloc_and_get_firmware_logs(ni_session_context_t *p_ctx, void** p_log_buffer, bool gen_log_file);
+
+/*!*****************************************************************************
+ *  \brief  Set up hard coded demo ROI map
+ *
+ *  \param[in] p_enc_ctx   Pointer to a caller allocated  
+ *
+ *  \return on success
+ *              NI_RETCODE_SUCCESS
+ *
+ *          on failure
+ *              NI_RETCODE_ERROR_MEM_ALOC
+*******************************************************************************/
+LIB_API ni_retcode_t ni_set_demo_roi_map(ni_session_context_t *p_enc_ctx);
+
+/*!*****************************************************************************
+ *  \brief  Convert various reconfig and demo modes (stored in encoder configuration) to
+ *          aux data and store them in frame
+ *
+ *  \param[in] p_enc_ctx      Pointer to a caller allocated
+ *                            ni_session_context_t struct
+ *  \param[in] p_frame        Pointer to a caller allocated ni_frame_t struct
+ *
+ *
+ *  \return on success
+ *              NI_RETCODE_SUCCESS
+ *
+ *          on failure
+ *              NI_RETCODE_ERROR_MEM_ALOC
+*******************************************************************************/
+LIB_API ni_retcode_t ni_enc_prep_reconf_demo_data(ni_session_context_t *p_enc_ctx,
+                                                  ni_frame_t *p_frame);
+
+/*!*****************************************************************************
+ *  \brief  Set custom gop and prepare to check if success
+ *
+ *  \param[in] p_param      Pointer to a caller allocated ni_xcoder_params_t struct
+ *  \param[in] value        Pointer to a caller allocated customer gop name
+ *
+ *  \return none
+ *
+*******************************************************************************/
+LIB_API void ni_gop_params_check_set(ni_xcoder_params_t *p_param, char *value);
+
+/*!*****************************************************************************
+ *  \brief  Check customer gop params set.
+ *
+ *  \param[in] p_param      Pointer to a caller allocated ni_xcoder_params_t struct
+ *
+ *
+ *  \return on success
+ *              true
+ *
+ *          on failure
+ *              false
+*******************************************************************************/
+LIB_API bool ni_gop_params_check(ni_xcoder_params_t *p_param);
+
+/*!*****************************************************************************
+ *  \brief   Initiate P2P transfer
+ *
+ *  \param[in] pSession      Pointer to source card destination
+ *  \param[in] source        Pointer to source frame to transmit
+ *  \param[in] ui64DestAddr  Destination address on target device
+ *  \param[in] ui32FrameSize Size of frame to transfer
+ *
+ *  \return on success
+ *              NI_RETCODE_SUCCESS
+ *          on failure
+ *              NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION
+ *              NI_RETCODE_INVALID_PARAM
+ *              NI_RETCODE_ERROR_INVALID_SESSION
+ *              NI_RETCODE_ERROR_MEM_ALOC
+ *              NI_RETCODE_ERROR_NVME_CMD_FAILED
+*******************************************************************************/
+LIB_API ni_retcode_t ni_p2p_xfer(ni_session_context_t *pSession,
+                                 niFrameSurface1_t *source,
+                                 uint64_t ui64DestAddr, uint32_t ui32FrameSize);
+
+/*!*****************************************************************************
+ *  \brief   Calculate the total size of a frame based on the upload
+ *           context attributes and includes rounding up to the page size
+ *
+ *  \param[in] p_upl_ctx    pointer to an uploader session context
+ *  \param[in] linesize     array of line stride
+ *
+ *  \return  size
+ *           NI_RETCODE_INVALID_PARAM
+ *
+ ******************************************************************************/
+LIB_API int ni_calculate_total_frame_size(const ni_session_context_t *p_upl_ctx,
+                                          const int linesize[]);
 
 #ifdef __cplusplus
 }

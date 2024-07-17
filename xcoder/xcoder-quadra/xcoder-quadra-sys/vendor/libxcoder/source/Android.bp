@@ -1,6 +1,6 @@
 //###############################################################################
 
-cc_library_shared {
+cc_library {
 	name: "libxcoder",
     srcs: [
         "ni_lat_meas.c",
@@ -17,7 +17,7 @@ cc_library_shared {
 	
 	vendor_available: true,
 	vndk: {
-        enabled: true,
+        enabled: false,
     },
 //	proprietary: true,
     //PRODUCT_COPY_FILES += $(TARGET_OUT)/lib64/libxcoder.so:/usr/local/lib64/
@@ -56,15 +56,6 @@ cc_library_shared {
         "liblog",
     ],
 		
-	sanitize: {
-        misc_undefined: [
-            "signed-integer-overflow",
-        ],
-        cfi: true,
-        diag: {
-            cfi: true,
-        },
-    },
 
     ldflags: ["-Wl,-Bsymbolic"],
     clang: true,

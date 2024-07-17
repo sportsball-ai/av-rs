@@ -1,7 +1,12 @@
-use super::{fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
 use scopeguard::{guard, ScopeGuard};
 use snafu::{Error, Snafu};
-use std::{marker::PhantomData, mem, ops::Deref};
+use std::{
+    marker::PhantomData,
+    mem::{self, MaybeUninit},
+    ops::Deref,
+    os::raw::c_void,
+};
 use xcoder_quadra_sys as sys;
 
 #[derive(Clone, Copy, Debug)]
@@ -205,17 +210,17 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
         let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
 
         unsafe {
-            let mut params: sys::ni_xcoder_params_t = mem::zeroed();
-            let code = sys::ni_decoder_init_default_params(&mut params as _, fps_numerator, fps_denominator, 0, config.width, config.height);
+            let mut params = alloc_zeroed();
+            let code = sys::ni_decoder_init_default_params(params.as_mut_ptr(), fps_numerator, fps_denominator, 0, config.width, config.height);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderDecoderError::Unknown {
                     code,
                     operation: "initializing parameters",
                 });
             }
+            let mut params = mem::transmute::<Box<MaybeUninit<sys::ni_xcoder_params_t>>, Box<sys::ni_xcoder_params_t>>(params);
             params.__bindgen_anon_1.dec_input_params.hwframes = 1;
             params.__bindgen_anon_1.dec_input_params.mcmode = config.multicore_joint_mode.into();
-            let params = Box::new(params);
 
             let session = sys::ni_device_session_context_alloc_init();
             if session.is_null() {
@@ -227,7 +232,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
 
             (**session).hw_id = config.hardware_id.unwrap_or(-1);
             (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
-            (**session).p_session_config = &*params as *const sys::ni_xcoder_params_t as _;
+            (**session).p_session_config = params.as_mut() as *mut sys::ni_xcoder_params_t as *mut c_void;
             (**session).codec_format = match config.codec {
                 XcoderDecoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
                 XcoderDecoderCodec::H265 => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
@@ -476,6 +481,7 @@ mod test {
                 level_idc: None,
             },
             bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
             hardware: Some(decoder.hardware()),
             multicore_joint_mode: false,
         })

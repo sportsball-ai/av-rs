@@ -20,12 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ISharedBuffer.h
-*
-*  \brief  Exported definitions related to resource management of NI Quadra devices
-*
-*******************************************************************************/
-
+ *  \file   ISharedBuffer.h
+ *
+ *  \brief  Public definitions related to resource management of NETINT video
+ *          processing devices on Android
+ *******************************************************************************/
 
 #ifndef ISHAREDBUFFER_H_
 #define ISHAREDBUFFER_H_

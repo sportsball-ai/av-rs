@@ -20,11 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ni_nvme.h
-*
-*	\brief  Definitions related to working with NI Quadra over NVME interface
-*
-*******************************************************************************/
+ *  \file   ni_nvme.h
+ *
+ *  \brief  Private definitions for interfacing with NETINT video processing
+ *          devices over NVMe
+ ******************************************************************************/
 
 #pragma once
 
@@ -222,7 +222,7 @@ typedef struct _ni_nvme_identity
   uint8_t fw_build_id[256];
   uint8_t fw_repo_info_padding[2];
 
-  uint8_t memory_cfg; // 0 == DR, 1 == SR
+  uint8_t memory_cfg; // 0 == DR, 1 == SR, 2 == SR(disable P2P), 3 == SR_4G
   // byte offset 469 (=468+1 due to alignment at hw0_max_video_width)
 
   // xcoder HW - version 2 (replaces/deprecates version 1)
@@ -325,8 +325,10 @@ typedef enum _ni_nvme_admin_opcode
   nvme_admin_cmd_xcoder_recycle_buffer = 0xD7,
   nvme_admin_cmd_xcoder_init_framepool = 0xD8,
   nvme_admin_cmd_xcoder_identity = 0xD9,
+  nvme_admin_cmd_xcoder_general = 0xDA,
+  nvme_admin_cmd_xcoder_load = 0xDB,
+  nvme_admin_cmd_xcoder_p2p_send = 0xDC
 } ni_nvme_admin_opcode_t;
-
 
 typedef enum _nvme_open_xcoder_subtype
 {
@@ -363,14 +365,21 @@ typedef enum _nvme_query_xcoder_session_subtype
 
 typedef enum _nvme_query_xcoder_instance_subtype
 {
+    nvme_query_xcoder_instance_read_ai_hw_output = 0x0000,
+    nvme_query_xcoder_instance_read_perf_metrics = 0x0001,
     nvme_query_xcoder_instance_get_status = 0x0002,
+    nvme_query_xcoder_instance_get_current_status = 0x0003,
     nvme_query_xcoder_instance_get_stream_info = 0x0004,
+    nvme_query_xcoder_instance_network_layer_size_v2 = 0x0004,
     nvme_query_xcoder_instance_get_end_of_output = 0x0005,
+    nvme_query_xcoder_instance_read_network_layer_v2 = 0x0005,
+    nvme_query_xcoder_instance_write_buf_size_by_ep = 0x0007,
     nvme_query_xcoder_instance_acquire_buf = 0x0008,
     nvme_query_xcoder_instance_read_buf_size = 0x0009,
     nvme_query_xcoder_instance_write_buf_size = 0x000a,
     nvme_query_xcoder_instance_upload_idx = 0x000b,
     nvme_query_xcoder_instance_network_layer_size = 0x000b,
+    nvme_query_xcoder_instance_read_output_buf_size = 0x00b,
     nvme_query_xcoder_instance_dec_place_holder =
         0x000c,   //config_set_write_length
     nvme_query_xcoder_instance_read_network_layer = 0x000c,
@@ -382,12 +391,15 @@ typedef enum _nvme_query_xcoder_instance_subtype
 typedef enum _nvme_query_xcoder_general_subtype
 {
   nvme_query_xcoder_general_get_status = 0x0002,
+  nvme_query_xcoder_general_get_detail_info = 0x0007,
+  nvme_query_xcoder_general_get_detail_info_v1 = 0x0008,
 } nvme_query_xcoder_general_subtype_t;
 
 typedef enum _nvme_config_xcoder_subtype
 {
   nvme_config_xcoder_config_session = 0x0000,
-  nvme_config_xcoder_config_instance = 0x0001
+  nvme_config_xcoder_config_instance = 0x0001,
+  nvme_config_xcoder_config_global = 0x0002,
 } nvme_config_xcoder_subtype_t;
 
 typedef enum _nvme_config_xcoder_config_session_subtype
@@ -397,6 +409,9 @@ typedef enum _nvme_config_xcoder_config_session_subtype
     nvme_config_xcoder_config_session_write = 0x0002,
     nvme_config_xcoder_config_session_keep_alive_timeout = 0x0003,
     nvme_config_xcoder_config_session_sw_version = 0x0004,
+    nvme_config_xcoder_config_namespace_num = 0x0005,
+    nvme_config_xcoder_config_ddr_priority = 0x0006,
+    nvme_config_xcoder_config_frame_clone = 0x0007,
 } nvme_config_xcoder_config_session_subtype_t;
 
 typedef enum _nvme_config_xcoder_config_instance_subtype
@@ -406,6 +421,7 @@ typedef enum _nvme_config_xcoder_config_instance_subtype
     nvme_config_xcoder_config_set_enc_params = 0x0005,
     nvme_config_xcoder_config_set_dec_params = 0x0005,
     nvme_config_xcoder_config_set_scaler_params = 0x0005,
+    nvme_config_xcoder_config_set_scaler_drawbox_params = 0x0006,
     nvme_config_xcoder_config_flush = 0x0007,
     nvme_config_xcoder_config_update_enc_params = 0x0008,
     nvme_config_xcoder_config_set_network_binary = 0x0008,
@@ -414,8 +430,18 @@ typedef enum _nvme_config_xcoder_config_instance_subtype
     nvme_config_xcoder_config_alloc_frame = 0x000d,  // scaler only
     nvme_config_xcoder_config_set_sequence_change = 0x000d,   // encoder only
     nvme_config_xcoder_instance_read_buf_size_busy_place_holder = 0x000e,   // admin type taken by busy query read
+    nvme_config_xcoder_config_set_scaler_watermark_params = 0x000e,
     nvme_config_xcoder_instance_write_buf_size_busy_place_holder = 0x000f,  // admin type taken by busy query write
 } nvme_config_xcoder_config_instance_subtype_t;
+
+typedef enum _nvme_xcoder_general_subtype
+{
+  nvme_xcoder_general_status_query = 2,
+  nvme_xcoder_general_versions_query = 3,
+  nvme_xcoder_general_nsvf_query = 4,
+  nvme_xcoder_general_temperature_query = 5,
+  nvme_xcoder_general_extra_info_query = 5,
+} nvme_xcoder_general_subtype_t;
 
 typedef struct _ni_nvme_write_complete_dw0_t
 {
@@ -611,8 +637,21 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
                                              ((sub)<<NI_SUB_BIT_OFFSET)+subtype))     // 0x20000 -- 0x28000, each (op,sub,subtype) has 4k bytes
 #define RD_OFFSET_IN_4K                                                        \
     (START_OFFSET_IN_4K + MBs_to_4k(128))   // 0x28000 -- 0x38000
+
 #define WR_OFFSET_IN_4K                                                        \
     (RD_OFFSET_IN_4K + MBs_to_4k(256))   // 0x38000 -- 0x48000
+
+#define WR_METADATA_OFFSET_IN_4K (MBs_to_4k(1024) + MBs_to_4k(256))
+
+#define LOAD_OFFSET_IN_4K (WR_OFFSET_IN_4K + MBs_to_4k(256))
+#define DUMP_LOG_OFFSET_IN_4K (LOAD_OFFSET_IN_4K + MBs_to_4k(8))
+
+#define NVME_LOG_OFFSET_IN_4K (DUMP_LOG_OFFSET_IN_4K)
+#define EP_LOG_OFFSET_IN_4K (NVME_LOG_OFFSET_IN_4K + MBs_to_4k(1))
+#define DP_LOG_OFFSET_IN_4K (EP_LOG_OFFSET_IN_4K + MBs_to_4k(1))
+#define TP_LOG_OFFSET_IN_4K (DP_LOG_OFFSET_IN_4K + MBs_to_4k(1))
+#define FP_LOG_OFFSET_IN_4K (TP_LOG_OFFSET_IN_4K + MBs_to_4k(1))
+
 #define HIGH_OFFSET_IN_4K(sid, instance)                                       \
     ((((sid & 0x1FFUL) << NI_SESSION_ID_SHIFT_HI) | (instance))                \
      << NI_INSTANCE_TYPE_OFFSET)   // 1024MB +128MB from range 0x0 to 0x40000 + 0x40000 to 0x48000
@@ -621,6 +660,9 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
 /************read/write command macro*******************/
 //write instance
 #define WRITE_INSTANCE_W(sid,instance)  HIGH_OFFSET_IN_4K(sid,instance) + WR_OFFSET_IN_4K
+// write separate metadata
+#define WRITE_METADATA_W(sid, instance)                                        \
+    HIGH_OFFSET_IN_4K(sid, instance) + WR_METADATA_OFFSET_IN_4K
 
 //read instance
 #define READ_INSTANCE_R(sid,instance)   HIGH_OFFSET_IN_4K(sid,instance) + RD_OFFSET_IN_4K
@@ -654,7 +696,11 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
 
 #define QUERY_INSTANCE_CUR_STATUS_INFO_R(sid,instance)  HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
                                                         nvme_query_xcoder_query_instance,nvme_query_xcoder_instance_get_current_status)
-
+#define QUERY_INSTANCE_AI_INFO_R(sid, instance)                                \
+    HIGH_OFFSET_IN_4K(sid, instance) +                                         \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),                     \
+                         nvme_query_xcoder_query_instance,                     \
+                         nvme_query_xcoder_instance_read_ai_hw_output)
 #define QUERY_INSTANCE_STREAM_INFO_R(sid,instance)  HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
                                                         nvme_query_xcoder_query_instance,nvme_query_xcoder_instance_get_stream_info)
 #define QUERY_INSTANCE_EOS_R(sid,instance)          HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
@@ -663,6 +709,8 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
                                                         nvme_query_xcoder_query_instance,nvme_query_xcoder_instance_read_buf_size)
 #define QUERY_INSTANCE_WBUFF_SIZE_R(sid, instance)  HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
                                                         nvme_query_xcoder_query_instance,nvme_query_xcoder_instance_write_buf_size)
+#define QUERY_INSTANCE_WBUFF_SIZE_R_BY_EP(sid, instance) HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
+                                                        nvme_query_xcoder_query_instance,nvme_query_xcoder_instance_write_buf_size_by_ep)
 #define QUERY_INSTANCE_RBUFF_SIZE_BUSY_R(sid, instance)                        \
     HIGH_OFFSET_IN_4K(sid, instance) +                                         \
         CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),                     \
@@ -681,6 +729,12 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
                          nvme_query_xcoder_query_instance,                     \
                          nvme_query_xcoder_instance_acquire_buf)
 
+#define QUERY_INSTANCE_HW_OUT_SIZE_R(sid, instance)                            \
+    HIGH_OFFSET_IN_4K(sid, instance) +                                         \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),                     \
+                         nvme_query_xcoder_query_instance,                     \
+                         nvme_query_xcoder_instance_read_output_buf_size)
+
 #define QUERY_INSTANCE_NL_SIZE_R(sid, instance)                                \
     HIGH_OFFSET_IN_4K(sid, instance) +                                         \
         CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),                     \
@@ -692,8 +746,43 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
                          nvme_query_xcoder_query_instance,                     \
                          nvme_query_xcoder_instance_read_network_layer)
 
+#define QUERY_INSTANCE_NL_SIZE_V2_R(sid, instance)                             \
+    HIGH_OFFSET_IN_4K(sid, instance) +                                         \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),                     \
+                         nvme_query_xcoder_query_instance,                     \
+                         nvme_query_xcoder_instance_network_layer_size_v2)
+
+#define QUERY_INSTANCE_NL_V2_R(sid, instance)                                  \
+    HIGH_OFFSET_IN_4K(sid, instance) +                                         \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),                     \
+                         nvme_query_xcoder_query_instance,                     \
+                         nvme_query_xcoder_instance_read_network_layer_v2)
+
+#define QUERY_INSTANCE_METRICS_R(sid, instance)                                \
+    HIGH_OFFSET_IN_4K(sid, instance) +                                         \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),                     \
+                         nvme_query_xcoder_query_instance,                     \
+                         nvme_query_xcoder_instance_read_perf_metrics)
+
 #define QUERY_GENERAL_GET_STATUS_R(instance)        HIGH_OFFSET_IN_4K(0,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
                                                         nvme_query_xcoder_query_general,nvme_query_xcoder_general_get_status)
+
+#define QUERY_DETAIL_GET_STATUS_R(instance)        HIGH_OFFSET_IN_4K(0,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
+                                                        nvme_query_xcoder_query_general,nvme_query_xcoder_general_get_detail_info)
+#define QUERY_DETAIL_GET_STATUS_V1_R(instance)        HIGH_OFFSET_IN_4K(0,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_query),  \
+                                                        nvme_query_xcoder_query_general,nvme_query_xcoder_general_get_detail_info_v1)
+
+#define QUERY_GET_NVME_STATUS_R HIGH_OFFSET_IN_4K(0,0) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_general), \
+                                nvme_xcoder_general_status_query, 0)
+#define QUERY_GET_VERSIONS_R HIGH_OFFSET_IN_4K(0,0) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_general), \
+                                nvme_xcoder_general_versions_query, 0)
+
+#define QUERY_GET_NS_VF_R HIGH_OFFSET_IN_4K(0,0) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_general), \
+                                nvme_xcoder_general_nsvf_query, 0)
+#define QUERY_GET_TEMPERATURE_R HIGH_OFFSET_IN_4K(0,0) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_general), \
+                                nvme_xcoder_general_temperature_query, 0)
+#define QUERY_GET_EXTTRA_INFO_R HIGH_OFFSET_IN_4K(0,0) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_general), \
+                                nvme_xcoder_general_extra_info_query, 0)
 
 //config instance
 #define CONFIG_INSTANCE_SetSOS_W(sid,instance)      HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
@@ -715,6 +804,19 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
         CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
                          nvme_config_xcoder_config_instance,                   \
                          nvme_config_xcoder_config_alloc_frame)
+
+#define CONFIG_INSTANCE_SetScalerDrawBoxPara_W(sid, instance)                        \
+    HIGH_OFFSET_IN_4K(sid, instance) +                                         \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
+                         nvme_config_xcoder_config_instance,                   \
+                         nvme_config_xcoder_config_set_scaler_drawbox_params)
+
+#define CONFIG_INSTANCE_SetScalerWatermarkPara_W(sid, instance)                        \
+    HIGH_OFFSET_IN_4K(sid, instance) +                                         \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
+                         nvme_config_xcoder_config_instance,                   \
+                         nvme_config_xcoder_config_set_scaler_watermark_params)
+
 #define CONFIG_INSTANCE_SetEncPara_W(sid,instance)      HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
                                                             nvme_config_xcoder_config_instance,nvme_config_xcoder_config_set_enc_params)
 #define CONFIG_INSTANCE_UpdateEncPara_W(sid,instance)   HIGH_OFFSET_IN_4K(sid,instance) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
@@ -737,7 +839,7 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
                          nvme_config_xcoder_config_alloc_frame)
 
 //config session
-#define CONFIG_SESSION_KeepAlive_W(sid)             HIGH_OFFSET_IN_4K(sid,0) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
+#define CONFIG_SESSION_KeepAlive_W(sid)             HIGH_OFFSET_IN_4K(sid,1) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
                                                             nvme_config_xcoder_config_session,nvme_config_xcoder_config_session_keep_alive)
 #define CONFIG_SESSION_Read_W(sid)                  HIGH_OFFSET_IN_4K(sid,0) + CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),  \
                                                             nvme_config_xcoder_config_session,nvme_config_xcoder_config_session_read)
@@ -745,6 +847,8 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
                                                             nvme_config_xcoder_config_session,nvme_config_xcoder_config_session_write)
 
 #define CLEAR_INSTANCE_BUF_W(frame_id)		    CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_recycle_buffer), 0, (frame_id & 0x00FF)) + (((frame_id & 0xFF00)>>8)<<NI_INSTANCE_TYPE_OFFSET)
+
+#define SEND_P2P_BUF_W                          CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_p2p_send), 0, 0)
 
 #define CONFIG_SESSION_KeepAliveTimeout_W(sid)                                 \
     HIGH_OFFSET_IN_4K(sid, 0) +                                                \
@@ -757,6 +861,23 @@ int32_t ni_nvme_send_io_pass_through_command(ni_device_handle_t fd, ni_nvme_pass
         CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
                          nvme_config_xcoder_config_session,                    \
                          nvme_config_xcoder_config_session_sw_version)
+
+#define CONFIG_GLOBAL_NAMESPACE_NUM                                            \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
+                         nvme_config_xcoder_config_global,                     \
+                         nvme_config_xcoder_config_namespace_num)
+
+#define CONFIG_SESSION_DDR_PRIORITY_W(sid)                                     \
+    HIGH_OFFSET_IN_4K(sid, 0) +                                                \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
+                         nvme_config_xcoder_config_session,                    \
+                         nvme_config_xcoder_config_ddr_priority)                      
+
+#define CONFIG_SESSION_FRAME_COPY_W(sid)                                     \
+    HIGH_OFFSET_IN_4K(sid, 0) +                                                \
+        CTL_OFFSET_IN_4K(GAP(nvme_admin_cmd_xcoder_config),                    \
+                         nvme_config_xcoder_config_session,                    \
+                         nvme_config_xcoder_config_frame_clone)
 
 int32_t ni_nvme_send_read_cmd(ni_device_handle_t handle, ni_event_handle_t event_handle, void *p_data, uint32_t data_len, uint32_t lba);
 int32_t ni_nvme_send_write_cmd(ni_device_handle_t handle, ni_event_handle_t event_handle, void *p_data, uint32_t data_len, uint32_t lba);

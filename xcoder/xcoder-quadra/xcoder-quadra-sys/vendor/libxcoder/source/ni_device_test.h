@@ -20,12 +20,12 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_device_test.h
-*
-*  \brief  Example code on how to programmatically work with NI Quadra using
-*          libxcoder API
-*
-*******************************************************************************/
+ *  \file   ni_device_test.h
+ *
+ *  \brief  Application for performing video processing with libxcoder API.
+ *          Its code provides examples on how to programatically use libxcoder
+ *          API.
+ ******************************************************************************/
 
 #pragma once
 
@@ -45,21 +45,7 @@
 #define lseek _lseek
 #endif
 
-#if defined(LRETURN)
-#undef LRETURN
-#define LRETURN goto end;
-#undef END
-#define END                                     \
-  end:
-#else
-#define LRETURN goto end;
-#define END                                     \
-  end:
-#endif
-
-#define NVME_CMD_SEM_PROTECT 			1
-
-
+#define NVME_CMD_SEM_PROTECT 1
 #define FILE_NAME_LEN 	256
 
 #define XCODER_APP_TRANSCODE 0
@@ -68,9 +54,10 @@
 #define XCODER_APP_HWUP_ENCODE 3
 #define XCODER_APP_FILTER 4
 
-#define ENC_CONF_STRUCT_SIZE 						0x100
+#define ENC_CONF_STRUCT_SIZE 0x100
 
 #define MAX_INPUT_FILES 	3
+#define MAX_OUTPUT_FILES 4
 
 #define NI_TEST_RETCODE_FAILURE -1
 #define NI_TEST_RETCODE_SUCCESS 0
@@ -81,20 +68,47 @@
 
 #define NI_ALIGN(x, a) (((x)+(a)-1)&~((a)-1))
 
+typedef enum
+{
+    NI_SW_PIX_FMT_NONE = -1,       /* invalid format       */
+    NI_SW_PIX_FMT_YUV444P,         /* 8-bit YUV444 planar  */
+    NI_SW_PIX_FMT_YUV444P10LE,     /* 10-bit YUV444 planar */
+} ni_sw_pix_fmt_t;
+
+typedef struct _ni_pix_fmt_name
+{
+    const char *name;
+    ni_pix_fmt_t pix_fmt;
+} ni_pix_fmt_name_t;
+
+typedef struct _ni_gc620_pix_fmt
+{
+  ni_pix_fmt_t pix_fmt_ni;
+  int          pix_fmt_gc620;
+} ni_gc620_pix_fmt_t;
+
 typedef struct _device_state
 {
+    int dec_sos_sent;
     int dec_eos_sent;
     int dec_eos_received;
+    int enc_resend;
+    int enc_sos_sent;
     int enc_eos_sent;
     int enc_eos_received;
-    int enc_seq_change;
 } device_state_t;
+
+// simplistic ref counted HW frame
+typedef struct _ni_hwframe_ref_t
+{
+    int ref_cnt;
+    niFrameSurface1_t surface;
+} ni_hwframe_ref_t;
 
 typedef struct _tx_data
 {
     char fileName[MAX_INPUT_FILES][FILE_NAME_LEN];
     uint32_t DataSizeLimit;
-
     int device_handle;
     int mode;
     ni_session_context_t *p_dec_ctx;
@@ -121,7 +135,6 @@ typedef struct RecvDataStruct_
 {
     char fileName[FILE_NAME_LEN];
     uint32_t DataSizeLimit;
-
     int device_handle;
     int mode;
     ni_session_context_t *p_dec_ctx;
@@ -144,6 +157,13 @@ typedef struct RecvDataStruct_
     int arg_width;
     int arg_height;
 } rx_data_t;
+
+typedef struct  ni_rate_emu
+{
+    int rate_emu_framerate;         // target framerate to emulate
+    uint64_t rate_emu_start;        // start time in ns for rate emulation
+    uint64_t rate_emu_input_frames; // number of frames processed
+} ni_rate_emu_t;
 
 typedef struct _ni_drawbox_params
 {
@@ -447,57 +467,57 @@ typedef struct _ni_vp9_header_info
 } ni_vp9_header_info_t;
 
 int decoder_send_data(ni_session_context_t * p_dec_ctx,
-                      ni_session_data_io_t * p_in_data, int stFlag,
-                      int input_video_width, int input_video_height, int pfs,
-                      unsigned int fileSize, unsigned long *sentTotal,
-                      int printT, device_state_t *xState, void *stream_info);
+                      ni_session_data_io_t * p_in_data,
+                      int input_video_width, int input_video_height,
+                      int pfs, unsigned long *sentTotal, int printT,
+                      device_state_t *xState, void *stream_info);
 
 int decoder_receive_data(ni_session_context_t * p_dec_ctx,
                          ni_session_data_io_t * p_out_data,
                          int output_video_width, int output_video_height,
                          FILE *pfr, unsigned long long *recvTotal, int printT,
-                         int writeToFile, device_state_t *xState);
+                         int writeToFile, device_state_t *xState,
+                         int * p_rx_size);
 
-int encoder_send_data(
-    ni_session_context_t * p_enc_ctx, ni_session_data_io_t * p_in_data,
-    int stFlag, int input_video_width, int input_video_height, int pfs,
-    unsigned int fileSize, unsigned long *sentSize, device_state_t *xState,
-    int bit_depth, int is_last_input);
+int encoder_send_data(ni_session_context_t * p_enc_ctx,
+                      ni_session_data_io_t * p_in_data, void *yuv_buf,
+                      int input_video_width, int input_video_height,
+                      unsigned long *sent_size, device_state_t *xState,
+                      int is_last_input,
+                      ni_rate_emu_t *p_rate_emu);
 
-int encoder_send_data2(
-    ni_session_context_t * p_enc_ctx, uint32_t dec_codec_format,
-    ni_session_data_io_t * p_dec_out_data, ni_session_data_io_t * p_enc_in_data,
-    int stFlag, int input_video_width, int input_video_height, int pfs,
-    unsigned int fileSize, unsigned long *sentSize, device_state_t *xState);
+int encoder_send_data2(ni_session_context_t * p_enc_ctx,
+                       ni_session_data_io_t * p_dec_out_data,
+                       ni_session_data_io_t * p_enc_in_data,
+                       int input_video_width, int input_video_height,
+                       unsigned long *sent_size, device_state_t *xState);
 
 int encoder_close_session(ni_session_context_t *p_enc_ctx,
-    ni_session_data_io_t *p_in_data,
-    ni_session_data_io_t *p_out_data);
+                          ni_session_data_io_t *p_in_data,
+                          ni_session_data_io_t *p_out_data);
 
 int encoder_init_session(ni_session_context_t *p_enc_ctx,
-    ni_session_data_io_t *p_in_data,    
-    ni_session_data_io_t *p_out_data,
-    int arg_width,
-    int arg_height,
-    int bit_depth);
+                         ni_session_data_io_t *p_in_data,
+                         ni_session_data_io_t *p_out_data,
+                         int arg_width, int arg_height,
+                         ni_pix_fmt_t pix_fmt);
 
 int encoder_sequence_change(ni_session_context_t *p_enc_ctx,
-    ni_session_data_io_t *p_in_data,    
-    ni_session_data_io_t *p_out_data,
-    int width,
-    int height,
-    int bit_depth_factor);
+                            ni_session_data_io_t *p_in_data,
+                            ni_session_data_io_t *p_out_data,
+                            int width, int height, ni_pix_fmt_t pix_fmt);
 
 int scale_filter(ni_session_context_t * p_ctx, ni_frame_t * p_frame_in,
-                 ni_session_data_io_t * p_data_out, int scale_width,
-                 int scale_height, int out_format);
+                 ni_session_data_io_t * p_data_out, int guid, int scale_width,
+                 int scale_height, int in_format, int out_format);
 
-int drawbox_filter(
-    ni_session_context_t * p_crop_ctx, ni_session_context_t * p_pad_ctx,
-    ni_session_context_t * p_overlay_ctx, ni_session_context_t * p_fmt_ctx,
-    ni_frame_t * p_frame_in, ni_session_data_io_t * p_data_out,
-    box_params_t * p_box_params, int output_format);
-
+int drawbox_filter(ni_session_context_t * p_crop_ctx,
+                   ni_session_context_t * p_pad_ctx,
+                   ni_session_context_t * p_overlay_ctx,
+                   ni_session_context_t * p_fmt_ctx,
+                   ni_frame_t *p_frame_in, ni_session_data_io_t *p_data_out,
+                   box_params_t *p_box_params, int guid,
+                   int input_format, int output_format);
 #ifdef __cplusplus
 }
 #endif

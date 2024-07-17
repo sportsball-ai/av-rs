@@ -31,11 +31,10 @@
  ****************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_bitstream.h
-*
-*  \brief  Utility functions to operate on bits in a bitstream
-*
-*******************************************************************************/
+ *  \file   ni_bitstream.h
+ *
+ *  \brief  Utility definitions to operate on bits in a bitstream
+ ******************************************************************************/
 
 #pragma once
 
@@ -101,7 +100,7 @@ uint64_t ni_bs_writer_tell(const ni_bitstream_writer_t *const stream);
 void ni_bs_writer_put(ni_bitstream_writer_t *stream, uint32_t data,
                       uint8_t bits);
 
-// write unsigned/signed Exp-Golomb bit string to bitstream
+// write unsigned/signed Exp-Golomb bit string to bitstream, 2^32-2 at most
 void ni_bs_writer_put_ue(ni_bitstream_writer_t *stream, uint32_t data);
 void ni_bs_writer_put_se(ni_bitstream_writer_t *stream, int32_t data);
 

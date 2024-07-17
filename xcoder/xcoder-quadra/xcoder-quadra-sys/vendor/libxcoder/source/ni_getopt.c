@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-* \file   ni_getopt.c
-*
-* \brief  Implementation of getopt and getopt_long with Windows API.
-*
-*******************************************************************************/
+ *  \file   ni_getopt.c
+ *
+ *  \brief  Implementation of getopt() and getopt_long() for Windows environment
+ ******************************************************************************/
 
 #include <stdio.h>
 #include <string.h>
@@ -96,7 +95,6 @@ int getopt(int argc, char *argv[], const char *optstring)
 
     return c;
 }
-
 
 int getopt_long(int argc, char* argv[], const char* optstring,
                 const struct option* longopts, int* longindex)

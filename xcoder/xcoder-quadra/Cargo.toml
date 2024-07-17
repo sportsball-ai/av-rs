@@ -7,8 +7,11 @@ edition = "2021"
 av-traits = { path = "../../av-traits" }
 snafu = "0.8.0"
 scopeguard = "1.1.0"
+libc = "0.2"
+enum-repr = "0.2.6"
 
 [dev-dependencies]
+bytemuck = "1.16.1"
 h264 = { path = "../../h264" }
 h265 = { path = "../../h265" }
 snafu = { version = "0.8.0", features = ["std"] }

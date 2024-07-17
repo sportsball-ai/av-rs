@@ -20,12 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ni_rsrc_api_android.h
-*
-*  \brief  Exported definitions related to resource management of NI Quadra devices
-*
-*******************************************************************************/
-
+ *  \file   ni_rsrc_api_android.h
+ *
+ *  \brief  Public definitions for managing NETINT video processing devices on
+ *          Android
+ ******************************************************************************/
 
 #ifndef ANDROID_NI_RSRC_API_H
 #define ANDROID_NI_RSRC_API_H

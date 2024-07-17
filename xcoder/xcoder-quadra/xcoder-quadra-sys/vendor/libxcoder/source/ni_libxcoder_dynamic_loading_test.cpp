@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
- *  \file   ni_libxcoder_dynamic_loading_test.c
+ *  \file   ni_libxcoder_dynamic_loading_test.cpp
  *
- *  \brief  Use ni_libxcoder_dynamic_loading.h to dynamically load libxcoder at
- *          runtime. Check all function pointers are mapped. Only for Linux.
- *
+ *  \brief  Application to test that ni_libxcoder_dynamic_loading.h successfully
+ *          loads all its exported functions
  ******************************************************************************/
 
 #include <unistd.h>
@@ -64,8 +63,8 @@ int main(int argc, char **argv)
     }
     printf("Dynamically loaded functionList\n");
 
-    for (int i = 0; i < (sizeof(NETINT_LIBXCODER_API_FUNCTION_LIST) / \
-                         sizeof(void *)); i++)
+    for (int i = 0; i < (int)((sizeof(NETINT_LIBXCODER_API_FUNCTION_LIST) / \
+                         sizeof(void *))); i++)
     {
         if (((void *) *(((void **) &functionList) + i)) == NULL)
         {

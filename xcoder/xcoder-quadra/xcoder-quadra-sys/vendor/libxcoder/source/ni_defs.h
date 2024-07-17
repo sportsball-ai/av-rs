@@ -23,7 +23,6 @@
 *  \file   ni_defs.h
 *
 *  \brief  Common NETINT definitions used by all modules
-*
 *******************************************************************************/
 
 #pragma once
@@ -59,6 +58,12 @@ extern "C"
 {
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#    define NI_UNUSED __attribute__((unused))
+#else
+#    define NI_UNUSED
+#endif
+
 #if !defined(NI_WARN_AS_ERROR) && !defined(__clang__) && defined(__GNUC__)
     #define NI_DEPRECATED __attribute__((deprecated))
     #define NI_DEPRECATED_MACRO                                                \
@@ -79,21 +84,20 @@ extern "C"
 // read correct version numbers if updating libxcoder but not linked apps.
 // NI_XCODER_REVISION[0:2] = SW release version
 // NI_XCODER_REVISION[3]   = compatible FW API semantic major version
-// NI_XCODER_REVISION[4]   = compatible FW API semantic minor version
-// NI_XCODER_REVISION[5:7] = optional
-// reference: https://netint.atlassian.net/l/c/woqFMHES
-#define NI_XCODER_REVISION "40064rcB"
+// NI_XCODER_REVISION[4:5] = compatible FW API semantic minor version
+// NI_XCODER_REVISION[6:7] = optional
+// The definition macro in ni_quadra_filter_api.h need to be synchronized with libxcoder
+#define NI_XCODER_REVISION "4926rbr2"
 #define NI_XCODER_REVISION_API_MAJOR_VER_IDX 3
 #define NI_XCODER_REVISION_API_MINOR_VER_IDX 4
 
 // LIBXCODER_API_VERSION can be read to determine libxcoder to linked apps/APIs
 // compatibility. Recommend using ni_get_*_ver() functions in ni_util.h to
 // read correct version numbers if updating libxcoder but not linked apps.
-// reference: https://netint.atlassian.net/l/c/fVEGmYEZ
 #define MACRO_TO_STR(s) #s
 #define MACROS_TO_VER_STR(a, b) MACRO_TO_STR(a.b)
 #define LIBXCODER_API_VERSION_MAJOR 2   // Libxcoder API semantic major version
-#define LIBXCODER_API_VERSION_MINOR 4   // Libxcoder API semantic minor version
+#define LIBXCODER_API_VERSION_MINOR 63  // Libxcoder API semantic minor version
 #define LIBXCODER_API_VERSION MACROS_TO_VER_STR(LIBXCODER_API_VERSION_MAJOR, \
                                                 LIBXCODER_API_VERSION_MINOR)
 
@@ -206,18 +210,27 @@ typedef int32_t  ni_lock_handle_t;
 #define NI_MAX_DEVICE_CNT      128
 #define NI_MAX_DEVICE_NAME_LEN 32
 
+#define NI_NVME_PREFIX   "nvme" 
 #define NI_MAX_PACKET_SZ                0x20000
 #define NI_POLL_INTERVAL                (2 * 1000)
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_NUM_DATA_POINTERS in ni_quadra_filter_api.h
 #define NI_MAX_NUM_DATA_POINTERS    4
+
+#define NI_MAX_NUM_SW_FRAME_DATA_POINTERS    3
 
 #define NI_MAX_CONTEXTS_PER_HW_INSTANCE 128
 #define NI_MAX_4K_FPS_QUADRA 240
 
 #define NI_MAX_DEVICES_PER_HW_INSTANCE 4
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_NUM_OF_DECODER_OUTPUTS in ni_quadra_filter_api.h
 #define NI_MAX_NUM_OF_DECODER_OUTPUTS 3
 
+// The macro definition in ni_quadra_filter_api.h need to be synchronized with libxcoder
+// If you change this,you should also change NI_QUADRA_MAX_PPU_PARAM_EXPR_CHAR in ni_quadra_filter_api.h
 #define NI_MAX_PPU_PARAM_EXPR_CHAR 20
 
 #define NI_MAX_TX_SZ 0xA00000
@@ -225,25 +238,37 @@ typedef int32_t  ni_lock_handle_t;
 #define NI_MEM_PAGE_ALIGNMENT 0x1000
 
 #define NI_MAX_DR_HWDESC_FRAME_INDEX 5363
+#define NI_MAX_DR_HWDESC_FRAME_INDEX_2 4993
   // If P2P area changes in firmware these constants must be updated
 #define NI_MIN_HWDESC_P2P_BUF_ID 5364
 #define NI_MAX_HWDESC_P2P_BUF_ID 5525
 
 #define NI_MAX_SR_HWDESC_FRAME_INDEX 2457
+#define NI_MAX_SR_HWDESC_FRAME_INDEX_2 2287
+#define NI_MAX_SR_HWDESC_FRAME_INDEX_3_REMOVE_P2P 2439
+#define NI_MAX_SR_HWDESC_FRAME_INDEX_4_4G 1248
+
   // If P2P area changes in firmware these constants must be updated
 #define NI_MIN_SR_HWDESC_P2P_BUF_ID 2458
 #define NI_MAX_SR_HWDESC_P2P_BUF_ID 2619
+#define NI_MAX_SR_HWDESC_P2P_BUF_ID_4G 2458
 
   //Feed this ni_session_context_t->ddr_config
-#define NI_GET_MIN_HWDESC_P2P_BUF_ID(x)  (x==1?NI_MIN_SR_HWDESC_P2P_BUF_ID:NI_MIN_HWDESC_P2P_BUF_ID)
-#define NI_GET_MAX_HWDESC_P2P_BUF_ID(x)  (x==1?NI_MAX_SR_HWDESC_P2P_BUF_ID:NI_MAX_HWDESC_P2P_BUF_ID)
+#define NI_GET_MIN_HWDESC_P2P_BUF_ID(x)  ((x==1 || x==3 || x==6)?NI_MIN_SR_HWDESC_P2P_BUF_ID:NI_MIN_HWDESC_P2P_BUF_ID)
+#define NI_GET_MAX_HWDESC_P2P_BUF_ID(x)  ((x==1 || x==3 || x==6)?((x==6)?NI_MAX_SR_HWDESC_P2P_BUF_ID_4G:NI_MAX_SR_HWDESC_P2P_BUF_ID):NI_MAX_HWDESC_P2P_BUF_ID)
 
 //use NI_MAX_DR_HWDESC_FRAME_INDEX or NI_GET_MAX_HWDESC_FRAME_INDEX
-NI_DEPRECATE_MACRO(NI_MAX_HWDESC_FRAME_INDEX) 
+NI_DEPRECATE_MACRO(NI_MAX_HWDESC_FRAME_INDEX)
 #define NI_MAX_HWDESC_FRAME_INDEX NI_DEPRECATED_MACRO NI_MAX_DR_HWDESC_FRAME_INDEX
 
 //input param is DDR config of target device
-#define NI_GET_MAX_HWDESC_FRAME_INDEX(x) (x==1?NI_MAX_SR_HWDESC_FRAME_INDEX:NI_MAX_DR_HWDESC_FRAME_INDEX)
+#define NI_GET_MAX_HWDESC_FRAME_INDEX(x)                                            \
+        (x == 1 ? NI_MAX_SR_HWDESC_FRAME_INDEX:                                     \
+                  (x == 2 ? NI_MAX_DR_HWDESC_FRAME_INDEX:                           \
+                            (x == 3 ? NI_MAX_SR_HWDESC_FRAME_INDEX_2:               \
+                                      (x == 4 ? NI_MAX_DR_HWDESC_FRAME_INDEX_2:     \
+                                                (x == 5 ? NI_MAX_SR_HWDESC_FRAME_INDEX_3_REMOVE_P2P:     \
+                                                          NI_MAX_SR_HWDESC_FRAME_INDEX_4_4G)))))
 
 #define NI_MAX_UPLOAD_INSTANCE_FRAMEPOOL 100
 
@@ -262,16 +287,18 @@ NI_DEPRECATE_MACRO(NI_MAX_HWDESC_FRAME_INDEX)
 #define NI_INVALID_SEI_TYPE (-1)
 
 // max count of custom sei per packet
-#define NI_MAX_CUSTOM_SEI_CNT 10
+#define NI_MAX_CUSTOM_SEI_CNT 20
 
 //bytes size of meta data sent together with YUV: from f/w decoder to app
 #define NI_FW_META_DATA_SZ  104 //metadataDecFrame on dec FW (including hwdesc x3)
 // size of meta data sent together with YUV data: from app to f/w encoder
-#define NI_APP_ENC_FRAME_META_DATA_SIZE 56
-// size of meta data sent together with bitstream: from f/w encoder to app
-#define NI_FW_ENC_BITSTREAM_META_DATA_SIZE 32 //might need to edit for yuvbypass quadra
+#define NI_APP_ENC_FRAME_META_DATA_SIZE 64
+
+#define NI_APP_ENC_FRAME_META_DATA_SIZE_UNDER_MAJOR_6_MINOR_Q 56
 
 #define MAX_AV1_ENCODER_GOP_NUM 8
+
+#define NI_MAX_FILTER_POOL_SIZE 4
 
 #if defined(LRETURN)
 #undef LRETURN
@@ -292,7 +319,7 @@ typedef enum _ni_xcoder_prod_line
     NI_XCODER_QUADRA = 2,
 } ni_xcoder_prod_line_t;
 
-inline int is_supported_xcoder(int x)
+static inline int is_supported_xcoder(int x)
 {
     return (NI_XCODER_QUADRA == x);
 }
@@ -314,163 +341,251 @@ inline int is_supported_xcoder(int x)
       NI_DEVICE_TYPE_MAX = 5,
   } ni_device_type_t;
 
+// CPU Log definitions
+#define CPU_LOG_BUFFER_SIZE                     (1 * 1024 * 1024)
+#define TOTAL_CPU_LOG_BUFFER_SIZE                                              \
+    (CPU_LOG_BUFFER_SIZE * 5)   // g_np/tp/fp/ep/dp_cpu_log_buffer
+#define CPU_LOG_CYCLES_PER_CHECK    (10000)
+typedef enum
+{
+    ALL_CORE = 0x00,
+    NVME_CORE = 0x01,
+    EP_CORE = 0x02,
+    DP_CORE = 0x03,
+    TP_CORE = 0x04,
+    FP_CORE = 0x05,
+    NUM_OF_CORES = 0x06,
+} ni_core_type_t;
+
+typedef struct _ni_session_statistic_t
+{
+    uint32_t ui32WrBufAvailSize;   // instance write buffer size available
+    uint32_t ui32RdBufAvailSize;   // instance read  buffer size available
+
+    uint32_t ui32FramesInput;
+    uint32_t ui32FramesBuffered;
+    uint32_t ui32FramesCompleted;
+    uint32_t ui32FramesOutput;
+    uint32_t ui32FramesDropped;
+    uint32_t ui32InstErrors;
+
+    uint16_t ui16SessionId;
+    uint16_t ui16ErrorCount;
+    uint32_t ui32LastTransactionId;
+    uint32_t ui32LastTransactionCompletionStatus;
+    uint32_t ui32LastErrorTransactionId;
+    uint32_t ui32LastErrorStatus;
+    uint32_t ui32Session_timestamp_high;
+    uint32_t ui32Session_timestamp_low;
+    uint32_t reserved;
+
+    uint8_t  ui8AdditionalFramesDelay;
+    uint8_t  ui8Reserved[3];
+    uint32_t  ui32Reserved[7];
+} ni_session_statistic_t;
+
 #define IS_XCODER_DEVICE_TYPE(t)                                               \
-    (t > NI_DEVICE_TYPE_MIN && t < NI_DEVICE_TYPE_XCODER_MAX)
+    ((ni_device_type_t)t > NI_DEVICE_TYPE_MIN &&                               \
+     (ni_device_type_t)t < NI_DEVICE_TYPE_XCODER_MAX)
 #define GET_XCODER_DEVICE_TYPE(t)                                              \
-    (t == NI_DEVICE_TYPE_UPLOAD ? NI_DEVICE_TYPE_ENCODER : t)
+    ((ni_device_type_t)t == NI_DEVICE_TYPE_UPLOAD ?                            \
+                            NI_DEVICE_TYPE_ENCODER :                           \
+                            (ni_device_type_t)t)
+#define GET_XCODER_DEVICE_TYPE_STR(t)                                          \
+        (IS_XCODER_DEVICE_TYPE(GET_XCODER_DEVICE_TYPE(t)) ?                    \
+             g_device_type_str[GET_XCODER_DEVICE_TYPE(t)] :                    \
+                                     "Invalid device type")
 
-  static const char *device_type_str[] = {"decoder", "encoder", "scaler", "AI"};
-  static const char device_type_chr[] = {'d', 'e', 's', 'a'};
+NI_UNUSED static const char *g_device_type_str[] = {"decoder", "encoder", "scaler", "AI", "uploader"};
+NI_UNUSED static const char g_device_type_chr[] = {'d', 'e', 's', 'a'};
 
-  typedef enum
-  {
-      NI_RETCODE_SUCCESS = 0,  /*!!< successful return code */
-      NI_RETCODE_FAILURE = -1, /*!!< unrecoverable failure */
-      NI_RETCODE_INVALID_PARAM =
-          -2, /*!!< invalid/uninitialized/null pointer parameter encountered */
-      NI_RETCODE_ERROR_MEM_ALOC = -3,        /*!!< memory allocation failure */
-      NI_RETCODE_ERROR_NVME_CMD_FAILED = -4, /*!!< nvme command failure */
-      NI_RETCODE_ERROR_INVALID_SESSION = -5, /*!!< invalid session */
-      NI_RETCODE_ERROR_RESOURCE_UNAVAILABLE =
-          -6, /*!!< resource currently unavailable */
-      NI_RETCODE_PARAM_INVALID_NAME = -7,  /*!!< invalid parameter name */
-      NI_RETCODE_PARAM_INVALID_VALUE = -8, /*!!< invalid parameter value */
-      NI_RETCODE_PARAM_ERROR_FRATE =
-          -9, /*!!< invalid frame rate parameter value */
-      NI_RETCODE_PARAM_ERROR_BRATE =
-          -10, /*!!< invalid bit rate parameter value */
-      NI_RETCODE_PARAM_ERROR_TRATE =
-          -11, /*!!< invalid bit rate parameter value */
-      NI_RETCODE_PARAM_ERROR_VBV_BUFFER_SIZE = -12,
-      NI_RETCODE_PARAM_ERROR_INTRA_PERIOD =
-          -13, /*!!< invalid intra period parameter value */
-      NI_RETCODE_PARAM_ERROR_INTRA_QP = -14, /*!!< invalid qp parameter value */
-      NI_RETCODE_PARAM_ERROR_GOP_PRESET =
-          -15, /*!!< invalid got preset parameter value */
-      NI_RETCODE_PARAM_ERROR_CU_SIZE_MODE = -16,
-      NI_RETCODE_PARAM_ERROR_MX_NUM_MERGE = -17,
-      NI_RETCODE_PARAM_ERROR_DY_MERGE_8X8_EN = -18,
-      NI_RETCODE_PARAM_ERROR_DY_MERGE_16X16_EN = -19,
-      NI_RETCODE_PARAM_ERROR_DY_MERGE_32X32_EN = -20,
-      NI_RETCODE_PARAM_ERROR_CU_LVL_RC_EN =
-          -21, /*!!< invalid cu level rate control parameter value */
-      NI_RETCODE_PARAM_ERROR_HVS_QP_EN = -22,
-      NI_RETCODE_PARAM_ERROR_HVS_QP_SCL = -23,
-      NI_RETCODE_PARAM_ERROR_MN_QP =
-          -24, /*!!< invalid minimum qp parameter value */
-      NI_RETCODE_PARAM_ERROR_MX_QP =
-          -25, /*!!< invalid maximum qp parameter value */
-      NI_RETCODE_PARAM_ERROR_MX_DELTA_QP =
-          -26, /*!!< invalid maximum delta qp parameter value */
-      NI_RETCODE_PARAM_ERROR_CONF_WIN_TOP =
-          -27, /*!!< invalid top offset of conformance window parameter value */
-      NI_RETCODE_PARAM_ERROR_CONF_WIN_BOT =
-          -28, /*!!< invalid bottom offset of conformance window parameter value */
-      NI_RETCODE_PARAM_ERROR_CONF_WIN_L =
-          -29, /*!!< invalid left offset of conformance window parameter value */
-      NI_RETCODE_PARAM_ERROR_CONF_WIN_R =
-          -30, /*!!< invalid right offset of conformance window parameter value */
-      NI_RETCODE_PARAM_ERROR_USR_RMD_ENC_PARAM =
-          -31, /*!!< invalid user recommended parameter value */
-      NI_RETCODE_PARAM_ERROR_BRATE_LT_TRATE = -32,
-      NI_RETCODE_PARAM_ERROR_RCENABLE = -33,
-      NI_RETCODE_PARAM_ERROR_MAXNUMMERGE = -34,
-      NI_RETCODE_PARAM_ERROR_CUSTOM_GOP =
-          -35, /*!!< invalid custom gop preset parameter value */
-      NI_RETCODE_PARAM_ERROR_PIC_WIDTH =
-          -36, /*!!< invalid picture width parameter value */
-      NI_RETCODE_PARAM_ERROR_PIC_HEIGHT =
-          -37, /*!!< invalid picture height parameter value */
-      NI_RETCODE_PARAM_ERROR_DECODING_REFRESH_TYPE =
-          -38, /*!!< invalid decoding refresh type parameter value */
-      NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_8X8_EN = -39,
-      NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_16X16_EN = -40,
-      NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_32X32_EN = -41,
-      NI_RETCODE_PARAM_ERROR_TOO_BIG = -42, /*!!< parameter value is too big */
-      NI_RETCODE_PARAM_ERROR_TOO_SMALL =
-          -43,                           /*!!< parameter value is too small */
-      NI_RETCODE_PARAM_ERROR_ZERO = -44, /*!!< parameter value is zero */
-      NI_RETCODE_PARAM_ERROR_OOR = -45, /*!!< parameter value is out of range */
-      NI_RETCODE_PARAM_ERROR_WIDTH_TOO_BIG =
-          -46, /*!!< parameter width value is too big */
-      NI_RETCODE_PARAM_ERROR_WIDTH_TOO_SMALL =
-          -47, /*!!< parameter width value is too small */
-      NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_BIG =
-          -48, /*!!< parameter height value is too big */
-      NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_SMALL =
-          -49, /*!!< parameter height value is too small */
-      NI_RETCODE_PARAM_ERROR_AREA_TOO_BIG =
-          -50, /*!!< parameter heightxwidth value is too big */
-      NI_RETCODE_ERROR_EXCEED_MAX_NUM_SESSIONS =
-          -51, /*!!< exceeding the max number of 64 sessions */
-      NI_RETCODE_ERROR_GET_DEVICE_POOL =
-          -52, /*!!< cannot get info from device */
-      NI_RETCODE_ERROR_LOCK_DOWN_DEVICE =
-          -53, /*!!< cannot obtain the file lock across all the process for query */
-      NI_RETCODE_ERROR_UNLOCK_DEVICE = -54, /*!!< cannot unlock the lock */
-      NI_RETCODE_ERROR_OPEN_DEVICE = -55,   /*!!< cannot open the device */
-      NI_RETCODE_ERROR_INVALID_HANDLE =
-          -56, /*!!< the handles that passed in is wrong */
-      NI_RETCODE_ERROR_INVALID_ALLOCATION_METHOD =
-          -57, /*!!< the handles that passed in is wrong */
-      NI_RETCODE_ERROR_VPU_RECOVERY = -58, /*!!< VPU in recovery mode */
-      NI_RETCODE_PARAM_WARNING_DEPRECATED = -59,
-      NI_RETCODE_PARAM_ERROR_LOOK_AHEAD_DEPTH =
-          -60, /*!!< invalid lookahead depth */
-      NI_RETCODE_PARAM_ERROR_FILLER = -61,
-      NI_RETCODE_PARAM_ERROR_PICSKIP = -62,
-      NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION = -63,
+typedef enum
+{
+    NI_RETCODE_SUCCESS = 0,  /*!!< successful return code */
+    NI_RETCODE_FAILURE = -1, /*!!< unrecoverable failure */
+    NI_RETCODE_INVALID_PARAM =
+        -2, /*!!< invalid/uninitialized/null pointer parameter encountered */
+    NI_RETCODE_ERROR_MEM_ALOC = -3,        /*!!< memory allocation failure */
+    NI_RETCODE_ERROR_NVME_CMD_FAILED = -4, /*!!< nvme command failure */
+    NI_RETCODE_ERROR_INVALID_SESSION = -5, /*!!< invalid session */
+    NI_RETCODE_ERROR_RESOURCE_UNAVAILABLE =
+        -6,                              /*!!< resource currently unavailable */
+    NI_RETCODE_PARAM_INVALID_NAME = -7,  /*!!< invalid parameter name */
+    NI_RETCODE_PARAM_INVALID_VALUE = -8, /*!!< invalid parameter value */
+    NI_RETCODE_PARAM_ERROR_FRATE =
+        -9, /*!!< invalid frame rate parameter value */
+    NI_RETCODE_PARAM_ERROR_BRATE =
+        -10, /*!!< invalid bit rate parameter value */
+    NI_RETCODE_PARAM_ERROR_TRATE =
+        -11, /*!!< invalid bit rate parameter value */
+    NI_RETCODE_PARAM_ERROR_VBV_BUFFER_SIZE = -12,
+    NI_RETCODE_PARAM_ERROR_INTRA_PERIOD =
+        -13, /*!!< invalid intra period parameter value */
+    NI_RETCODE_PARAM_ERROR_INTRA_QP = -14, /*!!< invalid qp parameter value */
+    NI_RETCODE_PARAM_ERROR_GOP_PRESET =
+        -15, /*!!< invalid got preset parameter value */
+    NI_RETCODE_PARAM_ERROR_CU_SIZE_MODE = -16,
+    NI_RETCODE_PARAM_ERROR_MX_NUM_MERGE = -17,
+    NI_RETCODE_PARAM_ERROR_DY_MERGE_8X8_EN = -18,
+    NI_RETCODE_PARAM_ERROR_DY_MERGE_16X16_EN = -19,
+    NI_RETCODE_PARAM_ERROR_DY_MERGE_32X32_EN = -20,
+    NI_RETCODE_PARAM_ERROR_CU_LVL_RC_EN =
+        -21, /*!!< invalid cu level rate control parameter value */
+    NI_RETCODE_PARAM_ERROR_HVS_QP_EN = -22,
+    NI_RETCODE_PARAM_ERROR_HVS_QP_SCL = -23,
+    NI_RETCODE_PARAM_ERROR_MN_QP =
+        -24, /*!!< invalid minimum qp parameter value */
+    NI_RETCODE_PARAM_ERROR_MX_QP =
+        -25, /*!!< invalid maximum qp parameter value */
+    NI_RETCODE_PARAM_ERROR_MX_DELTA_QP =
+        -26, /*!!< invalid maximum delta qp parameter value */
+    NI_RETCODE_PARAM_ERROR_CONF_WIN_TOP =
+        -27, /*!!< invalid top offset of conformance window parameter value */
+    NI_RETCODE_PARAM_ERROR_CONF_WIN_BOT =
+        -28, /*!!< invalid bottom offset of conformance window parameter value */
+    NI_RETCODE_PARAM_ERROR_CONF_WIN_L =
+        -29, /*!!< invalid left offset of conformance window parameter value */
+    NI_RETCODE_PARAM_ERROR_CONF_WIN_R =
+        -30, /*!!< invalid right offset of conformance window parameter value */
+    NI_RETCODE_PARAM_ERROR_USR_RMD_ENC_PARAM =
+        -31, /*!!< invalid user recommended parameter value */
+    NI_RETCODE_PARAM_ERROR_BRATE_LT_TRATE = -32,
+    NI_RETCODE_PARAM_ERROR_RCENABLE = -33,
+    NI_RETCODE_PARAM_ERROR_MAXNUMMERGE = -34,
+    NI_RETCODE_PARAM_ERROR_CUSTOM_GOP =
+        -35, /*!!< invalid custom gop preset parameter value */
+    NI_RETCODE_PARAM_ERROR_PIC_WIDTH =
+        -36, /*!!< invalid picture width parameter value */
+    NI_RETCODE_PARAM_ERROR_PIC_HEIGHT =
+        -37, /*!!< invalid picture height parameter value */
+    NI_RETCODE_PARAM_ERROR_DECODING_REFRESH_TYPE =
+        -38, /*!!< invalid decoding refresh type parameter value */
+    NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_8X8_EN = -39,
+    NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_16X16_EN = -40,
+    NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_32X32_EN = -41,
+    NI_RETCODE_PARAM_ERROR_TOO_BIG = -42, /*!!< parameter value is too big */
+    NI_RETCODE_PARAM_ERROR_TOO_SMALL =
+        -43,                           /*!!< parameter value is too small */
+    NI_RETCODE_PARAM_ERROR_ZERO = -44, /*!!< parameter value is zero */
+    NI_RETCODE_PARAM_ERROR_OOR = -45,  /*!!< parameter value is out of range */
+    NI_RETCODE_PARAM_ERROR_WIDTH_TOO_BIG =
+        -46, /*!!< parameter width value is too big */
+    NI_RETCODE_PARAM_ERROR_WIDTH_TOO_SMALL =
+        -47, /*!!< parameter width value is too small */
+    NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_BIG =
+        -48, /*!!< parameter height value is too big */
+    NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_SMALL =
+        -49, /*!!< parameter height value is too small */
+    NI_RETCODE_PARAM_ERROR_AREA_TOO_BIG =
+        -50, /*!!< parameter heightxwidth value is too big */
+    NI_RETCODE_ERROR_EXCEED_MAX_NUM_SESSIONS =
+        -51, /*!!< exceeding the max number of 64 sessions */
+    NI_RETCODE_ERROR_GET_DEVICE_POOL = -52, /*!!< cannot get info from device */
+    NI_RETCODE_ERROR_LOCK_DOWN_DEVICE =
+        -53, /*!!< cannot obtain the file lock across all the process for query */
+    NI_RETCODE_ERROR_UNLOCK_DEVICE = -54, /*!!< cannot unlock the lock */
+    NI_RETCODE_ERROR_OPEN_DEVICE = -55,   /*!!< cannot open the device */
+    NI_RETCODE_ERROR_INVALID_HANDLE =
+        -56, /*!!< the handles that passed in is wrong */
+    NI_RETCODE_ERROR_INVALID_ALLOCATION_METHOD =
+        -57, /*!!< the handles that passed in is wrong */
+    NI_RETCODE_ERROR_VPU_RECOVERY = -58, /*!!< VPU in recovery mode */
+    NI_RETCODE_PARAM_WARNING_DEPRECATED = -59,
+    NI_RETCODE_PARAM_ERROR_LOOK_AHEAD_DEPTH =
+        -60, /*!!< invalid lookahead depth */
+    NI_RETCODE_PARAM_ERROR_FILLER = -61,
+    NI_RETCODE_PARAM_ERROR_PICSKIP = -62,
+    NI_RETCODE_ERROR_UNSUPPORTED_FW_VERSION = -63,
+    NI_RETCODE_ERROR_UNSUPPORTED_FEATURE = -64,
+    NI_RETCODE_ERROR_PERMISSION_DENIED = -65,
+    NI_RETCODE_ERROR_STREAM_ERROR = -66,
 
-      NI_RETCODE_PARAM_WARN =
-          0x100, /*!!<Just a warning to print, safe to continue */
+    NI_RETCODE_PARAM_WARN =
+        0x100, /*!!<Just a warning to print, safe to continue */
 
-      /*!!< nvme device write buffer is full: not returned by fw but defined for
-    use to track write-buffer full condition */
-      NI_RETCODE_NVME_SC_WRITE_BUFFER_FULL = 0x200,
-      /*! Hardware Specific Error codes */
-      NI_RETCODE_NVME_SC_RESOURCE_UNAVAILABLE = 0x301,
-      NI_RETCODE_NVME_SC_RESOURCE_IS_EMPTY =
-          0x302, /*!!< Invalid resource, recommand application termination */
-      NI_RETCODE_NVME_SC_RESOURCE_NOT_FOUND =
-          0x303, /*!!< Invalid resource, recommand application termination */
-      NI_RETCODE_NVME_SC_REQUEST_NOT_COMPLETED = 0x304,
-      NI_RETCODE_NVME_SC_REQUEST_IN_PROGRESS =
-          0x305, /*!!< Request in progress, recommend application retry */
-      NI_RETCODE_NVME_SC_INVALID_PARAMETER = 0x306,
-      NI_RETCODE_NVME_SC_VPU_RECOVERY = 0x3FD,
-      NI_RETCODE_NVME_SC_VPU_RSRC_INSUFFICIENT =
-          0x3FE, /*!!< Insufficient resource, recommend application termination */
-      NI_RETCODE_NVME_SC_VPU_GENERAL_ERROR =
-          0x3FF, /*!!< General VPU error, recommend application termination */
-  } ni_retcode_t;
+    NI_RETCODE_EAGAIN =
+        0x101, /*!! Cannot read/write buffer let host decide what to do */
 
-  typedef enum _ni_nvme_opcode
-  {
-      nvme_cmd_flush = 0x00,
-      nvme_cmd_write = 0x01,
-      nvme_cmd_read = 0x02,
-      nvme_cmd_write_uncor = 0x04,
-      nvme_cmd_compare = 0x05,
-      nvme_cmd_write_zeroes = 0x08,
-      nvme_cmd_dsm = 0x09,
-      nvme_cmd_resv_register = 0x0d,
-      nvme_cmd_resv_report = 0x0e,
-      nvme_cmd_resv_acquire = 0x11,
-      nvme_cmd_resv_release = 0x15,
-      nvme_cmd_xcoder_write = 0x83,
-      nvme_cmd_xcoder_read = 0x84
-  } ni_nvme_opcode_t;
+    /*!!< nvme device write buffer is full: not returned by fw but defined for
+  use to track write-buffer full condition */
+    NI_RETCODE_NVME_SC_WRITE_BUFFER_FULL = 0x200,
+    /*! Hardware Specific Error codes */
+    NI_RETCODE_NVME_SC_RESOURCE_UNAVAILABLE = 0x301,
+    NI_RETCODE_NVME_SC_RESOURCE_IS_EMPTY =
+        0x302, /*!!< Invalid resource, recommand application termination */
+    NI_RETCODE_NVME_SC_RESOURCE_NOT_FOUND =
+        0x303, /*!!< Invalid resource, recommand application termination */
+    NI_RETCODE_NVME_SC_REQUEST_NOT_COMPLETED = 0x304,
+    NI_RETCODE_NVME_SC_REQUEST_IN_PROGRESS =
+        0x305, /*!!< Request in progress, recommend application retry */
+    NI_RETCODE_NVME_SC_INVALID_PARAMETER = 0x306,
+    NI_RETCODE_NVME_SC_STREAM_ERROR = 0x307, /*!!< Insufficient resource, recommend application termination */
+    NI_RETCODE_NVME_SC_VPU_RECOVERY = 0x3FD,
+    NI_RETCODE_NVME_SC_VPU_RSRC_INSUFFICIENT =
+        0x3FE, /*!!< Insufficient resource, recommend application termination */
+    NI_RETCODE_NVME_SC_VPU_GENERAL_ERROR =
+        0x3FF, /*!!< General VPU error, recommend application termination */
+} ni_retcode_t;
+
+typedef enum _ni_nvme_opcode
+{
+    nvme_cmd_flush = 0x00,
+    nvme_cmd_write = 0x01,
+    nvme_cmd_read = 0x02,
+    nvme_cmd_write_uncor = 0x04,
+    nvme_cmd_compare = 0x05,
+    nvme_cmd_write_zeroes = 0x08,
+    nvme_cmd_dsm = 0x09,
+    nvme_cmd_resv_register = 0x0d,
+    nvme_cmd_resv_report = 0x0e,
+    nvme_cmd_resv_acquire = 0x11,
+    nvme_cmd_resv_release = 0x15,
+    nvme_cmd_xcoder_write = 0x83,
+    nvme_cmd_xcoder_read = 0x84
+} ni_nvme_opcode_t;
 
 typedef enum _ni_scaler_opcode
 {
   NI_SCALER_OPCODE_SCALE   = 0,
   NI_SCALER_OPCODE_CROP    = 1,
+  NI_SCALER_OPCODE_FLIP    = 1,
   NI_SCALER_OPCODE_PAD     = 2,
   NI_SCALER_OPCODE_OVERLAY = 3,
-  NI_SCALER_OPCODE_STACK   = 4
+  NI_SCALER_OPCODE_STACK   = 4,
+  NI_SCALER_OPCODE_ROTATE  = 5,
+  NI_SCALER_OPCODE_DRAWBOX = 6,
+  NI_SCALER_OPCODE_IPOVLY  = 7,
+  NI_SCALER_OPCODE_WATERMARK = 8,
+  NI_SCALER_OPCODE_DELOGO = 9,
+  NI_SCALER_OPCODE_MERGE = 10
 } ni_scaler_opcode_t;
 
+typedef enum _ni_ai_status
+{
+    NI_AI_STATUS_SUCCESS = 0,
+    NI_AI_STATUS_GENERIC_ERROR = -1,
+    NI_AI_STATUS_NOT_INITIALIZED = -2,
+    NI_AI_STATUS_ALREADY_INITIALIZED = -3,
+    NI_AI_STATUS_IO_BUSY = -4,
+    NI_AI_STATUS_RESOURCE_NOT_AVAILABLE = -5,
+    NI_AI_STATUS_CREATE_NETWORK_FAILED = -6,
+    NI_AI_STATUS_INPUT_BUFFER_FULL = -7,
+    NI_AI_STATUS_OUTPUT_BUFFER_EMPTY = -8,
+    NI_AI_STATUS_INVALID_PARAMS = -9,
+    NI_AI_STATUS_ERROR_START_NETWORK = -10,
+    NI_AI_STATUS_ERROR_SET_INOUT = -11,
+    NI_AI_STATUS_BAD_OPTION = -12,
+    NI_AI_STATUS_MAP_ERROR = -13,
+    NI_AI_STATUS_CONTEXT_NOT_AVAILABLE = -14,
+    NI_AI_STATUS_MODEL_NOT_FOUND = -15,
+    NI_AI_STATUS_IO_ERROR = -16,
+    NI_AI_STATUS_INVALID_ADDRESS = -17,
+    NI_AI_STATUS_OUT_OF_MEMORY = -18,
+    NI_AI_STATUS_BAD_INOUT = -19,
+    NI_AI_STATUS_INVALID_INSTANCE = -20,
+    NI_AI_STATUS_IO_NOT_ALLOWED = -21,
+    NI_AI_STATUS_NETWORK_NOT_READY = -22,
+} ni_ai_status_t;
 #ifdef __cplusplus
 }
 #endif
-

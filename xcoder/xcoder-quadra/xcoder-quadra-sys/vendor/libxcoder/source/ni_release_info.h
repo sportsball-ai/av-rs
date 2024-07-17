@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_release_info.h
-*
-*  \brief  Release identification data generated at release time
-*
-*******************************************************************************/
+ *  \file   ni_release_info.h
+ *
+ *  \brief  Release identification data generated at release time
+ ******************************************************************************/
 
-#define NI_SW_RELEASE_TIME "2022-08-05_11:04:57_-0700"
-#define NI_SW_RELEASE_ID "Netint_Quadra_release_v4.0.0_RCB"
+#define NI_SW_RELEASE_TIME "2024-06-19_10:59:13_-0700"
+#define NI_SW_RELEASE_ID "Netint_Quadra_release_v4.9.2_RC2"

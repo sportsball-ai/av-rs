@@ -20,11 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   client.cpp
-*
-*  \brief  client test for NI Quadra android service 
-*
-*******************************************************************************/
+ *  \file   client.cpp
+ *
+ *  \brief  client test for NETINT video processing Android service 
+ *
+ ******************************************************************************/
 
 #include <android/hardware/nidec/1.0/INidec.h>
 #include <hidl/Status.h>
@@ -39,7 +39,6 @@
 
 using android::sp;
 using android::hardware::hidl_handle;
-using android::hardware::hidl_string;
 using android::hardware::nidec::V1_0::INidec;
 
 #define UNUSED(x) (void)(x)
@@ -65,7 +64,7 @@ int main()
         return -1;
     }
 
-    service->GetAppFlag(param, [&](int32_t ret, hidl_handle handle) {
+    service->GetAppFlag(param, [&](int32_t ret, const hidl_handle &handle) {
         printf("GetAppFlag: ret %d\n", ret);
         if (ret > 0)
         {

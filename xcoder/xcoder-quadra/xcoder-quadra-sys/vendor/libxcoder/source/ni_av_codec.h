@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_av_codec.h
-*
-*  \brief  NETINT audio/video related utility functions
-*
-*******************************************************************************/
+ *  \file   ni_av_codec.h
+ *
+ *  \brief  Audio/video related utility definitions
+ ******************************************************************************/
 
 #pragma once
 
@@ -37,6 +36,10 @@ extern "C" {
 // libxcoder API related definitions
 
 #define NI_NUM_PIXEL_ASPECT_RATIO 17
+#define NI_NAL_VPS_BIT (0x01)
+#define NI_NAL_SPS_BIT (0x01 << 1)
+#define NI_NAL_PPS_BIT (0x01 << 2)
+#define NI_GENERATE_ALL_NAL_HEADER_BIT (0x01 << 3)
 static const ni_rational_t
     ni_h264_pixel_aspect_list[NI_NUM_PIXEL_ASPECT_RATIO] = {
         {0, 1},   {1, 1},    {12, 11}, {10, 11}, {16, 11}, {40, 33},
@@ -63,55 +66,57 @@ typedef enum _ni_h264_sei_type_t
     NI_H264_SEI_TYPE_ALTERNATIVE_TRANSFER = 147,   // alternative transfer
 } ni_h264_sei_type_t;
 
-// pic_struct in picture timing SEI message
+/*! pic_struct in picture timing SEI message */
 typedef enum _ni_h264_sei_pic_struct_t
 {
-    NI_H264_SEI_PIC_STRUCT_FRAME = 0,          //  0: %frame
-    NI_H264_SEI_PIC_STRUCT_TOP_FIELD = 1,      //  1: top field
-    NI_H264_SEI_PIC_STRUCT_BOTTOM_FIELD = 2,   //  2: bottom field
-    NI_H264_SEI_PIC_STRUCT_TOP_BOTTOM =
-        3,   //  3: top field, bottom field, in that order
-    NI_H264_SEI_PIC_STRUCT_BOTTOM_TOP =
-        4,   //  4: bottom field, top field, in that order
-    NI_H264_SEI_PIC_STRUCT_TOP_BOTTOM_TOP =
-        5,   //  5: top field, bottom field, top field repeated, in that order
-    NI_H264_SEI_PIC_STRUCT_BOTTOM_TOP_BOTTOM =
-        6,   //  6: bottom field, top field, bottom field repeated, in that order
-    NI_H264_SEI_PIC_STRUCT_FRAME_DOUBLING = 7,   //  7: %frame doubling
-    NI_H264_SEI_PIC_STRUCT_FRAME_TRIPLING = 8    //  8: %frame tripling
+    NI_H264_SEI_PIC_STRUCT_FRAME = 0,               //!< %frame
+    NI_H264_SEI_PIC_STRUCT_TOP_FIELD = 1,           //!< top field
+    NI_H264_SEI_PIC_STRUCT_BOTTOM_FIELD = 2,        //!< bottom field
+    NI_H264_SEI_PIC_STRUCT_TOP_BOTTOM = 3,          //!< top field, bottom
+                                                    //!< field, in that order
+    NI_H264_SEI_PIC_STRUCT_BOTTOM_TOP = 4,          //!< bottom field, top
+                                                    //!< field, in that order
+    NI_H264_SEI_PIC_STRUCT_TOP_BOTTOM_TOP = 5,      //!< top field, bottom
+                                                    //!< field, top field
+                                                    //!< repeated, in that
+                                                    //!< order
+    NI_H264_SEI_PIC_STRUCT_BOTTOM_TOP_BOTTOM = 6,   //!< bottom field, top
+                                                    //!< field, bottom field
+                                                    //!< repeated, in that
+                                                    //!< order
+    NI_H264_SEI_PIC_STRUCT_FRAME_DOUBLING = 7,      //!< %frame doubling
+    NI_H264_SEI_PIC_STRUCT_FRAME_TRIPLING = 8       //!< %frame tripling
 } ni_h264_sei_pic_struct_t;
 
-/* Chromaticity coordinates of the source primaries.
- * These values match the ones defined by ISO/IEC 23001-8_2013 § 7.1.
- */
+/*! Chromaticity coordinates of the source primaries. These values match the
+    ones defined by ISO/IEC 23001-8_2013 § 7.1. */
 typedef enum _ni_color_primaries
 {
     NI_COL_PRI_RESERVED0 = 0,
-    NI_COL_PRI_BT709 =
-        1,   //< also ITU-R BT1361 / IEC 61966-2-4 / SMPTE RP177 Annex B
+    NI_COL_PRI_BT709 = 1,   //!< also ITU-R BT1361 / IEC 61966-2-4 / SMPTE
+                            //!< RP177 Annex B
     NI_COL_PRI_UNSPECIFIED = 2,
     NI_COL_PRI_RESERVED = 3,
-    NI_COL_PRI_BT470M =
-        4,   //< also FCC Title 47 Code of Federal Regulations 73.682 (a)(20)
-
-    NI_COL_PRI_BT470BG =
-        5,   //< also ITU-R BT601-6 625 / ITU-R BT1358 625 / ITU-R BT1700 625 PAL & SECAM
-    NI_COL_PRI_SMPTE170M =
-        6,   //< also ITU-R BT601-6 525 / ITU-R BT1358 525 / ITU-R BT1700 NTSC
-    NI_COL_PRI_SMPTE240M = 7,   //< functionally identical to above
-    NI_COL_PRI_FILM = 8,        //< colour filters using Illuminant C
-    NI_COL_PRI_BT2020 = 9,      //< ITU-R BT2020
-    NI_COL_PRI_SMPTE428 = 10,   //< SMPTE ST 428-1 (CIE 1931 XYZ)
+    NI_COL_PRI_BT470M = 4,      //!< also FCC Title 47 Code of Federal
+                                //!< Regulations 73.682 (a)(20)
+    NI_COL_PRI_BT470BG = 5,     //!< also ITU-R BT601-6 625 / ITU-R BT1358
+                                //!< 625 / ITU-R BT1700 625 PAL & SECAM
+    NI_COL_PRI_SMPTE170M = 6,   //!< also ITU-R BT601-6 525 / ITU-R BT1358
+                                //!< 525 / ITU-R BT1700 NTSC
+    NI_COL_PRI_SMPTE240M = 7,   //!< functionally identical to above
+    NI_COL_PRI_FILM = 8,        //!< colour filters using Illuminant C
+    NI_COL_PRI_BT2020 = 9,      //!< ITU-R BT2020
+    NI_COL_PRI_SMPTE428 = 10,   //!< SMPTE ST 428-1 (CIE 1931 XYZ)
     NI_COL_PRI_SMPTEST428_1 = NI_COL_PRI_SMPTE428,
-    NI_COL_PRI_SMPTE431 = 11,    //< SMPTE ST 431-2 (2011) / DCI P3
-    NI_COL_PRI_SMPTE432 = 12,    //< SMPTE ST 432-1 (2010) / P3 D65 / Display P3
-    NI_COL_PRI_JEDEC_P22 = 22,   //< JEDEC P22 phosphors
-    NI_COL_PRI_NB                //< Not part of ABI
+    NI_COL_PRI_SMPTE431 = 11,    //!< SMPTE ST 431-2 (2011) / DCI P3
+    NI_COL_PRI_SMPTE432 = 12,    //!< SMPTE ST 432-1 (2010) / P3 D65 / Display
+                                 //!< P3
+    NI_COL_PRI_JEDEC_P22 = 22,   //!< JEDEC P22 phosphors
+    NI_COL_PRI_NB                //!< Not part of ABI
 } ni_color_primaries_t;
 
-/* Color Transfer Characteristic.
- * These values match the ones defined by ISO/IEC 23001-8_2013 § 7.2.
- */
+/*! Color Transfer Characteristic. These values match the ones defined by
+    ISO/IEC 23001-8_2013 § 7.2. */
 typedef enum _ni_color_transfer_characteristic
 {
     NI_COL_TRC_RESERVED0 = 0,
@@ -144,10 +149,8 @@ typedef enum _ni_color_transfer_characteristic
     NI_COL_TRC_NB   //< Not part of ABI
 } ni_color_transfer_characteristic_t;
 
-/**
- * YUV colorspace type.
- * These values match the ones defined by ISO/IEC 23001-8_2013 § 7.3.
- */
+/*! YUV colorspace type. These values match the ones defined by ISO/IEC
+    23001-8_2013 § 7.3. */
 typedef enum _ni_color_space
 {
     NI_COL_SPC_RGB =
@@ -177,7 +180,7 @@ typedef enum _ni_color_space
     NI_COL_SPC_NB            //< Not part of ABI
 } ni_color_space_t;
 
-// HRD parameters
+/*! HRD parameters */
 typedef struct _ni_hrd_params
 {
     uint32_t au_cpb_removal_delay_length_minus1;
@@ -209,6 +212,9 @@ typedef struct _ni_mastering_display_metadata
     // Flag indicating whether the luminance (min_ and max_) have been set.
     int has_luminance;
 } ni_mastering_display_metadata_t;
+
+#define MASTERING_DISP_CHROMA_DEN 50000 //denominator value to have 0.00002 units
+#define MASTERING_DISP_LUMA_DEN 10000 //denominator value to have 0.0001 units
 
 // struct describing HDR10 Content light level
 typedef struct _ni_content_light_level
@@ -502,6 +508,7 @@ ni_enc_prep_aux_data(ni_session_context_t *p_enc_ctx, ni_frame_t *p_enc_frame,
  *  \param[in]  udu_data SEI for User data unregistered
  *  \param[in]  hdrp_data SEI for HDR10+
  *  \param[in]  is_hwframe, must be 0 (sw frame) or 1 (hw frame)
+ *  \param[in]  is_semiplanar, must be 1 (semiplanar frame) or 0 (not)
  *
  *  \return NONE
  ******************************************************************************/
@@ -511,8 +518,94 @@ ni_enc_copy_aux_data(ni_session_context_t *p_enc_ctx, ni_frame_t *p_enc_frame,
                      const uint8_t *mdcv_data, const uint8_t *cll_data,
                      const uint8_t *cc_data, const uint8_t *udu_data,
                      const uint8_t *hdrp_data, int is_hwframe,
-                     int is_nv12frame);
+                     int is_semiplanar);
 
+/*!*****************************************************************************
+  *  \brief  Send an input data frame to the encoder with YUV data given in 
+  *   the inputs.
+  * 
+  *   For ideal performance memory should be 4k aligned. If it is not 4K aligned
+  *   then a temporary 4k aligned memory will be used to copy data to and from
+  *   when writing and reading. This will negatively impact performance.
+  * 
+  *   Any metadata to be sent with the frame should be attached to p_enc_frame
+  *   as aux data (e.g. using ni_frame_new_aux_data()).
+  *
+  *  \param[in] p_ctx                         Encoder session context
+  *  \param[in] p_enc_frame                   Struct holding information about the frame 
+  *                                           to be sent to the encoder
+  *  \param[in] p_yuv_buffer                  Caller allocated buffer holding YUV data 
+  *                                           for the frame
+  *
+  *  \return On success
+  *                          Total number of bytes written
+  *          On failure
+  *                          NI_RETCODE_INVALID_PARAM
+  *                          NI_RETCODE_ERROR_MEM_ALOC
+  *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+  *                          NI_RETCODE_ERROR_INVALID_SESSION
+  *****************************************************************************/
+LIB_API int ni_enc_write_from_yuv_buffer(ni_session_context_t *p_ctx,
+                                         ni_frame_t *p_enc_frame,
+                                         uint8_t *p_yuv_buffer);
+
+/*!******************************************************************************
+ * \brief  Extract custom sei payload data from pkt_data,
+ *  and save it to ni_packet_t
+ *
+ * \param uint8_t *pkt_data - FFMpeg AVPacket data
+ * \param int pkt_size - packet size
+ * \param long index - pkt data index of custom sei first byte after SEI type
+ * \param ni_packet_t *p_packet - netint internal packet
+ * \param uint8_t sei_type - type of SEI
+ * \param int vcl_found - whether got vcl in the pkt data, 1 means got
+ *
+ * \return - 0 on success, non-0 on failure
+ ********************************************************************************/
+LIB_API int ni_extract_custom_sei(uint8_t *pkt_data, int pkt_size, long index,
+                        ni_packet_t *p_packet, uint8_t sei_type, int vcl_found);
+
+/*!******************************************************************************
+ * \brief  Decode parse packet
+ *
+ * \param[in] p_session_ctx             Pointer to a caller allocated 
+ *                                      ni_session_context_t struct
+ * \param[in] p_param                   Pointer to a caller allocated
+ *                                      ni_xcoder_params_t struct
+ * \param[in] *data                     FFMpeg AVPacket data
+ * \param[in] size                      packet size
+ * \param[in] p_packet                  Pointer to a caller allocated
+ *                                      ni_packet_t struct
+ * \param[in] low_delay                 FFmpeg lowdelay
+ * \param[in] codec_format              enum ni_codec_format_t
+ * \param[in] pkt_nal_bitmap            pkt_nal_bitmap
+ * \param[in] custom_sei_type           custom_sei_type
+ * \param[in] *svct_skip_next_packet    svct_skip_next_packet int*
+ * \param[in] *is_lone_sei_pkt          is_lone_sei_pkt int*
+ *
+ * \return - 0 on success, non-0 on failure
+ ********************************************************************************/
+LIB_API int ni_dec_packet_parse(ni_session_context_t *p_session_ctx,
+                        ni_xcoder_params_t *p_param, uint8_t *data, int size,
+                        ni_packet_t *p_packet, int low_delay, int codec_format,
+                        int pkt_nal_bitmap, int custom_sei_type,
+                        int *svct_skip_next_packet, int *is_lone_sei_pkt);
+
+/*!******************************************************************************
+ * \brief  Expand frame form src frame
+ *
+ * \param[in] dst                  Pointer to a caller allocated ni_frame_t struct
+ * \param[in] src                  Pointer to a caller allocated ni_frame_t struct
+ * \param[in] dst_stride           int dst_stride[]
+ * \param[in] raw_width            frame width
+ * \param[in] raw_height           frame height
+ * \param[in] ni_fmt               ni_pix_fmt_t type for ni pix_fmt
+ * \param[in] nb_planes            int nb_planes
+ *
+ * \return - 0 on success, NI_RETCODE_FAILURE on failure
+ ********************************************************************************/
+LIB_API int ni_expand_frame(ni_frame_t *dst, ni_frame_t *src, int dst_stride[],
+                        int raw_width, int raw_height, int ni_fmt, int nb_planes);
 #ifdef __cplusplus
 }
 #endif

@@ -2,7 +2,7 @@
 #[path = ""]
 mod linux_impl {
     use snafu::Snafu;
-    use std::ops::Deref;
+    use std::{ffi::c_uint, ops::Deref};
     use xcoder_quadra_sys as sys;
 
     pub mod cropper;
@@ -90,6 +90,109 @@ mod linux_impl {
         let num = (fps * den as f64).round() as _;
         (num, den)
     }
+
+    fn alloc_zeroed<T>() -> Box<std::mem::MaybeUninit<T>> {
+        use std::alloc::GlobalAlloc as _;
+        unsafe {
+            let raw = std::alloc::System.alloc_zeroed(std::alloc::Layout::from_size_align_unchecked(
+                std::mem::size_of::<T>(),
+                std::mem::align_of::<T>(),
+            ));
+            Box::from_raw(raw as *mut std::mem::MaybeUninit<T>)
+        }
+    }
+
+    #[enum_repr::EnumRepr(type = "c_uint")]
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum XcoderPixelFormat {
+        Yuv420Planar = sys::ni_pix_fmt_t_NI_PIX_FMT_YUV420P,
+        Yuv420Planar10BitLittleEndian = sys::ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE,
+        Nv12 = sys::ni_pix_fmt_t_NI_PIX_FMT_NV12,
+        P010LittleEndian = sys::ni_pix_fmt_t_NI_PIX_FMT_P010LE,
+        /// 32 bit packed
+        Rgba = sys::ni_pix_fmt_t_NI_PIX_FMT_RGBA,
+        /// 32 bit packed
+        Bgra = sys::ni_pix_fmt_t_NI_PIX_FMT_BGRA,
+        /// 32 bit packed
+        Argb = sys::ni_pix_fmt_t_NI_PIX_FMT_ARGB,
+        /// 32 bit packed
+        Abgr = sys::ni_pix_fmt_t_NI_PIX_FMT_ABGR,
+        /// 32 bit packed
+        Bgr0 = sys::ni_pix_fmt_t_NI_PIX_FMT_BGR0,
+        /// 24 bit packed
+        Bgrp = sys::ni_pix_fmt_t_NI_PIX_FMT_BGRP,
+        Nv16 = sys::ni_pix_fmt_t_NI_PIX_FMT_NV16,
+        Yuyv422 = sys::ni_pix_fmt_t_NI_PIX_FMT_YUYV422,
+        Uyvy422 = sys::ni_pix_fmt_t_NI_PIX_FMT_UYVY422,
+        None = sys::ni_pix_fmt_t_NI_PIX_FMT_NONE,
+    }
+
+    impl XcoderPixelFormat {
+        pub fn ten_bit(&self) -> bool {
+            use XcoderPixelFormat::*;
+            matches!(self, Yuv420Planar10BitLittleEndian | P010LittleEndian)
+        }
+
+        /// Returns how many planes are in the layout. For semi-planar formats, a plane containing multiple
+        /// types of data is still considered to be one plane.
+        pub fn plane_count(&self) -> usize {
+            match self {
+                XcoderPixelFormat::Yuv420Planar |
+                XcoderPixelFormat::Yuv420Planar10BitLittleEndian => 3,
+                XcoderPixelFormat::Nv12 |
+                XcoderPixelFormat::Nv16 |
+                XcoderPixelFormat::P010LittleEndian => 2,
+                XcoderPixelFormat::Rgba |
+                XcoderPixelFormat::Bgra |
+                XcoderPixelFormat::Argb |
+                XcoderPixelFormat::Abgr |
+                XcoderPixelFormat::Bgr0 |
+                XcoderPixelFormat::Bgrp |
+                XcoderPixelFormat::Yuyv422 |
+                XcoderPixelFormat::Uyvy422 => 1,
+                XcoderPixelFormat::None => 0,
+            }
+        }
+
+        pub fn strides(&self, width: i32) -> [i32; 3] {
+            match self {
+                XcoderPixelFormat::Yuv420Planar => [width, width / 2, width / 2],
+                XcoderPixelFormat::Yuv420Planar10BitLittleEndian => [width * 2, width, width],
+                XcoderPixelFormat::Nv12 => [width, width, 0],
+                XcoderPixelFormat::P010LittleEndian => [width * 2, width * 2, 0],
+                XcoderPixelFormat::Rgba |
+                XcoderPixelFormat::Bgra |
+                XcoderPixelFormat::Argb |
+                XcoderPixelFormat::Abgr |
+                XcoderPixelFormat::Bgr0 => [width * 4, 0, 0],
+                XcoderPixelFormat::Bgrp => [width * 3, 0, 0],
+                XcoderPixelFormat::Nv16 |
+                XcoderPixelFormat::Yuyv422 |
+                XcoderPixelFormat::Uyvy422 => [width, width / 2, 0],
+                XcoderPixelFormat::None => [0; 3],
+            }
+        }
+
+        pub fn heights(&self, height: i32) -> [i32; 3] {
+            match self {
+                XcoderPixelFormat::Yuv420Planar |
+                XcoderPixelFormat::Yuv420Planar10BitLittleEndian => [height, height / 2, height / 2],
+                XcoderPixelFormat::Nv12 |
+                XcoderPixelFormat::P010LittleEndian => [height, height / 2, 0],
+                XcoderPixelFormat::Rgba |
+                XcoderPixelFormat::Bgra |
+                XcoderPixelFormat::Argb |
+                XcoderPixelFormat::Abgr |
+                XcoderPixelFormat::Bgr0 |
+                XcoderPixelFormat::Bgrp => [height, 0, 0],
+                XcoderPixelFormat::Nv16 |
+                XcoderPixelFormat::Yuyv422 |
+                XcoderPixelFormat::Uyvy422 => [height, height, 0],
+                XcoderPixelFormat::None => [0; 3],
+            }
+        }
+
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -146,6 +249,7 @@ mod test {
                 level_idc: None,
             },
             bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
             hardware: Some(decoder.hardware()),
             multicore_joint_mode: false,
         })
@@ -234,6 +338,7 @@ mod test {
                     level_idc: None,
                 },
                 bit_depth: 8,
+                pixel_format: XcoderPixelFormat::Yuv420Planar,
                 hardware: Some(decoder.hardware()),
                 multicore_joint_mode: true,
             })

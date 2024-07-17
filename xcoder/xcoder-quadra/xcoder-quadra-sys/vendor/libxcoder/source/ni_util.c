@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ni_util.c
-*
-*  \brief  Exported utility routines
-*
-*******************************************************************************/
+ *  \file   ni_util.c
+ *
+ *  \brief  Utility definitions
+ ******************************************************************************/
 
 #if __linux__ || __APPLE__
 #include <sys/ioctl.h>
@@ -39,6 +38,94 @@
 
 #include "ni_nvme.h"
 #include "ni_util.h"
+
+typedef struct _ni_err_rc_txt_entry
+{
+    ni_retcode_t rc;
+    const char *txt;
+} ni_err_rc_txt_entry_t;
+
+static const ni_err_rc_txt_entry_t ni_err_rc_description[] = {
+    {NI_RETCODE_SUCCESS, "SUCCESS"},
+    {NI_RETCODE_FAILURE, "FAILURE"},
+    {NI_RETCODE_INVALID_PARAM, "INVALID_PARAM"},
+    {NI_RETCODE_ERROR_MEM_ALOC, "ERROR_MEM_ALOC"},
+    {NI_RETCODE_ERROR_NVME_CMD_FAILED, "ERROR_NVME_CMD_FAILED"},
+    {NI_RETCODE_ERROR_INVALID_SESSION, "ERROR_INVALID_SESSION"},
+    {NI_RETCODE_ERROR_RESOURCE_UNAVAILABLE, "ERROR_RESOURCE_UNAVAILABLE"},
+    {NI_RETCODE_PARAM_INVALID_NAME, "PARAM_INVALID_NAME"},
+    {NI_RETCODE_PARAM_INVALID_VALUE, "PARAM_INVALID_VALUE"},
+    {NI_RETCODE_PARAM_ERROR_FRATE, "PARAM_ERROR_FRATE"},
+    {NI_RETCODE_PARAM_ERROR_BRATE, "PARAM_ERROR_BRATE"},
+    {NI_RETCODE_PARAM_ERROR_TRATE, "PARAM_ERROR_TRATE"},
+    {NI_RETCODE_PARAM_ERROR_VBV_BUFFER_SIZE, "PARAM_ERROR_VBV_BUFFER_SIZE"},
+    {NI_RETCODE_PARAM_ERROR_INTRA_PERIOD, "PARAM_ERROR_INTRA_PERIOD"},
+    {NI_RETCODE_PARAM_ERROR_INTRA_QP, "PARAM_ERROR_INTRA_QP"},
+    {NI_RETCODE_PARAM_ERROR_GOP_PRESET, "PARAM_ERROR_GOP_PRESET"},
+    {NI_RETCODE_PARAM_ERROR_CU_SIZE_MODE, "PARAM_ERROR_CU_SIZE_MODE"},
+    {NI_RETCODE_PARAM_ERROR_MX_NUM_MERGE, "PARAM_ERROR_MX_NUM_MERGE"},
+    {NI_RETCODE_PARAM_ERROR_DY_MERGE_8X8_EN, "PARAM_ERROR_DY_MERGE_8X8_EN"},
+    {NI_RETCODE_PARAM_ERROR_DY_MERGE_16X16_EN, "PARAM_ERROR_DY_MERGE_16X16_EN"},
+    {NI_RETCODE_PARAM_ERROR_DY_MERGE_32X32_EN, "PARAM_ERROR_DY_MERGE_32X32_EN"},
+    {NI_RETCODE_PARAM_ERROR_CU_LVL_RC_EN, "PARAM_ERROR_CU_LVL_RC_EN"},
+    {NI_RETCODE_PARAM_ERROR_HVS_QP_EN, "PARAM_ERROR_HVS_QP_EN"},
+    {NI_RETCODE_PARAM_ERROR_HVS_QP_SCL, "PARAM_ERROR_HVS_QP_SCL"},
+    {NI_RETCODE_PARAM_ERROR_MN_QP, "PARAM_ERROR_MN_QP"},
+    {NI_RETCODE_PARAM_ERROR_MX_QP, "PARAM_ERROR_MX_QP"},
+    {NI_RETCODE_PARAM_ERROR_MX_DELTA_QP, "PARAM_ERROR_MX_DELTA_QP"},
+    {NI_RETCODE_PARAM_ERROR_CONF_WIN_TOP, "PARAM_ERROR_CONF_WIN_TOP"},
+    {NI_RETCODE_PARAM_ERROR_CONF_WIN_BOT, "PARAM_ERROR_CONF_WIN_BOT"},
+    {NI_RETCODE_PARAM_ERROR_CONF_WIN_L, "PARAM_ERROR_CONF_WIN_L"},
+    {NI_RETCODE_PARAM_ERROR_CONF_WIN_R, "PARAM_ERROR_CONF_WIN_R"},
+    {NI_RETCODE_PARAM_ERROR_USR_RMD_ENC_PARAM, "PARAM_ERROR_USR_RMD_ENC_PARAM"},
+    {NI_RETCODE_PARAM_ERROR_BRATE_LT_TRATE, "PARAM_ERROR_BRATE_LT_TRATE"},
+    {NI_RETCODE_PARAM_ERROR_RCENABLE, "PARAM_ERROR_RCENABLE"},
+    {NI_RETCODE_PARAM_ERROR_MAXNUMMERGE, "PARAM_ERROR_MAXNUMMERGE"},
+    {NI_RETCODE_PARAM_ERROR_CUSTOM_GOP, "PARAM_ERROR_CUSTOM_GOP"},
+    {NI_RETCODE_PARAM_ERROR_PIC_WIDTH, "PARAM_ERROR_PIC_WIDTH"},
+    {NI_RETCODE_PARAM_ERROR_PIC_HEIGHT, "PARAM_ERROR_PIC_HEIGHT"},
+    {NI_RETCODE_PARAM_ERROR_DECODING_REFRESH_TYPE, "PARAM_ERROR_DECODING_REFRESH_TYPE"},
+    {NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_8X8_EN, "PARAM_ERROR_CUSIZE_MODE_8X8_EN"},
+    {NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_16X16_EN, "PARAM_ERROR_CUSIZE_MODE_16X16_EN"},
+    {NI_RETCODE_PARAM_ERROR_CUSIZE_MODE_32X32_EN, "PARAM_ERROR_CUSIZE_MODE_32X32_EN"},
+    {NI_RETCODE_PARAM_ERROR_TOO_BIG, "PARAM_ERROR_TOO_BIG"},
+    {NI_RETCODE_PARAM_ERROR_TOO_SMALL, "PARAM_ERROR_TOO_SMALL"},
+    {NI_RETCODE_PARAM_ERROR_ZERO, "PARAM_ERROR_ZERO"},
+    {NI_RETCODE_PARAM_ERROR_OOR, "PARAM_ERROR_OOR"},
+    {NI_RETCODE_PARAM_ERROR_WIDTH_TOO_BIG, "PARAM_ERROR_WIDTH_TOO_BIG"},
+    {NI_RETCODE_PARAM_ERROR_WIDTH_TOO_SMALL, "PARAM_ERROR_WIDTH_TOO_SMALL"},
+    {NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_BIG, "PARAM_ERROR_HEIGHT_TOO_BIG"},
+    {NI_RETCODE_PARAM_ERROR_HEIGHT_TOO_SMALL, "PARAM_ERROR_HEIGHT_TOO_SMALL"},
+    {NI_RETCODE_PARAM_ERROR_AREA_TOO_BIG, "PARAM_ERROR_AREA_TOO_BIG"},
+    {NI_RETCODE_ERROR_EXCEED_MAX_NUM_SESSIONS, "ERROR_EXCEED_MAX_NUM_SESSIONS"},
+    {NI_RETCODE_ERROR_GET_DEVICE_POOL, "ERROR_GET_DEVICE_POOL"},
+    {NI_RETCODE_ERROR_LOCK_DOWN_DEVICE, "ERROR_LOCK_DOWN_DEVICE"},
+    {NI_RETCODE_ERROR_UNLOCK_DEVICE, "ERROR_UNLOCK_DEVICE"},
+    {NI_RETCODE_ERROR_OPEN_DEVICE, "ERROR_OPEN_DEVICE"},
+    {NI_RETCODE_ERROR_INVALID_HANDLE, "ERROR_INVALID_HANDLE"},
+    {NI_RETCODE_ERROR_INVALID_ALLOCATION_METHOD, "ERROR_INVALID_ALLOCATION_METHOD"},
+    {NI_RETCODE_ERROR_VPU_RECOVERY, "ERROR_VPU_RECOVERY"},
+    {NI_RETCODE_ERROR_STREAM_ERROR, "ERROR_STREAM_ERROR"},
+
+    {NI_RETCODE_PARAM_WARNING_DEPRECATED, "PARAM_WARNING_DEPRECATED"},
+    {NI_RETCODE_PARAM_ERROR_LOOK_AHEAD_DEPTH, "PARAM_ERROR_LOOK_AHEAD_DEPTH"},
+    {NI_RETCODE_PARAM_ERROR_FILLER, "PARAM_ERROR_FILLER"},
+    {NI_RETCODE_PARAM_ERROR_PICSKIP, "PARAM_ERROR_PICSKIP"},
+
+    {NI_RETCODE_PARAM_WARN, "PARAM_WARN"},
+
+    {NI_RETCODE_NVME_SC_WRITE_BUFFER_FULL, "NVME_SC_WRITE_BUFFER_FULL"},
+    {NI_RETCODE_NVME_SC_RESOURCE_UNAVAILABLE, "NVME_SC_RESOURCE_UNAVAILABLE"},
+    {NI_RETCODE_NVME_SC_RESOURCE_IS_EMPTY, "NVME_SC_RESOURCE_IS_EMPTY"},
+    {NI_RETCODE_NVME_SC_RESOURCE_NOT_FOUND, "NVME_SC_RESOURCE_NOT_FOUND"},
+    {NI_RETCODE_NVME_SC_REQUEST_NOT_COMPLETED, "NVME_SC_REQUEST_NOT_COMPLETED"},
+    {NI_RETCODE_NVME_SC_REQUEST_IN_PROGRESS, "NVME_SC_REQUEST_IN_PROGRESS"},
+    {NI_RETCODE_NVME_SC_INVALID_PARAMETER, "NVME_SC_INVALID_PARAMETER"},
+    {NI_RETCODE_NVME_SC_STREAM_ERROR, "NVME_SC_STREAM_ERROR"},
+    {NI_RETCODE_NVME_SC_VPU_RECOVERY, "NVME_SC_VPU_RECOVERY"},
+    {NI_RETCODE_NVME_SC_VPU_RSRC_INSUFFICIENT, "NVME_SC_VPU_RSRC_INSUFFICIENT"},
+    {NI_RETCODE_NVME_SC_VPU_GENERAL_ERROR, "NVME_SC_VPU_GENERAL_ERROR"},
+};
 
 /*!*****************************************************************************
  *  \brief Get time for logs with microsecond timestamps
@@ -94,20 +181,33 @@ uint32_t ni_round_up(uint32_t number_to_round, uint32_t multiple)
     return (number_to_round + multiple - remainder);
 }
 
-int32_t ni_posix_memalign(void **pp_memptr, size_t alignment, size_t size)
+/*!*****************************************************************************
+ *  \brief Allocate aligned memory
+ *
+ *  \param[in/out] memptr  The address of the allocated memory will be a
+ *                         multiple of alignment, which must be a power of two
+ *                         and a multiple of sizeof(void *).  If size is 0, then
+ *                         the value placed is either NULL, or a unique pointer
+ *                         value that can later be successfully passed to free.
+ *  \param[in] alignment   The alignment value of the allocated value.
+ *  \param[in] size        The allocated memory size.
+ *
+ *  \return                0 for success, ENOMEM for error
+ ******************************************************************************/
+int ni_posix_memalign(void **memptr, size_t alignment, size_t size)
 {
 #ifdef _WIN32
-    *pp_memptr = malloc(size);
-    if (NULL == *pp_memptr)
+    *memptr = _aligned_malloc(size, alignment);
+    if (NULL == *memptr)
     {
-        return 1;
+        return ENOMEM;
     } else
     {
-        ZeroMemory(*pp_memptr, size);
+        ZeroMemory(*memptr, size);
         return 0;
     }
 #else
-    return posix_memalign(pp_memptr, alignment, size);
+    return posix_memalign(memptr, alignment, size);
 #endif
 }
 
@@ -128,6 +228,8 @@ uint32_t ni_get_kernel_max_io_size(const char * p_dev)
     size_t len = 0;
     int err = 0;
 
+    memset(file_name, 0, KERNEL_NVME_FILE_NAME_MAX_SZ);
+
     if (!p_dev)
     {
         ni_log(NI_LOG_ERROR, "Invalid Arguments\n");
@@ -143,7 +245,7 @@ uint32_t ni_get_kernel_max_io_size(const char * p_dev)
 
     // Get Max number of segments from /sys
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, SYS_PARAMS_PREFIX_PATH, SYS_PREFIX_SZ);
+    strcpy(file_name, SYS_PARAMS_PREFIX_PATH);
     //start from 5 chars ahead to not copy the "/dev/" since we only need whats after it
     strncat(file_name, (char *)(p_dev + 5), sizeof(file_name) - SYS_PREFIX_SZ);
     strncat(file_name, KERNEL_NVME_MAX_SEG_PATH,
@@ -167,7 +269,7 @@ uint32_t ni_get_kernel_max_io_size(const char * p_dev)
     p_file = NULL;
     // Get Max segment size from /sys
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, SYS_PARAMS_PREFIX_PATH, SYS_PREFIX_SZ);
+    strcpy(file_name, SYS_PARAMS_PREFIX_PATH);
     strncat(file_name, (char *)(p_dev + 5), sizeof(file_name) - SYS_PREFIX_SZ);
     strncat(file_name, KERNEL_NVME_MIN_IO_SZ_PATH,
             sizeof(file_name) - SYS_PREFIX_SZ - len);
@@ -190,7 +292,7 @@ uint32_t ni_get_kernel_max_io_size(const char * p_dev)
     p_file = NULL;
     //Now get max_hw_sectors_kb
     memset(file_name, 0, sizeof(file_name));
-    strncpy(file_name, SYS_PARAMS_PREFIX_PATH, SYS_PREFIX_SZ);
+    strcpy(file_name, SYS_PARAMS_PREFIX_PATH);
     strncat(file_name, (char *)(p_dev + 5), sizeof(file_name) - SYS_PREFIX_SZ);
     strncat(file_name, KERNEL_NVME_MAX_HW_SEC_KB_PATH,
             sizeof(file_name) - SYS_PREFIX_SZ - len);
@@ -213,13 +315,13 @@ uint32_t ni_get_kernel_max_io_size(const char * p_dev)
         MAX_IO_TRANSFER_SIZE)
     {
         io_size = MAX_IO_TRANSFER_SIZE;
-        //printf("max_io_size is set to: %d because its bigger than maximum limit of: %d\n",io_size, MAX_IO_TRANSFER_SIZE);
+        //ni_log(NI_LOG_INFO, "max_io_size is set to: %d because its bigger than maximum limit of: %d\n",io_size, MAX_IO_TRANSFER_SIZE);
     } else
     {
         io_size = ni_min(min_io_size * max_segments, max_hw_sectors_kb * 1024);
     }
 
-    // printf("\nMAX NVMe IO Size of %d was calculated for this platform and will
+    // ni_log(NI_LOG_INFO, "\nMAX NVMe IO Size of %d was calculated for this platform and will
     // be used unless overwritten by user settings\n",io_size);
     fflush(stdout);
 
@@ -295,6 +397,35 @@ void ni_usleep(int64_t usec)
         sleep(usec >> 32);
     }
 #endif
+}
+
+char *ni_strtok(char *s, const char *delim, char **saveptr)
+{
+    char *tok;
+
+    if (!s && !(s = *saveptr))
+        return NULL;
+
+    /* skip leading delimiters */
+    s += strspn(s, delim);
+
+    /* s now points to the first non delimiter char, or to the end of the string */
+    if (!*s) {
+        *saveptr = NULL;
+        return NULL;
+    }
+    tok = s++;
+
+    /* skip non delimiters */
+    s += strcspn(s, delim);
+    if (*s) {
+        *s = '\0';
+        *saveptr = s+1;
+    } else {
+        *saveptr = NULL;
+    }
+
+    return tok;
 }
 
 // memory buffer pool operations (one use is for decoder frame buffer pool)
@@ -391,7 +522,7 @@ void ni_buf_pool_return_buffer(ni_buf_t *buf, ni_buf_pool_t *p_buffer_pool)
   if (!p_buffer_pool)
   {
       ni_log(NI_LOG_DEBUG, "%s: pool already freed, self destroy\n", __func__);
-      free(buf->buf);
+      ni_aligned_free(buf->buf);
       free(buf);
       return;
   }
@@ -447,7 +578,7 @@ ni_buf_t *ni_buf_pool_allocate_buffer(ni_buf_pool_t *p_buffer_pool,
 
         if (ni_posix_memalign(&p_buf, sysconf(_SC_PAGESIZE), buffer_size))
         {
-            free(p_buffer);
+            ni_aligned_free(p_buffer);
             return NULL;
         }
         ni_log(NI_LOG_DEBUG, "%s ptr %p  buf %p\n", __func__, p_buf, p_buffer);
@@ -483,7 +614,7 @@ int32_t ni_dec_fme_buffer_pool_initialize(ni_session_context_t* p_ctx,
     int width_aligned;
     int height_aligned;
 
-    ni_log(NI_LOG_TRACE, "%s: enter\n", __func__);
+    ni_log2(p_ctx, NI_LOG_TRACE,  "%s: enter\n", __func__);
 
     if (QUADRA)
     {
@@ -526,7 +657,7 @@ int32_t ni_dec_fme_buffer_pool_initialize(ni_session_context_t* p_ctx,
 
     if (p_ctx->dec_fme_buf_pool != NULL)
     {
-        ni_log(NI_LOG_DEBUG,
+        ni_log2(p_ctx, NI_LOG_DEBUG, 
                "Warning init dec_fme Buf pool already with size %u\n",
                p_ctx->dec_fme_buf_pool->number_of_buffers);
 
@@ -553,7 +684,7 @@ int32_t ni_dec_fme_buffer_pool_initialize(ni_session_context_t* p_ctx,
     if ((p_ctx->dec_fme_buf_pool =
              (ni_buf_pool_t *)malloc(sizeof(ni_buf_pool_t))) == NULL)
     {
-        ni_log(NI_LOG_ERROR, "Error alloc for dec fme buf pool\n");
+        ni_log2(p_ctx, NI_LOG_ERROR,  "Error alloc for dec fme buf pool\n");
         return -1;
     }
 
@@ -562,7 +693,7 @@ int32_t ni_dec_fme_buffer_pool_initialize(ni_session_context_t* p_ctx,
     ni_pthread_mutex_init(&p_ctx->dec_fme_buf_pool->mutex);
     p_ctx->dec_fme_buf_pool->number_of_buffers = number_of_buffers;
 
-    ni_log(NI_LOG_DEBUG,
+    ni_log2(p_ctx, NI_LOG_DEBUG, 
            "ni_dec_fme_buffer_pool_initialize: entries %d  entry size "
            "%d\n",
            number_of_buffers, buffer_size);
@@ -579,7 +710,7 @@ int32_t ni_dec_fme_buffer_pool_initialize(ni_session_context_t* p_ctx,
         }
     }
 
-    ni_log(NI_LOG_TRACE, "%s: exit\n", __func__);
+    ni_log2(p_ctx, NI_LOG_TRACE,  "%s: exit\n", __func__);
     return 0;
 }
 
@@ -614,7 +745,7 @@ void ni_dec_fme_buffer_pool_free(ni_buf_pool_t *p_buffer_pool)
         while (buf)
         {
             p_next = buf->p_next_buffer;
-            free(buf->buf);
+            ni_aligned_free(buf->buf);
             free(buf);
             buf = p_next;
             count_free++;
@@ -633,7 +764,7 @@ void ni_dec_fme_buffer_pool_free(ni_buf_pool_t *p_buffer_pool)
     }
     else
     {
-        ni_log(NI_LOG_ERROR, "%s: NOT allocated\n", __func__);
+        ni_log(NI_LOG_INFO, "%s: NOT allocated\n", __func__);
     }
 }
 
@@ -677,7 +808,7 @@ void ni_buffer_pool_free(ni_queue_buffer_pool_t *p_buffer_pool)
     }
     else
     {
-        ni_log(NI_LOG_ERROR, "%s: NOT allocated\n", __func__);
+        ni_log(NI_LOG_INFO, "%s: NOT allocated\n", __func__);
     }
 }
 
@@ -713,11 +844,11 @@ int32_t ni_buffer_pool_initialize(ni_session_context_t* p_ctx, int32_t number_of
 {
     int i;
 
-    ni_log(NI_LOG_TRACE, "%s: enter\n", __func__);
+    ni_log2(p_ctx, NI_LOG_TRACE,  "%s: enter\n", __func__);
 
     if (p_ctx->buffer_pool != NULL)
     {
-        ni_log(NI_LOG_DEBUG, "Warn init Buf pool already with size %u\n",
+        ni_log2(p_ctx, NI_LOG_DEBUG,  "Warn init Buf pool already with size %u\n",
                p_ctx->buffer_pool->number_of_buffers);
         return -1;
     }
@@ -893,6 +1024,7 @@ static ni_retcode_t ni_search_file(const char *p_dev, char *cmd, char *cmd_ret,
                                    int cmd_ret_len)
 {
     FILE *cmd_fp;
+    ni_retcode_t ret = NI_RETCODE_SUCCESS;
 
     if (access(p_dev, F_OK) == -1)
     {
@@ -908,12 +1040,115 @@ static ni_retcode_t ni_search_file(const char *p_dev, char *cmd, char *cmd_ret,
 
     if (fgets(cmd_ret, cmd_ret_len, cmd_fp) == 0)
     {
-        return NI_RETCODE_INVALID_PARAM;
+        ret = NI_RETCODE_INVALID_PARAM;
     }
+
     pclose(cmd_fp);
-    return NI_RETCODE_SUCCESS;
+    return ret;
 }
 #endif
+/*!******************************************************************************
+*  \brief  Remove a string-pattern from a string in-place.
+*
+*  \param[in,out] main_str Null terminated array of characters to operate upon in-place.
+*  \param[in] pattern Null terminated array of characters to remove from main_str.
+*                     Supports special characters '#' and '+' for digit matching and
+*                     repeated matching respectively. Note, there is no way to \a escape
+*                     the special characters.
+*                     \b Example:
+*                     char a_str[10] = "aaa123qwe";
+*                     char b_str[5] = "a+#+";
+*                     remove_substring_pattern(a_str, b_str);
+*                     printf("%s\n", a_str);
+*                     \b Output:
+*                     qwe
+*
+*  \return If characters removed, returns 1
+*          If no characters removed, returns 0
+*******************************************************************************/
+NI_UNUSED static uint32_t remove_substring_pattern(char *main_str, const char *pattern)
+{
+  uint32_t i, j;                     // for loop counters
+  uint32_t match_length;             // length of matching substring
+  uint32_t matched_chr;              // boolean flag for when match is found for a character in the pattern
+  char char_match_pattern[11] = "";  // what characters to look for when evaluating a character in main_str
+  uint32_t pattern_matched = 0;      // boolean flag for when who pattern match is found
+  uint32_t pattern_start = 0;        // starting index in main_str of substring matching pattern
+  const char digit_match_pattern[11] = "0123456789";  // set of numeric digits for expansion of special character '#'
+
+  // do not accept zero length main_str or pattern
+  if (!main_str || !pattern || !*main_str || !*pattern)
+  {
+    return 0;
+  }
+
+  // iterate over all characters in main_str looking for starting index of matching pattern
+  for (i = 0; i < strlen(main_str) && !pattern_matched; i++)
+  {
+    pattern_matched = 0;
+    match_length = 0;
+    // iterate over the characters of the pattern
+    for (j = 0; j < strlen(pattern); j++)
+    {
+      matched_chr = 0;
+      // set which characters to look for, special cases for special control characters
+      if (pattern[j] == '+')
+      {
+        // immediately fail as entering this branch means either the first character is a '+', or a '+" following a "+'
+        return 0;
+      }
+      else if (pattern[j] == '#')
+      {
+        memcpy(char_match_pattern, digit_match_pattern, strlen(digit_match_pattern) + 1);
+      }
+      else
+      {
+        memcpy(char_match_pattern, pattern + j, 1);
+        memset(char_match_pattern + 1, 0, 1);
+      }
+      // check if char is in match_pattern
+      if (pattern[j+1] == '+')
+      {
+        while (main_str[i + match_length] && strchr(char_match_pattern, (int) main_str[i + match_length]))
+        {
+          match_length++;
+          matched_chr = 1;
+        }
+        j++;
+      }
+      else if (main_str[i + match_length] && strchr(char_match_pattern, (int) main_str[i + match_length]))
+      {
+        match_length++;
+        matched_chr = 1;
+      }
+      // if no matches were found, then this segment is not the sought pattern
+      if (!matched_chr)
+      {
+        break;
+      }
+      // if all of pattern has been processed and matched, mark sucessful whole pattern match
+      else if ((j + 1) >= strlen(pattern))
+      {
+        pattern_matched = 1;
+        pattern_start = i;
+      }
+    }
+  }
+
+  // remove sub-string if its pattern was found in main_str
+  if (pattern_matched)
+  {
+    uint32_t orig_main_str_len = (uint32_t)strlen(main_str);
+    memmove(main_str + pattern_start, main_str + pattern_start + match_length,
+    strlen(main_str + pattern_start + match_length));
+    main_str[orig_main_str_len - match_length] = 0;
+    return 1;
+  }
+  else
+  {
+    return 0;
+  }
+}
 
 /*!******************************************************************************
  *  \brief  Find NVMe name space block from device name
@@ -939,94 +1174,110 @@ ni_retcode_t ni_find_blk_name(const char *p_dev, char *p_out_buf, int out_buf_le
     snprintf(p_out_buf, out_buf_len, "%s", p_dev);
     return NI_RETCODE_SUCCESS;
 #elif __APPLE__
+    /* 
+    Using smartctl /dev/rdisk4 -i | grep 'PCI Vendor' command check if output 
+    contains Quadra. Model number could be duplicated in other devices so 
+    should use PCI Vendor instead but smartctl is not preinstalled on mac
+    snprintf(command, sizeof(command) - 1,
+              "smartctl %s -i | grep 'PCI Vendor'", p_dev);
+     */
+    FILE *cmd_fp;
+    char cmd_ret[60] = {0};
+    char command[128] = {0};
+    snprintf(command, sizeof(command) - 1,
+             "diskutil info %s | grep 'Media Name'", p_dev);
+    ni_log(NI_LOG_TRACE, "Using %s to find quadra device\n", command);
+    cmd_fp = popen(command, "r");
+    if (cmd_fp == NULL)
+    {
+        ni_log(NI_LOG_ERROR, "Failed to execute %s\n", command);
+        return NI_RETCODE_FAILURE;
+    }
+    if (fgets(cmd_ret, sizeof(cmd_ret) - 1, cmd_fp) == NULL)
+    {
+        ni_log(NI_LOG_ERROR, "Failed to read %s output.\n", command);
+        pclose(cmd_fp);
+        return NI_RETCODE_FAILURE;
+    }
+    pclose(cmd_fp);
+    ni_log(NI_LOG_TRACE, "Got '%s' from the command\n", cmd_ret);
+    // if (strcasestr(cmd_ret, "0x1d82") != NULL)
+    if (strcasestr(cmd_ret, "Quadra") != NULL)
+    {
+        snprintf(p_out_buf, out_buf_len, "%s", p_dev);
+        return NI_RETCODE_SUCCESS;
+    } else
+    {
+        //This is a soft error so trace level is fine
+        ni_log(NI_LOG_TRACE, "%s is not a quadra device\n", p_dev);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+#elif defined(XCODER_LINUX_VIRTIO_DRIVER_ENABLED)
+    ni_log(NI_LOG_TRACE, "The device is already considered as a block divice in Linux virtual machine with VirtIO driver.\n");
     snprintf(p_out_buf, out_buf_len, "%s", p_dev);
     return NI_RETCODE_SUCCESS;
 #else
-    FILE *cmd_fp;
-    char cmd_ret[16] = "";
-    char udev_cmd[80] = "";
-
-#ifdef _ANDROID
-    // assumes no indexing differences between sysfs and udev on Android (ie. no nvme multi-pathing)
-    snprintf(udev_cmd, sizeof(udev_cmd) - 1,
-             "ls /sys/class/nvme/%s/ | grep nvme", &p_dev[5]);
-#else
-    // Note, we are using udevadm through terminal instead of libudev.c to avoid requiring extra kernel dev packges
-    snprintf(udev_cmd, sizeof(udev_cmd) - 1,
-             "ls /sys/`udevadm info -q path -n %s` | grep -P \"nvme\\d+n1\"",
-             p_dev);
-#endif
-
-    // check p_dev exists in /dev/ folder. If not, return NI_INVALID_DEVICE_HANDLE
-    if (access(p_dev, F_OK) == -1)
-    {
-        return NI_RETCODE_FAILURE;
-    }
-
-    // look for child block in sysfs mapping tree
-    cmd_fp = popen(udev_cmd, "r");
-    if (!cmd_fp)
-    {
-        return NI_RETCODE_FAILURE;
-    }
-
-    if (fgets(cmd_ret, sizeof(cmd_ret) / sizeof(cmd_ret[0]), cmd_fp) == 0)
-    {
-        ni_log(NI_LOG_DEBUG,
-               "WARNING: cannot find namespaceID. Using guess.\n");
-        snprintf(p_out_buf, out_buf_len, "%sn1", p_dev);
-    } else
-    {
-        cmd_ret[strcspn(cmd_ret, "\r\n")] = 0;
-#ifdef _ANDROID
-        ni_retcode_t ret = NI_RETCODE_SUCCESS;
-        snprintf(udev_cmd, sizeof(udev_cmd) - 1, "ls /dev/ | grep %s",
-                 cmd_ret);   // cmd_ret is block device name
-        int cmd_ret_len = sizeof(cmd_ret) / sizeof(cmd_ret[0]);
-        ret = ni_search_file(p_dev, udev_cmd, cmd_ret, cmd_ret_len);
-        if (ret == NI_RETCODE_SUCCESS)
-        {
-            char *tmp = NULL;
-            if ((tmp = strstr(cmd_ret, "\n")))
-            {
-                *tmp = '\0';
-            }
-            snprintf(p_out_buf, out_buf_len, "/dev/%s", cmd_ret);
-        } else if (ret == NI_RETCODE_INVALID_PARAM)
-        {
-            snprintf(udev_cmd, sizeof(udev_cmd) - 1, "ls /dev/block/ | grep %s",
-                     cmd_ret);   // cmd_ret is block device name
-            ret = ni_search_file(p_dev, udev_cmd, cmd_ret, cmd_ret_len);
-            if (ret == NI_RETCODE_SUCCESS)
-            {
-                char *tmp = NULL;
-                if ((tmp = strstr(cmd_ret, "\n")))
-                {
-                    *tmp = '\0';
-                }
-                snprintf(p_out_buf, out_buf_len, "/dev/block/%s", cmd_ret);
-            } else if (ret == NI_RETCODE_INVALID_PARAM)
-            {
-                ni_log(NI_LOG_ERROR,
-                       "Error: ni_find_blk_name can not find block device %s\n",
-                       cmd_ret);
-            } else
-            {
-                return ret;
-            }
-        } else
-        {
-            return ret;
-        }
-#else
-        snprintf(p_out_buf, out_buf_len, "/dev/%s", cmd_ret);
-#endif
-    }
-
-    pclose(cmd_fp);
-
+    ni_log(NI_LOG_DEBUG, "Set NVMe device name equal to NVMe block name\n");
+    snprintf(p_out_buf, out_buf_len, "%s", p_dev);
     return NI_RETCODE_SUCCESS;
 #endif
+}
+
+/*!******************************************************************************
+ *  \brief  check dev name
+ *
+ *  \param[in] p_dev Device name represented as c string. ex: "/dev/nvmeXnY"
+ *
+ *  \return On success returns NI_RETCODE_SUCCESS
+ *          On failure returns NI_RETCODE_FAILURE or NI_RETCODE_INVALID_PARAM
+ *******************************************************************************/
+ni_retcode_t ni_check_dev_name(const char *p_dev)
+{
+    if (!p_dev)
+    {
+        return NI_RETCODE_INVALID_PARAM;
+    }
+
+#ifdef __APPLE__
+    /* 
+    Using smartctl /dev/rdisk4 -i | grep 'PCI Vendor' command check if output 
+    contains Quadra. Model number could be duplicated in other devices so 
+    should use PCI Vendor instead but smartctl is not preinstalled on mac
+    snprintf(command, sizeof(command) - 1,
+              "smartctl %s -i | grep 'PCI Vendor'", p_dev);
+     */
+    FILE *cmd_fp;
+    char cmd_ret[60] = {0};
+    char command[128] = {0};
+    snprintf(command, sizeof(command) - 1,
+             "diskutil info %s | grep 'Media Name'", p_dev);
+    ni_log(NI_LOG_TRACE, "Using %s to find quadra device\n", command);
+    cmd_fp = popen(command, "r");
+    if (cmd_fp == NULL)
+    {
+        ni_log(NI_LOG_ERROR, "Failed to execute %s\n", command);
+        return NI_RETCODE_FAILURE;
+    }
+    if (fgets(cmd_ret, sizeof(cmd_ret) - 1, cmd_fp) == NULL)
+    {
+        ni_log(NI_LOG_ERROR, "Failed to read %s output.\n", command);
+        pclose(cmd_fp);
+        return NI_RETCODE_FAILURE;
+    }
+    pclose(cmd_fp);
+    ni_log(NI_LOG_TRACE, "Got '%s' from the command\n", cmd_ret);
+    // if (strcasestr(cmd_ret, "0x1d82") != NULL)
+    if (strcasestr(cmd_ret, "Quadra") != NULL)
+    {
+        return NI_RETCODE_SUCCESS;
+    } else
+    {
+        //This is a soft error so trace level is fine
+        ni_log(NI_LOG_TRACE, "%s is not a quadra device\n", p_dev);
+        return NI_RETCODE_INVALID_PARAM;
+    }
+#endif
+    return NI_RETCODE_SUCCESS;
 }
 
 /*!******************************************************************************
@@ -1040,16 +1291,16 @@ ni_retcode_t ni_timestamp_init(ni_session_context_t* p_ctx, ni_timestamp_table_t
 {
     ni_timestamp_table_t *ptemp;
 
-    ni_log(NI_LOG_TRACE, "%s: enter\n", __func__);
+    ni_log2(p_ctx, NI_LOG_TRACE,  "%s: enter\n", __func__);
 
     if (*pp_table != NULL)
     {
-        ni_log(NI_LOG_DEBUG, "%s: previously allocated, reallocating now\n",
+        ni_log2(p_ctx, NI_LOG_DEBUG,  "%s: previously allocated, reallocating now\n",
                __func__);
         ni_queue_free(&(*pp_table)->list, p_ctx->buffer_pool);
         free(*pp_table);
     }
-    ni_log(NI_LOG_DEBUG, "%s: Malloc\n", __func__);
+    ni_log2(p_ctx, NI_LOG_DEBUG,  "%s: Malloc\n", __func__);
     ptemp = (ni_timestamp_table_t *)malloc(sizeof(ni_timestamp_table_t));
     if (!ptemp)
     {
@@ -1064,7 +1315,7 @@ ni_retcode_t ni_timestamp_init(ni_session_context_t* p_ctx, ni_timestamp_table_t
 
     *pp_table = ptemp;
 
-    ni_log(NI_LOG_DEBUG, "%s: success\n", __func__);
+    ni_log2(p_ctx, NI_LOG_DEBUG,  "%s: success\n", __func__);
 
     return NI_RETCODE_SUCCESS;
 }
@@ -1243,7 +1494,7 @@ END:
  *******************************************************************************/
 ni_retcode_t ni_queue_init(ni_session_context_t* p_ctx, ni_queue_t *p_queue, const char *name)
 {
-    ni_log(NI_LOG_TRACE, "%s: enter\n", __func__);
+    ni_log2(p_ctx, NI_LOG_TRACE,  "%s: enter\n", __func__);
 
     if (!p_queue || !name)
     {
@@ -1256,7 +1507,7 @@ ni_retcode_t ni_queue_init(ni_session_context_t* p_ctx, ni_queue_t *p_queue, con
     p_queue->p_last = NULL;
     p_queue->count = 0;
 
-    ni_log(NI_LOG_TRACE, "%s: exit\n", __func__);
+    ni_log2(p_ctx, NI_LOG_TRACE,  "%s: exit\n", __func__);
 
     return NI_RETCODE_SUCCESS;
 }
@@ -1402,11 +1653,7 @@ ni_retcode_t ni_queue_pop(ni_queue_t *p_queue, uint64_t frame_info,
                 temp = temp->p_prev;
                 temp_prev = temp->p_prev;
 
-                if (!temp_prev)
-                {
-                    p_queue->p_first = temp->p_next;
-                    temp->p_next->p_prev = NULL;
-                } else
+                if (temp_prev)
                 {
                     temp_prev->p_next = temp->p_next;
                     if (temp->p_next)
@@ -1416,6 +1663,10 @@ ni_retcode_t ni_queue_pop(ni_queue_t *p_queue, uint64_t frame_info,
                     {
                         p_queue->p_last = temp_prev;
                     }
+                } else
+                {
+                    p_queue->p_first = temp->p_next;
+                    temp->p_next->p_prev = NULL;
                 }
                 //free(temp);
                 ni_buffer_pool_return_buffer(temp, p_buffer_pool);
@@ -1489,11 +1740,7 @@ ni_retcode_t ni_queue_pop_threshold(ni_queue_t *p_queue, uint64_t frame_info,
             if (llabs((int)frame_info - (int)temp->frame_info) <= threshold)
             {
                 *p_timestamp = temp->timestamp;
-                if (!temp_prev)
-                {
-                    p_queue->p_first = temp->p_next;
-                    temp->p_next->p_prev = NULL;
-                } else
+                if (temp_prev)
                 {
                     temp_prev->p_next = temp->p_next;
                     if (temp->p_next)
@@ -1503,6 +1750,10 @@ ni_retcode_t ni_queue_pop_threshold(ni_queue_t *p_queue, uint64_t frame_info,
                     {
                         p_queue->p_last = temp_prev;
                     }
+                } else
+                {
+                    p_queue->p_first = temp->p_next;
+                    temp->p_next->p_prev = NULL;
                 }
                 // free(temp);
                 ni_buffer_pool_return_buffer(temp, p_buffer_pool);
@@ -1760,38 +2011,36 @@ uint64_t ni_gettime_ns(void)
  *
  *  \param[in]  width   source YUV frame width
  *  \param[in]  height  source YUV frame height
- *  \param[in]  bit_depth_factor  1 for 8 bit, 2 for 10 bit
- *  \param[in]  is_nv12  non-0 for NV12 frame, 0 otherwise
+ *  \param[in]  factor  1 for 8 bit, 2 for 10 bit
+ *  \param[in]  is_semiplanar  1 for semiplanar frame, 0 otherwise
  *  \param[out] plane_stride  size (in bytes) of each plane width
  *  \param[out] plane_height  size of each plane height
  *
  *  \return Y/Cb/Cr stride and height info
  *
  ******************************************************************************/
-void ni_get_hw_yuv420p_dim(int width, int height, int bit_depth_factor,
-                           int is_nv12,
+void ni_get_hw_yuv420p_dim(int width, int height, int factor,
+                           int is_semiplanar,
                            int plane_stride[NI_MAX_NUM_DATA_POINTERS],
                            int plane_height[NI_MAX_NUM_DATA_POINTERS])
 {
     // strides are multiples of 128
     if (width < NI_MIN_WIDTH)
     {
-        plane_stride[0] = ((NI_MIN_WIDTH * bit_depth_factor + 127) / 128) * 128;
+        plane_stride[0] = ((NI_MIN_WIDTH * factor + 127) / 128) * 128;
         plane_stride[1] =
-            (((NI_MIN_WIDTH / (is_nv12 ? 1 : 2) * bit_depth_factor) + 127) /
+            (((NI_MIN_WIDTH / (is_semiplanar ? 1 : 2) * factor) + 127) /
              128) *
             128;
-        plane_stride[2] =
-            ((((is_nv12 ? 0 : NI_MIN_WIDTH) / 2 * bit_depth_factor) + 127) /
-             128) *
-            128;
+        plane_stride[2] = (is_semiplanar ? 0 : plane_stride[1]);
     } else
     {
-        plane_stride[0] = ((width * bit_depth_factor + 127) / 128) * 128;
+        width = ((width + 1) / 2) * 2; // pad odd resolution
+        plane_stride[0] = ((width * factor + 127) / 128) * 128;
         plane_stride[1] =
-            (((width / (is_nv12 ? 1 : 2) * bit_depth_factor) + 127) / 128) *
+            (((width / (is_semiplanar ? 1 : 2) * factor) + 127) / 128) *
             128;
-        plane_stride[2] = (is_nv12 ? 0 : plane_stride[1]);
+        plane_stride[2] = (is_semiplanar ? 0 : plane_stride[1]);
     }
 
     // height (in lines) just needs to be even number
@@ -1806,6 +2055,263 @@ void ni_get_hw_yuv420p_dim(int width, int height, int bit_depth_factor,
 }
 
 /*!*****************************************************************************
+ *  \brief  Get dimension information of frame to be sent
+ *          to encoder for encoding. Caller usually retrieves this info and
+ *          uses it in the call to ni_encoder_frame_buffer_alloc for buffer
+ *          allocation.
+ *          The returned stride and height info will take alignment 
+ *          requirements into account.
+ *
+ *  \param[in]  width   source frame width
+ *  \param[in]  height  source frame height
+ *  \param[in]  pix_fmt  ni pixel format
+ *  \param[out] plane_stride  size (in bytes) of each plane width
+ *  \param[out] plane_height  size of each plane height
+ *
+ *  \return stride and height info
+ *
+ ******************************************************************************/
+void ni_get_frame_dim(int width, int height,
+                      ni_pix_fmt_t pix_fmt,
+                      int plane_stride[NI_MAX_NUM_DATA_POINTERS],
+                      int plane_height[NI_MAX_NUM_DATA_POINTERS])
+{
+    plane_height[0] = ((height + 1) / 2) * 2;
+    plane_height[1] = plane_height[2] = plane_height[0] / 2;
+
+    switch (pix_fmt)
+    {
+        /* 8-bit YUV420 planar */
+        case NI_PIX_FMT_YUV420P:
+            plane_stride[0] = NI_VPU_ALIGN128(width);
+            plane_stride[1] = NI_VPU_ALIGN128((width / 2));
+            plane_stride[2] = plane_stride[1];
+            plane_stride[3] = 0;
+            break;
+        /* 10-bit YUV420 planar, little-endian, least significant bits */
+        case NI_PIX_FMT_YUV420P10LE:
+            plane_stride[0] = NI_VPU_ALIGN128(width * 2);
+            plane_stride[1] = NI_VPU_ALIGN128(width);
+            plane_stride[2] = plane_stride[1];
+            plane_stride[3] = 0;
+            break;
+        /* 8-bit YUV420 semi-planar */
+        case NI_PIX_FMT_NV12:
+            plane_stride[0] = NI_VPU_ALIGN128(width);
+            plane_stride[1] = plane_stride[0];
+            plane_stride[2] = 0;
+            plane_stride[3] = 0;
+            break;
+        /* 8-bit yuv422 semi-planar */
+        case NI_PIX_FMT_NV16:
+            plane_stride[0] = NI_VPU_ALIGN64(width);
+            plane_stride[1] = plane_stride[0];
+            plane_stride[2] = 0;
+            plane_stride[3] = 0;
+            break;
+        /*8-bit yuv422 planar */
+        case NI_PIX_FMT_YUYV422:
+        case NI_PIX_FMT_UYVY422:
+            plane_stride[0] = NI_VPU_ALIGN16(width) * 2;
+            plane_stride[1] = 0;
+            plane_stride[2] = 0;
+            plane_stride[3] = 0;
+            break;
+        /* 10-bit YUV420 semi-planar, little endian, most significant bits */
+        case NI_PIX_FMT_P010LE:
+            plane_stride[0] = NI_VPU_ALIGN128(width * 2);
+            plane_stride[1] = plane_stride[0];
+            plane_stride[2] = 0;
+            plane_stride[3] = 0;
+            break;
+        /* 32-bit RGBA packed */
+        case NI_PIX_FMT_ARGB:
+        case NI_PIX_FMT_ABGR:
+        case NI_PIX_FMT_RGBA:
+        case NI_PIX_FMT_BGRA:
+        case NI_PIX_FMT_BGR0:
+            plane_height[1] = plane_height[2] = 0;
+
+            plane_stride[0] = NI_VPU_ALIGN16(width) * 4;
+            plane_stride[1] = 0;
+            plane_stride[2] = 0;
+            plane_stride[3] = 0;
+            break;
+        default:
+            break;
+    }
+
+}   
+
+/*!*****************************************************************************
+ *  \brief  Get dimension information of frame to be sent
+ *          to encoder for encoding. Caller usually retrieves this info and
+ *          uses it in the call to ni_encoder_frame_buffer_alloc for buffer
+ *          allocation. 
+ *          The returned stride and height info will take into account both min
+ *          resolution and alignment requirements.
+ *
+ *  \param[in]  width   source frame width
+ *  \param[in]  height  source frame height
+ *  \param[in]  pix_fmt  ni pixel format
+ *  \param[out] plane_stride  size (in bytes) of each plane width
+ *  \param[out] plane_height  size of each plane height
+ *
+ *  \return stride and height info
+ *
+ ******************************************************************************/
+void ni_get_min_frame_dim(int width, int height,
+                      ni_pix_fmt_t pix_fmt,
+                      int plane_stride[NI_MAX_NUM_DATA_POINTERS],
+                      int plane_height[NI_MAX_NUM_DATA_POINTERS])
+{
+    
+    if (height < NI_MIN_HEIGHT)
+    {
+        height = NI_MIN_HEIGHT;
+    }
+    if (width < NI_MIN_WIDTH)
+    {
+        width = NI_MIN_WIDTH;
+    }
+    else
+    {
+        width = ((width + 1) / 2) * 2; // pad odd resolution
+    }
+
+    ni_get_frame_dim(width, height, pix_fmt, plane_stride, plane_height);
+
+    ni_log(NI_LOG_DEBUG,
+           "%s dst_stride %d/%d/%d height %d/%d/%d pix_fmt %d\n",
+           __func__, plane_stride[0], plane_stride[1], plane_stride[2],
+           plane_height[0], plane_height[1], plane_height[2], pix_fmt);
+}
+
+/*!*****************************************************************************
+ *  \brief  Copy RGBA or YUV data to Netint HW frame layout to be sent
+ *          to encoder for encoding. Data buffer (dst) is usually allocated by
+ *          ni_encoder_frame_buffer_alloc.
+ *
+ *  \param[out] p_dst  pointers to which data is copied
+ *  \param[in]  p_src  pointers from which data is copied
+ *  \param[in]  width  source frame width
+ *  \param[in]  height source frame height
+ *  \param[in]  factor  1 for 8 bit, 2 for 10 bit
+ *  \param[in]  is_semiplanar  non-0 for semiplanar frame, 0 otherwise
+ *  \param[in]  conf_win_right  right offset of conformance window
+ *  \param[in]  dst_stride  size (in bytes) of each plane width in destination
+ *  \param[in]  dst_height  size of each plane height in destination
+ *  \param[in]  src_stride  size (in bytes) of each plane width in source
+ *  \param[in]  src_height  size of each plane height in source
+ *  \param[in]  i  index to plane to be copied
+ *
+ *  \return copied data
+ *
+ ******************************************************************************/
+void ni_copy_plane_data(uint8_t *p_dst[NI_MAX_NUM_DATA_POINTERS],
+                          uint8_t *p_src[NI_MAX_NUM_DATA_POINTERS],
+                          int frame_width, int frame_height, int factor,
+                          int is_semiplanar, int conf_win_right,
+                          int dst_stride[NI_MAX_NUM_DATA_POINTERS],
+                          int dst_height[NI_MAX_NUM_DATA_POINTERS],
+                          int src_stride[NI_MAX_NUM_DATA_POINTERS],
+                          int src_height[NI_MAX_NUM_DATA_POINTERS],
+                          int i)
+{
+    if (i >= NI_MAX_NUM_DATA_POINTERS)
+    {
+        ni_log(NI_LOG_ERROR, "%s: error, invalid plane index %d\n", __func__,
+               i);
+        return;
+    }
+    if (p_dst[i] == p_src[i])
+    {
+        ni_log(NI_LOG_DEBUG, "%s: src and dst identical, return\n", __func__);
+        return;
+    }
+
+    int height =
+        (src_height[i] < dst_height[i] ? src_height[i] : dst_height[i]);
+    uint8_t *dst = p_dst[i];
+    const uint8_t *src = (const uint8_t *)p_src[i];
+
+    // width padding length in bytes, if needed
+    int pad_len_bytes;
+
+    if (0 == i || is_semiplanar) // Y
+    {
+        pad_len_bytes = dst_stride[i] - frame_width * factor;
+    }
+    else
+    {
+        // U/V share the same padding length
+        pad_len_bytes = dst_stride[i] - frame_width / 2 * factor;
+    }
+
+    if (0 == pad_len_bytes && conf_win_right > 0)
+    {
+        if (0 == i) // Y
+        {
+            pad_len_bytes = conf_win_right * factor;
+        }
+        else
+        {
+            // U/V share the same padding length
+            pad_len_bytes = conf_win_right * factor / 2;
+        }
+    }
+
+    ni_log(NI_LOG_DEBUG,
+           "%s plane %d stride padding: %d pixel (%d bytes), copy height: "
+           "%d.\n",
+           __func__, i, pad_len_bytes / factor, pad_len_bytes,
+           height);
+
+    for (; height > 0; height--)
+    {
+        memcpy(dst, src,
+               (src_stride[i] < dst_stride[i] ? src_stride[i] : dst_stride[i]));
+        dst += dst_stride[i];
+
+        // dst is now at the line end
+        if (pad_len_bytes)
+        {
+            // repeat last pixel
+            if (factor > 1)
+            {
+                // for 10 bit it's 2 bytes
+                int j;
+                uint8_t *tmp_dst = dst - pad_len_bytes;
+                for (j = 0; j < pad_len_bytes / factor; j++)
+                {
+                    memcpy(tmp_dst, dst - pad_len_bytes - factor, factor);
+                    tmp_dst += factor;
+                }
+            }
+            else
+            {
+                memset(dst - pad_len_bytes, *(dst - pad_len_bytes - 1),
+                       pad_len_bytes);
+            }
+        }
+        src += src_stride[i];
+    }
+
+    // height padding/cropping if needed
+    int padding_height = dst_height[i] - src_height[i];
+    if (padding_height > 0)
+    {
+        ni_log(NI_LOG_DEBUG, "%s plane %d padding height: %d\n", __func__,
+               i, padding_height);
+        src = dst - dst_stride[i];
+        for (; padding_height > 0; padding_height--)
+        {
+            memcpy(dst, src, dst_stride[i]);
+            dst += dst_stride[i];
+        }
+    }
+}
+/*!*****************************************************************************
  *  \brief  Copy YUV data to Netint HW YUV420p frame layout to be sent
  *          to encoder for encoding. Data buffer (dst) is usually allocated by
  *          ni_encoder_frame_buffer_alloc.
@@ -1814,8 +2320,8 @@ void ni_get_hw_yuv420p_dim(int width, int height, int bit_depth_factor,
  *  \param[in]  p_src  pointers of Y/Cb/Cr from which data is copied
  *  \param[in]  width  source YUV frame width
  *  \param[in]  height source YUV frame height
- *  \param[in]  bit_depth_factor  1 for 8 bit, 2 for 10 bit
- *  \param[in]  is_nv12  non-0 for NV12 frame, 0 otherwise
+ *  \param[in]  factor  1 for 8 bit, 2 for 10 bit
+ *  \param[in]  is_semiplanar  non-0 for semiplanar frame, 0 otherwise
  *  \param[in]  conf_win_right  right offset of conformance window
  *  \param[in]  dst_stride  size (in bytes) of each plane width in destination
  *  \param[in]  dst_height  size of each plane height in destination
@@ -1827,20 +2333,13 @@ void ni_get_hw_yuv420p_dim(int width, int height, int bit_depth_factor,
  ******************************************************************************/
 void ni_copy_hw_yuv420p(uint8_t *p_dst[NI_MAX_NUM_DATA_POINTERS],
                         uint8_t *p_src[NI_MAX_NUM_DATA_POINTERS],
-                        int frame_width, int frame_height, int bit_depth_factor,
-                        int is_nv12, int conf_win_right,
+                        int frame_width, int frame_height, int factor,
+                        int is_semiplanar, int conf_win_right,
                         int dst_stride[NI_MAX_NUM_DATA_POINTERS],
                         int dst_height[NI_MAX_NUM_DATA_POINTERS],
                         int src_stride[NI_MAX_NUM_DATA_POINTERS],
                         int src_height[NI_MAX_NUM_DATA_POINTERS])
 {
-    // return to avoid self copy
-    if (p_dst[0] == p_src[0] && p_dst[1] == p_src[1] && p_dst[2] == p_src[2])
-    {
-        ni_log(NI_LOG_DEBUG, "%s: src and dst identical, return\n", __func__);
-        return;
-    }
-
     ni_log(NI_LOG_DEBUG,
            "%s dst_stride %d/%d/%d src_stride %d/%d/%d dst_height "
            "%d/%d/%d src_height %d/%d/%d\n",
@@ -1848,85 +2347,210 @@ void ni_copy_hw_yuv420p(uint8_t *p_dst[NI_MAX_NUM_DATA_POINTERS],
            src_stride[1], src_stride[2], dst_height[0], dst_height[1],
            dst_height[2], src_height[0], src_height[1], src_height[2]);
 
-    // width padding length in bytes, if needed
-    int pad_len_bytes;
     int i;
 
     for (i = 0; i < NI_MAX_NUM_DATA_POINTERS - 1; i++)
     {
-        int height =
-            (src_height[i] < dst_height[i] ? src_height[i] : dst_height[i]);
-        uint8_t *dst = p_dst[i];
-        const uint8_t *src = (const uint8_t *)p_src[i];
+        ni_copy_plane_data(p_dst, p_src, frame_width, frame_height, factor,
+                              is_semiplanar, conf_win_right, dst_stride,
+                              dst_height, src_stride, src_height, i);
+    }
+}
 
-        if (0 == i || is_nv12)   // Y
+/*!*****************************************************************************
+ *  \brief  Copy RGBA or YUV data to Netint HW frame layout to be sent
+ *          to encoder for encoding. Data buffer (dst) is usually allocated by
+ *          ni_encoder_frame_buffer_alloc.
+ *
+ *  \param[out] p_dst  pointers to which data is copied
+ *  \param[in]  p_src  pointers from which data is copied
+ *  \param[in]  width  source frame width
+ *  \param[in]  height source frame height
+ *  \param[in]  factor  1 for 8 bit, 2 for 10 bit
+ *  \param[in]  pix_fmt  pixel format to distinguish between planar types and/or components
+ *  \param[in]  conf_win_right  right offset of conformance window
+ *  \param[in]  dst_stride  size (in bytes) of each plane width in destination
+ *  \param[in]  dst_height  size of each plane height in destination
+ *  \param[in]  src_stride  size (in bytes) of each plane width in source
+ *  \param[in]  src_height  size of each plane height in source
+ *
+ *  \return copied data
+ *
+ ******************************************************************************/
+void ni_copy_frame_data(uint8_t *p_dst[NI_MAX_NUM_DATA_POINTERS],
+                          uint8_t *p_src[NI_MAX_NUM_DATA_POINTERS],
+                          int frame_width, int frame_height,
+                          int factor, ni_pix_fmt_t pix_fmt,
+                          int conf_win_right,
+                          int dst_stride[NI_MAX_NUM_DATA_POINTERS],
+                          int dst_height[NI_MAX_NUM_DATA_POINTERS],
+                          int src_stride[NI_MAX_NUM_DATA_POINTERS],
+                          int src_height[NI_MAX_NUM_DATA_POINTERS])
+{
+    ni_log(NI_LOG_DEBUG,
+           "%s frame_width %d frame_height %d factor %d conf_win_right %d "
+           "dst_stride %d/%d/%d src_stride %d/%d/%d dst_height "
+           "%d/%d/%d src_height %d/%d/%d pix_fmt %d\n",
+           __func__, frame_width, frame_height, factor, conf_win_right, 
+           dst_stride[0], dst_stride[1], dst_stride[2], src_stride[0], 
+           src_stride[1], src_stride[2], dst_height[0], dst_height[1],
+           dst_height[2], src_height[0], src_height[1], src_height[2], 
+           pix_fmt);
+    
+    int is_rgba = 0;
+    int is_semiplanar = 0;
+    switch (pix_fmt)
+    {
+        case NI_PIX_FMT_NV12:
+        case NI_PIX_FMT_P010LE:
+            is_semiplanar = 1;
+            break;
+        case NI_PIX_FMT_ARGB:
+        case NI_PIX_FMT_ABGR:
+        case NI_PIX_FMT_RGBA:
+        case NI_PIX_FMT_BGRA:
+            is_rgba = 1;
+            break;
+        default:
+            break;
+    }
+
+    if (is_rgba)
+    {
+        ni_copy_plane_data(p_dst, p_src,
+                             frame_width, frame_height, 4,
+                             is_semiplanar, conf_win_right,
+                             dst_stride, dst_height,
+                             src_stride, src_height,
+                             0); // just one plane for rgba
+    }
+    else
+    {
+        ni_copy_hw_yuv420p(p_dst, p_src, frame_width, frame_height, factor,
+                           is_semiplanar, conf_win_right, dst_stride,
+                           dst_height, src_stride, src_height);
+    }
+}
+
+/*!*****************************************************************************
+ *  \brief  Copy yuv444p data to yuv420p frame layout to be sent
+ *          to encoder for encoding. Data buffer (dst) is usually allocated by
+ *          ni_encoder_frame_buffer_alloc.
+ *
+ *  \param[out]    p_dst0  pointers of Y/Cb/Cr as yuv420p output0
+ *  \param[out]    p_dst1  pointers of Y/Cb/Cr as yuv420p output1
+ *  \param[in]     p_src  pointers of Y/Cb/Cr as yuv444p intput
+ *  \param[in]     width  source YUV frame width
+ *  \param[in]     height source YUV frame height
+ *  \param[in]     factor  1 for 8 bit, 2 for 10 bit
+ *  \param[in]     mode 0 for
+ *                 out0 is Y+1/2V, with the original input as the out0, 1/4V
+ *                 copy to data[1] 1/4V copy to data[2]
+ *                 out1 is U+1/2V, U copy to data[0], 1/4V copy to data[1], 1/4V
+ *                 copy to data[2]
+ *                 mode 1 for
+ *                 out0 is Y+1/2u+1/2v, with the original input as the output0,
+ *                 1/4U copy to data[1] 1/4V copy to data[2]
+ *                 out1 is (1/2U+1/2V)+1/4U+1/4V, 1/2U & 1/2V copy to data[0],
+ *                 1/4U copy to data[1], 1/4V copy to data[2]
+ *
+ *  \return Y/Cb/Cr data
+ *
+ ******************************************************************************/
+void ni_copy_yuv_444p_to_420p(uint8_t *p_dst0[NI_MAX_NUM_DATA_POINTERS],
+                              uint8_t *p_dst1[NI_MAX_NUM_DATA_POINTERS],
+                              uint8_t *p_src[NI_MAX_NUM_DATA_POINTERS],
+                              int frame_width, int frame_height,
+                              int factor, int mode)
+{
+    int i, j;
+    int y_444p_linesize = frame_width * factor;
+    int uv_444p_linesize = y_444p_linesize;
+    int y_420p_linesize = NI_VPU_ALIGN128(y_444p_linesize);
+    int uv_420p_linesize = NI_VPU_ALIGN128(uv_444p_linesize / 2);
+
+    // return to avoid self copy
+    if (p_dst0[0] == p_dst1[0] && p_dst0[1] == p_dst1[1] &&
+        p_dst0[2] == p_dst1[2])
+    {
+        ni_log(NI_LOG_DEBUG, "%s: src and dst identical, return\n", __func__);
+        return;
+    }
+
+    // Y component
+    for (i = 0; i < frame_height; i++)
+    {
+        memcpy(&p_dst0[0][i * y_420p_linesize], &p_src[0][i * y_444p_linesize],
+               y_444p_linesize);
+    }
+
+    if (mode == 0)
+    {
+        // out0 data[0]: Y  data[1]: 0.25V  data[2]: 0.25V
+        // out1 data[0]: U  data[1]: 0.25V  data[2]: 0.25V
+        // U component
+        for (i = 0; i < frame_height; i++)
         {
-            pad_len_bytes = dst_stride[i] - frame_width * bit_depth_factor;
-        } else
-        {
-            // U/V share the same padding length
-            pad_len_bytes = dst_stride[i] - frame_width / 2 * bit_depth_factor;
+            memcpy(&p_dst1[0][i * y_420p_linesize],
+                   &p_src[1][i * y_444p_linesize], y_444p_linesize);
         }
 
-        if (0 == pad_len_bytes && conf_win_right > 0)
+        for (i = 0; i < frame_height / 2; i++)
         {
-            if (0 == i)   // Y
+            for (j = 0; j < frame_width * factor / 2; j += factor)
             {
-                pad_len_bytes = conf_win_right * bit_depth_factor;
-            } else
-            {
-                // U/V share the same padding length
-                pad_len_bytes = conf_win_right * bit_depth_factor / 2;
+                // V component
+                // even line
+                memcpy(&p_dst0[1][i * uv_420p_linesize + j],
+                       &p_src[2][2 * i * uv_444p_linesize + 2 * j],
+                       factor);
+                memcpy(&p_dst0[2][i * uv_420p_linesize + j],
+                       &p_src[2][2 * i * uv_444p_linesize + (2 * j + factor)],
+                       factor);
+                // odd line
+                memcpy(&p_dst1[1][i * uv_420p_linesize + j],
+                       &p_src[2][(2 * i + 1) * uv_444p_linesize + 2 * j],
+                       factor);
+                memcpy(&p_dst1[2][i * uv_420p_linesize + j],
+                       &p_src[2][(2 * i + 1) * uv_444p_linesize + (2 * j + factor)],
+                       factor);
             }
         }
-
-        ni_log(NI_LOG_DEBUG,
-               "%s plane %d stride padding: %d pixel (%d bytes), copy height: "
-               "%d.\n",
-               __func__, i, pad_len_bytes / bit_depth_factor, pad_len_bytes,
-               height);
-
-        for (; height > 0; height--)
+    } else
+    {
+        // out0 data[0]:  Y           data[1]: 0.25U  data[2]: 0.25V
+        // out1 data[0]:  0.5U + 0.5V data[1]: 0.25U  data[2]: 0.25V
+        for (i = 0; i < frame_height / 2; i++)
         {
-            memcpy(dst, src,
-                   (src_stride[i] < dst_stride[i] ? src_stride[i] :
-                                                    dst_stride[i]));
-            dst += dst_stride[i];
-
-            // dst is now at the line end
-            if (pad_len_bytes)
+            for (j = 0; j < frame_width * factor / 2; j += factor)
             {
-                // repeat last pixel
-                if (2 == bit_depth_factor)
-                {
-                    // for 10 bit it's 2 bytes
-                    int j;
-                    uint8_t *tmp_dst = dst - pad_len_bytes;
-                    for (j = 0; j < pad_len_bytes / 2; j++)
-                    {
-                        memcpy(tmp_dst, dst - pad_len_bytes - 2, 2);
-                        tmp_dst += 2;
-                    }
-                } else
-                {
-                    memset(dst - pad_len_bytes, *(dst - pad_len_bytes - 1),
-                           pad_len_bytes);
-                }
-            }
-            src += src_stride[i];
-        }
+                // U component
+                // even line 0.25U
+                memcpy(&p_dst1[1][i * uv_420p_linesize + j],
+                       &p_src[1][2 * i * uv_444p_linesize + (2 * j + factor)],
+                       factor);
+                // odd line 0.5U
+                memcpy(&p_dst1[0][2 * i * uv_444p_linesize + 2 * j],
+                       &p_src[1][(2 * i + 1) * uv_444p_linesize + 2 * j],
+                       factor * 2);
+                // even line 0.25U
+                memcpy(&p_dst0[1][i * uv_420p_linesize + j],
+                       &p_src[1][2 * i * uv_444p_linesize + 2 * j],
+                       factor);
 
-        // height padding/cropping if needed
-        int padding_height = dst_height[i] - src_height[i];
-        if (padding_height > 0)
-        {
-            ni_log(NI_LOG_DEBUG, "%s plane %d padding height: %d\n", __func__,
-                   i, padding_height);
-            src = dst - dst_stride[i];
-            for (; padding_height > 0; padding_height--)
-            {
-                memcpy(dst, src, dst_stride[i]);
-                dst += dst_stride[i];
+                // V component
+                // even line 0.25V
+                memcpy(&p_dst1[2][i * uv_420p_linesize + j],
+                       &p_src[2][2 * i * uv_444p_linesize + (2 * j + factor)],
+                       factor);
+                // odd line 0.5V
+                memcpy(&p_dst1[0][(2 * i + 1) * uv_444p_linesize + 2 * j],
+                       &p_src[2][(2 * i + 1) * uv_444p_linesize + 2 * j],
+                       factor * 2);
+                // even line 0.25V
+                memcpy(&p_dst0[2][i * uv_420p_linesize + j],
+                       &p_src[2][2 * i * uv_444p_linesize + 2 * j],
+                       factor);
             }
         }
     }
@@ -1999,7 +2623,7 @@ int ni_insert_emulation_prevent_bytes(uint8_t *buf, int size)
  *
  *  Note: buf will be modified if emu prevent byte(s) found and removed.
  ******************************************************************************/
-LIB_API int ni_remove_emulation_prevent_bytes(uint8_t *buf, int size)
+int ni_remove_emulation_prevent_bytes(uint8_t *buf, int size)
 {
     int remove_bytes = 0;
     uint8_t *buf_curr = buf;
@@ -2343,8 +2967,10 @@ static unsigned short ni_ai_fp32_to_bfp16_rtne(float in)
     /*
     Convert a float point to bfloat16, with round-nearest-to-even as rounding method.
     */
-    uint32_t fp32 = *((unsigned int *)((void *)&in));
     unsigned short out;
+
+    uint32_t fp32;
+    memcpy(&fp32, &in, sizeof(uint32_t));
 
     uint32_t lsb =
         (fp32 >> 16) & 1; /* Least significant bit of resulting bfloat. */
@@ -2473,26 +3099,8 @@ struct tensor_rsrc
 static int open_tensor_rsrc_file(struct tensor_rsrc *rsrc, void *data,
                                  uint32_t num)
 {
-    const char *file_name;
-    FILE *fp;
-
-    file_name = (const char *)data;
-    fp = fopen(file_name, "r");
-    if (!fp)
-    {
-        return -1;
-    }
-
-    rsrc->private = (void *)fp;
-
-    /* to make cppcheck happy */
-    if (0)
-    {
-        fclose(fp);
-        rsrc->private = NULL;
-    }
-
-    return 0;
+    rsrc->private = (void *)fopen((const char *)data, "r");
+    return rsrc->private ? 0 : -1;
 }
 
 static int get_tensor_rsrc_from_file(struct tensor_rsrc *rsrc, float *value)
@@ -2971,21 +3579,22 @@ void ni_copy_hw_descriptors(uint8_t *p_dst[NI_MAX_NUM_DATA_POINTERS],
  *
  *  \return char pointer to libxcoder API version
  ******************************************************************************/
-LIB_API char* ni_get_libxcoder_api_ver(void)
+char* ni_get_libxcoder_api_ver(void)
 {
     static char* libxcoder_api_ver = LIBXCODER_API_VERSION;
     return libxcoder_api_ver;
 }
 
 /*!*****************************************************************************
- *  \brief  Get FW API version libxcoder is compatible with
+ *  \brief  Get FW API version libxcoder is compatible with.
+ *          Deprecated in favour of `ni_fmt_fw_api_ver_str(&NI_XCODER_REVISION[NI_XCODER_REVISION_API_MAJOR_VER_IDX], &char_buf[0]);`
  *
  *  \return char pointer to FW API version libxcoder is compatible with
  ******************************************************************************/
-LIB_API char* ni_get_compat_fw_api_ver(void)
+NI_DEPRECATED char* ni_get_compat_fw_api_ver(void)
 {
-    static char compat_fw_api_ver_str[4] = "";
-    // init static array one byte at a time to avoid compiler error C2099
+    static char compat_fw_api_ver_str[5] = "";
+    // init static array one byte at a time to avoid msvc compiler error C2099
     if (!compat_fw_api_ver_str[0])
     {
         compat_fw_api_ver_str[0] = \
@@ -2993,9 +3602,86 @@ LIB_API char* ni_get_compat_fw_api_ver(void)
         compat_fw_api_ver_str[1] = '.';
         compat_fw_api_ver_str[2] = \
             NI_XCODER_REVISION[NI_XCODER_REVISION_API_MINOR_VER_IDX];
-        compat_fw_api_ver_str[3] = 0;
+        if (ni_cmp_fw_api_ver(&NI_XCODER_REVISION[NI_XCODER_REVISION_API_MAJOR_VER_IDX], "6r") >= 0)
+            compat_fw_api_ver_str[3] = \
+                NI_XCODER_REVISION[NI_XCODER_REVISION_API_MINOR_VER_IDX+1];
+        else
+            compat_fw_api_ver_str[3] = 0;
+        compat_fw_api_ver_str[4] = 0;
     }
     return &compat_fw_api_ver_str[0];
+}
+
+/*!*****************************************************************************
+ *  \brief  Get formatted FW API version string from unformatted FW API version
+ *          string
+ *
+ *  \param[in]   ver_str  pointer to string containing FW API. Only up to 3
+ *                        characters will be read
+ *  \param[out]  fmt_str  pointer to string buffer of at least size 5 to output
+ *                        formated version string to
+ *
+ *  \return none
+ ******************************************************************************/
+void ni_fmt_fw_api_ver_str(const char ver_str[], char fmt_str[])
+{
+    if (!ver_str || !fmt_str) {
+        return;
+    }
+
+    fmt_str[0] = ver_str[0];
+    fmt_str[1] = '.';
+    fmt_str[2] = ver_str[1];
+
+    if ((ver_str[0] < '6' || (ver_str[0] == '6' && ver_str[1] <= 'q')) ||
+        (ver_str[2] == 0)) {
+        fmt_str[3] = 0;
+    } else {
+        fmt_str[3] = ver_str[2];
+    }
+    fmt_str[4] = 0;
+}
+
+/*!*****************************************************************************
+ *  \brief  Compare two 3 character strings containing a FW API version. Handle
+ *          comparision when FW API version format length changed from 2 to 3.
+ *
+ *  \param[in]  ver1  pointer to string containing FW API. Only up to 3
+ *                    characters will be read
+ *  \param[in]  ver2  pointer to string containing FW API. Only up to 3
+ *                    characters will be read
+ *
+ *  \return 0 if ver1 == ver2, 1 if ver1 > ver2, -1 if ver1 < ver2
+ ******************************************************************************/
+int ni_cmp_fw_api_ver(const char ver1[], const char ver2[])
+{
+    int index;
+
+    index = 0;
+
+    if (ver1[index] > ver2[index])
+        return 1;
+    else if (ver1[index] < ver2[index])
+        return -1;
+
+    index++;
+
+    if (ver1[index] > ver2[index])
+        return 1;
+    else if (ver1[index] < ver2[index])
+        return -1;
+
+    if ((ver1[index - 1] < '6') || ((ver1[index - 1] == '6') && (ver1[index] <= 'q')))
+        return 0;
+
+    index++;
+
+    if (ver1[index] > ver2[index])
+        return 1;
+    else if (ver1[index] < ver2[index])
+        return -1;
+
+    return 0;
 }
 
 /*!*****************************************************************************
@@ -3003,7 +3689,7 @@ LIB_API char* ni_get_compat_fw_api_ver(void)
  *
  *  \return char pointer to libxcoder SW release version
  ******************************************************************************/
-LIB_API char* ni_get_libxcoder_release_ver(void)
+char* ni_get_libxcoder_release_ver(void)
 {
     static char release_ver_str[6] = "";
     // init static array one byte at a time to avoid compiler error C2099
@@ -3017,4 +3703,658 @@ LIB_API char* ni_get_libxcoder_release_ver(void)
         release_ver_str[5] = 0;
     }
     return &release_ver_str[0];
+}
+
+/*!*****************************************************************************
+ *  \brief  Get text string for the provided error
+ *
+ *  \return char pointer for the provided error
+ ******************************************************************************/
+const char *ni_get_rc_txt(ni_retcode_t rc)
+{
+    int i;
+    for (i = 0;
+         i < sizeof(ni_err_rc_description) / sizeof(ni_err_rc_txt_entry_t); i++)
+    {
+        if (rc == ni_err_rc_description[i].rc)
+        {
+            return ni_err_rc_description[i].txt;
+        }
+    }
+    return "rc not supported";
+}
+
+/*!*****************************************************************************
+ *  \brief  retrieve key and value from 'key=value' pair
+ *
+ *  \param[in]   p_str    pointer to string to extract pair from
+ *  \param[out]  key      pointer to key 
+ *  \param[out]  value    pointer to value
+ *
+ *  \return return 0 if successful, otherwise 1
+ *
+ ******************************************************************************/
+int ni_param_get_key_value(char *p_str, char *key, char *value)
+{
+    if (!p_str || !key || !value)
+    {
+        return 1;
+    }
+
+    char *p = strchr(p_str, '=');
+    if (!p)
+    {
+        return 1;
+    } else
+    {
+        *p = '\0';
+        key[0] = '\0';
+        value[0] = '\0';
+        strcpy(key, p_str);
+        strcpy(value, p + 1);
+        return 0;
+    }
+}
+
+/*!*****************************************************************************
+ *  \brief  retrieve encoder config parameter values from --xcoder-params
+ *
+ *  \param[in]   xcoderParams    pointer to string containing xcoder params
+ *  \param[out]  params          pointer to xcoder params to fill out 
+ *  \param[out]  ctx             pointer to session context
+ *
+ *  \return return 0 if successful, -1 otherwise
+ *
+ ******************************************************************************/
+int ni_retrieve_xcoder_params(char xcoderParams[],
+                                      ni_xcoder_params_t *params,
+                                      ni_session_context_t *ctx)
+{
+    char key[64], value[64];
+    char *curr = xcoderParams, *colon_pos;
+    int ret = 0;
+
+    while (*curr)
+    {
+        colon_pos = strchr(curr, ':');
+
+        if (colon_pos)
+        {
+            *colon_pos = '\0';
+        }
+
+        if (strlen(curr) > sizeof(key) + sizeof(value) - 1 ||
+            ni_param_get_key_value(curr, key, value))
+        {
+            ni_log(NI_LOG_ERROR,
+                    "Error: xcoder-params p_config key/value not "
+                    "retrieved: %s\n",
+                    curr);
+            ret = -1;
+            break;
+        }
+        ret = ni_encoder_params_set_value(params, key, value);
+        switch (ret)
+        {
+            case NI_RETCODE_PARAM_INVALID_NAME:
+                ni_log(NI_LOG_ERROR, "Error: unknown option: %s.\n", key);
+                break;
+            case NI_RETCODE_PARAM_INVALID_VALUE:
+                ni_log(NI_LOG_ERROR, "Error: invalid value for %s: %s.\n", key,
+                        value);
+                break;
+            default:
+                break;
+        }
+
+        if (NI_RETCODE_SUCCESS != ret)
+        {
+            ni_log(NI_LOG_ERROR, "Error: config parsing failed %d: %s\n", ret,
+                    ni_get_rc_txt(ret));
+            break;
+        }
+
+        if (colon_pos)
+        {
+            curr = colon_pos + 1;
+        } else
+        {
+            curr += strlen(curr);
+        }
+    }
+    ctx->keep_alive_timeout = params->cfg_enc_params.keep_alive_timeout;
+    // reuse decoder_low_delay for low delay encoding to store wait interval
+    // in send/recv multi-thread mode.
+    ctx->decoder_low_delay = params->low_delay_mode;
+
+    return ret;
+}
+
+/*!*****************************************************************************
+ *  \brief  Retrieve custom gop config values from --xcoder-gop
+ *
+ *  \param[in]   xcoderGop       pointer to string containing xcoder gop
+ *  \param[out]  params          pointer to xcoder params to fill out
+ *  \param[out]  ctx             pointer to session context
+ *
+ *  \return return 0 if successful, -1 otherwise
+ *
+ ******************************************************************************/
+int ni_retrieve_xcoder_gop(char xcoderGop[],
+                           ni_xcoder_params_t *params,
+                           ni_session_context_t *ctx)
+{
+    char key[64], value[64];
+    char *curr = xcoderGop, *colon_pos;
+    int ret = 0;
+
+    while (*curr)
+    {
+        colon_pos = strchr(curr, ':');
+
+        if (colon_pos)
+        {
+            *colon_pos = '\0';
+        }
+
+        if (strlen(curr) > sizeof(key) + sizeof(value) - 1 ||
+            ni_param_get_key_value(curr, key, value))
+        {
+            ni_log(NI_LOG_ERROR,
+                    "Error: xcoder-params p_config key/value not "
+                    "retrieved: %s\n",
+                    curr);
+            ret = -1;
+            break;
+        }
+        ret = ni_encoder_gop_params_set_value(params, key, value);
+        switch (ret)
+        {
+            case NI_RETCODE_PARAM_INVALID_NAME:
+                ni_log(NI_LOG_ERROR, "Error: unknown option: %s.\n", key);
+                break;
+            case NI_RETCODE_PARAM_INVALID_VALUE:
+                ni_log(NI_LOG_ERROR, "Error: invalid value for %s: %s.\n", key,
+                        value);
+                break;
+            default:
+                break;
+        }
+
+        if (NI_RETCODE_SUCCESS != ret)
+        {
+            ni_log(NI_LOG_ERROR, "Error: gop config parsing failed %d: %s\n", ret,
+                    ni_get_rc_txt(ret));
+            break;
+        }
+
+        if (colon_pos)
+        {
+            curr = colon_pos + 1;
+        } else
+        {
+            curr += strlen(curr);
+        }
+    }
+
+    return ret;
+}
+
+/*!*****************************************************************************
+ *  \brief  retrieve decoder config parameter values from --decoder-params
+ *
+ *  \param[in]   xcoderParams    pointer to string containing xcoder params
+ *  \param[out]  params          pointer to xcoder params to fill out 
+ *  \param[out]  ctx             pointer to session context
+ *
+ *  \return return 0 if successful, -1 otherwise
+ *
+ ******************************************************************************/
+int ni_retrieve_decoder_params(char xcoderParams[],
+                                       ni_xcoder_params_t *params,
+                                       ni_session_context_t *ctx)
+{
+    char key[64], value[64];
+    char *curr = xcoderParams, *colon_pos;
+    int ret = 0;
+
+    while (*curr)
+    {
+        colon_pos = strchr(curr, ':');
+
+        if (colon_pos)
+        {
+            *colon_pos = '\0';
+        }
+
+        if (strlen(curr) > sizeof(key) + sizeof(value) - 1 ||
+            ni_param_get_key_value(curr, key, value))
+        {
+            ni_log(NI_LOG_ERROR,
+                    "Error: decoder-params p_config key/value not "
+                    "retrieved: %s\n",
+                    curr);
+            ret = -1;
+            break;
+        }
+        ret = ni_decoder_params_set_value(params, key, value);
+        switch (ret)
+        {
+            case NI_RETCODE_PARAM_INVALID_NAME:
+                ni_log(NI_LOG_ERROR, "Error: unknown option: %s.\n", key);
+                break;
+            case NI_RETCODE_PARAM_INVALID_VALUE:
+                ni_log(NI_LOG_ERROR, "Error: invalid value for %s: %s.\n", key,
+                        value);
+                break;
+            default:
+                break;
+        }
+
+        if (NI_RETCODE_SUCCESS != ret)
+        {
+            ni_log(NI_LOG_ERROR, "Error: config parsing failed %d: %s\n", ret,
+                    ni_get_rc_txt(ret));
+            break;
+        }
+
+        if (colon_pos)
+        {
+            curr = colon_pos + 1;
+        } else
+        {
+            curr += strlen(curr);
+        }
+    }
+    ctx->keep_alive_timeout = params->dec_input_params.keep_alive_timeout;
+    ctx->decoder_low_delay = params->dec_input_params.decoder_low_delay;
+
+    return ret;
+}
+
+/*!*****************************************************************************
+ *  \brief  initialize a mutex
+ *
+ *  \param[in]  thread mutex
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_mutex_init(ni_pthread_mutex_t *mutex)
+{
+#ifdef _WIN32
+    bool rc = false;
+    // error return zero 
+    rc = InitializeCriticalSectionEx(mutex, 0, CRITICAL_SECTION_NO_DEBUG_INFO);
+    if (rc)
+    {
+        return 0;
+    }
+    else
+    {
+        return -1;
+    }
+#else
+    int rc;
+    ni_pthread_mutexattr_t attr;
+
+    rc = pthread_mutexattr_init(&attr);
+    if (rc != 0)
+    {
+        return -1;
+    }
+
+    /* For some cases to prevent the lock owner locking twice (i.e. internal
+     * API calls or if user application decides to lock the xcoder_mutex outside
+     * of API), The recursive mutex is a nice thing to solve the problem.
+     */
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+
+    return pthread_mutex_init(mutex, &attr);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  destory a mutex
+ *
+ *  \param[in]  thread mutex
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_mutex_destroy(ni_pthread_mutex_t *mutex)
+{
+#ifdef _WIN32
+    DeleteCriticalSection(mutex);
+    return 0;
+#else
+    return pthread_mutex_destroy(mutex);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  thread mutex lock
+ *
+ *  \param[in]  thread mutex
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_mutex_lock(ni_pthread_mutex_t *mutex)
+{
+    int rc = 0;
+    if (mutex != NULL)
+    {
+#ifdef _WIN32
+        EnterCriticalSection(mutex);
+#else
+        rc = pthread_mutex_lock(mutex);
+#endif
+    } else
+    {
+        rc = -1;
+    }
+
+    return rc;
+}
+
+/*!*****************************************************************************
+ *  \brief  thread mutex unlock
+ *
+ *  \param[in]  thread mutex
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_mutex_unlock(ni_pthread_mutex_t *mutex)
+{
+    int rc = 0;
+    if (mutex != NULL)
+    {
+#ifdef _WIN32
+        LeaveCriticalSection(mutex);
+#else
+        rc = pthread_mutex_unlock(mutex);
+#endif
+    } else
+    {
+        rc = -1;
+    }
+
+    return rc;
+}
+
+#ifdef _WIN32
+static unsigned __stdcall __thread_worker(void *arg)
+{
+    ni_pthread_t *t = (ni_pthread_t *)arg;
+    t->rc = t->start_routine(t->arg);
+    return 0;
+}
+#endif
+
+/*!*****************************************************************************
+ *  \brief  create a new thread
+ *
+ *  \param[in] thread          thread id 
+ *  \param[in] attr            attributes to the new thread 
+ *  \param[in] start_routine   entry of the thread routine 
+ *  \param[in] arg             sole argument of the routine 
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_create(ni_pthread_t *thread, const ni_pthread_attr_t *attr,
+                      void *(*start_routine)(void *), void *arg)
+{
+#ifdef _WIN32
+    thread->start_routine = start_routine;
+    thread->arg = arg;
+    thread->handle =
+#if HAVE_WINRT
+    (void *)CreateThread(NULL, 0, win32thread_worker, thread, 0, NULL);
+#else
+    (void *)_beginthreadex(NULL, 0, __thread_worker, thread, 0, NULL);
+#endif
+    return !thread->handle;
+#else
+    return pthread_create(thread, attr, start_routine, arg);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  join with a terminated thread
+ *
+ *  \param[in]  thread     thread id 
+ *  \param[out] value_ptr  return status 
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_join(ni_pthread_t thread, void **value_ptr)
+{
+#ifdef _WIN32
+    DWORD rc = WaitForSingleObject(thread.handle, INFINITE);
+    if (rc != WAIT_OBJECT_0)
+    {
+        if (rc == WAIT_ABANDONED)
+            return EINVAL;
+        else
+            return EDEADLK;
+    }
+    if (value_ptr)
+        *value_ptr = thread.rc;
+    CloseHandle(thread.handle);
+    return 0;
+#else
+    return pthread_join(thread, value_ptr);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  initialize condition variables
+ *
+ *  \param[in] cond  condition variable 
+ *  \param[in] attr  attribute to the condvar 
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_cond_init(ni_pthread_cond_t *cond,
+                         const ni_pthread_condattr_t *attr)
+{
+#ifdef _WIN32
+    InitializeConditionVariable(cond);
+    return 0;
+#else
+    return pthread_cond_init(cond, attr);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  destroy condition variables
+ *
+ *  \param[in] cond  condition variable
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_cond_destroy(ni_pthread_cond_t *cond)
+{
+#ifdef _WIN32
+    /* native condition variables do not destroy */
+    return 0;
+#else
+    return pthread_cond_destroy(cond);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  broadcast a condition
+ *
+ *  \param[in] cond  condition variable
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_cond_broadcast(ni_pthread_cond_t *cond)
+{
+#ifdef _WIN32
+    WakeAllConditionVariable(cond);
+    return 0;
+#else
+    return pthread_cond_broadcast(cond);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  wait on a condition
+ *
+ *  \param[in] cond  condition variable
+ *  \param[in] mutex mutex related to the condvar
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_cond_wait(ni_pthread_cond_t *cond, ni_pthread_mutex_t *mutex)
+{
+#ifdef _WIN32
+    SleepConditionVariableCS(cond, mutex, INFINITE);
+    return 0;
+#else
+    return pthread_cond_wait(cond, mutex);
+#endif
+}
+
+/*!******************************************************************************
+ *  \brief  signal a condition
+ *
+ *  \param[in] cond  condition variable
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ *******************************************************************************/
+int ni_pthread_cond_signal(ni_pthread_cond_t *cond)
+{
+#ifdef _WIN32
+    WakeConditionVariable(cond);
+    return 0;
+#else
+    return pthread_cond_signal(cond);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  wait on a condition
+ *
+ *  \param[in] cond    condition variable
+ *  \param[in] mutex   mutex related to the condvar
+ *  \param[in[ abstime abstract value of timeout
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_cond_timedwait(ni_pthread_cond_t *cond,
+                              ni_pthread_mutex_t *mutex,
+                              const struct timespec *abstime)
+{
+#ifdef _WIN32
+    int64_t abs_ns = abstime->tv_sec * 1000000000LL + abstime->tv_nsec;
+    DWORD t = (uint32_t)((abs_ns - ni_gettime_ns()) / 1000000);
+
+    if (!SleepConditionVariableCS(cond, mutex, t))
+    {
+        DWORD err = GetLastError();
+        if (err == ERROR_TIMEOUT)
+            return ETIMEDOUT;
+        else
+            return EINVAL;
+    }
+    return 0;
+#else
+    return pthread_cond_timedwait(cond, mutex, abstime);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  examine and change mask of blocked signals
+ *
+ *  \param[in] how     behavior of this call, can be value of SIG_BLOCK,
+ *                     SIG_UNBLOCK and  SIG_SETMASK 
+ *  \param[in] set     current value of the signal mask. If NULL, the mask keeps
+ *                     unchanged. 
+ *  \param[in] old_set previous value of the signal mask, can be NULL. 
+ *
+ *  \return On success returns 0
+ *          On failure returns <0
+ ******************************************************************************/
+int ni_pthread_sigmask(int how, const ni_sigset_t *set, ni_sigset_t *oldset)
+{
+#ifdef _WIN32
+    return 0;
+#else
+    return pthread_sigmask(how, set, oldset);
+#endif
+}
+
+/*!*****************************************************************************
+ *  \brief  return error string according to error code from firmware
+ *
+ *  \param[in] rc      error code return from firmware
+ *
+ *  \return error string
+ ******************************************************************************/
+const char *ni_ai_errno_to_str(int rc)
+{
+    switch (rc)
+    {
+        case NI_AI_STATUS_SUCCESS:
+            return "Success";
+        case NI_AI_STATUS_GENERIC_ERROR:
+            return "General Error";
+        case NI_AI_STATUS_NOT_INITIALIZED:
+            return "Not Initialized";
+        case NI_AI_STATUS_ALREADY_INITIALIZED:
+            return "Already Initialized";
+        case NI_AI_STATUS_IO_BUSY:
+            return "IO Busy";
+        case NI_AI_STATUS_RESOURCE_NOT_AVAILABLE:
+            return "Resource Not Available";
+        case NI_AI_STATUS_CREATE_NETWORK_FAILED:
+            return "Create Network Failed";
+        case NI_AI_STATUS_INPUT_BUFFER_FULL:
+            return "Input Buffer Full";
+        case NI_AI_STATUS_OUTPUT_BUFFER_EMPTY:
+            return "Output Buffer Empty";
+        case NI_AI_STATUS_INVALID_PARAMS:
+            return "Invalid Params";
+        case NI_AI_STATUS_ERROR_START_NETWORK:
+            return "Error Start Network";
+        case NI_AI_STATUS_ERROR_SET_INOUT:
+            return "Erorr Set Inout";
+        case NI_AI_STATUS_BAD_OPTION:
+            return "Bad Option";
+        case NI_AI_STATUS_MAP_ERROR:
+            return "Map Error";
+        case NI_AI_STATUS_CONTEXT_NOT_AVAILABLE:
+            return "Context Not Available";
+        case NI_AI_STATUS_MODEL_NOT_FOUND:
+            return "Model Not Found";
+        case NI_AI_STATUS_IO_ERROR:
+            return "IO Error";
+        case NI_AI_STATUS_INVALID_ADDRESS:
+            return "Invalid Address";
+        case NI_AI_STATUS_OUT_OF_MEMORY:
+            return "Out Of Memory";
+        case NI_AI_STATUS_BAD_INOUT:
+            return "Bad Inout";
+        case NI_AI_STATUS_INVALID_INSTANCE:
+            return "Invalid Instance";
+        case NI_AI_STATUS_IO_NOT_ALLOWED:
+            return "IO Not Allowed";
+        case NI_AI_STATUS_NETWORK_NOT_READY:
+            return "Network Not Ready";
+        default:
+            return "Other Error";
+    }
 }

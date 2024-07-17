@@ -20,15 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
+ *  \file   ni_device_api_priv.h
  *
- *   \file          xcoder_api.h
- *
- *   @date          April 1, 2018
- *
- *   \brief
- *
- *   @author        
- *
+ *  \brief  Private definitions used by ni_device_api.c for video processing
+ *          tasks
  ******************************************************************************/
 
 #pragma once
@@ -55,7 +50,9 @@ typedef enum
     INST_BUF_INFO_RW_UPLOAD = 2,
     INST_BUF_INFO_RW_READ_BUSY = 3,
     INST_BUF_INFO_RW_WRITE_BUSY = 4,
-    INST_BUF_INFO_R_ACQUIRE = 5
+    INST_BUF_INFO_R_ACQUIRE = 5,
+    INST_BUF_INFO_RW_WRITE_BY_EP = 6,
+    INST_BUF_INFO_RW_READ_BY_AI = 7,
 } ni_instance_buf_info_rw_type_t;
 // mapping of a subset of NI_RETCODE_NVME_SC_* of ni_retcode_t, returned by
 // fw in regular i/o environment.
@@ -83,16 +80,39 @@ typedef struct _ni_instance_mgr_general_status
 {
   uint8_t active_sub_instances_cnt; // Number of active sub-instance in that instance
   uint8_t process_load_percent;  // Processing load in percentage
-  uint8_t error_count;
-  uint8_t fatal_error;
+  union{
+      uint8_t error_count;
+      uint8_t pcie_load;
+  };
+  union{
+      uint8_t fatal_error;
+      uint8_t pcie_throughput;
+  };
   uint32_t fw_model_load;
   uint8_t cmd_queue_count;
   uint8_t fw_video_mem_usage;
   uint8_t fw_share_mem_usage;
   uint8_t fw_p2p_mem_usage;
   uint8_t active_hwupload_sub_inst_cnt; // number of hwuploader instances
-  uint8_t ui8reserved[3];
+  uint8_t fw_load;
+  uint8_t fw_video_shared_mem_usage;
+  uint8_t process_load_percent_upper;   // Processing load upper 8 bits
+  uint8_t process_load_percent_overall; // Processing load among all namespaces
+  uint8_t active_sub_instances_cnt_overall ; // Number of active sub-instance among all namespaces
+  uint32_t fw_model_load_overall;       // Model load among all namespaces
+  uint8_t admin_nsid; // declares if there is info from admin namespace
+  uint8_t tp_fw_load; //uint8_t rsrv;
 } ni_instance_mgr_general_status_t;
+
+#define NI_VERSION_CHARACTER_COUNT 8
+
+typedef struct _ni_log_fl_fw_versions
+{
+  uint8_t last_ran_fl_version[NI_VERSION_CHARACTER_COUNT];
+  uint8_t nor_flash_fl_version[NI_VERSION_CHARACTER_COUNT];
+  uint8_t current_fw_revision[NI_VERSION_CHARACTER_COUNT];
+  uint8_t nor_flash_fw_revision[NI_VERSION_CHARACTER_COUNT];
+} ni_log_fl_fw_versions_t;
 
 typedef struct _ni_instance_mgr_stream_info
 {
@@ -116,7 +136,8 @@ typedef struct _ni_session_stats
   uint32_t ui32LastTransactionCompletionStatus;
   uint32_t ui32LastErrorTransactionId;
   uint32_t ui32LastErrorStatus;
-  uint64_t ui64Session_timestamp;   // session start timestamp
+  uint32_t ui32Session_timestamp_high;  // session start timestamp high
+  uint32_t ui32Session_timestamp_low;   // session start timestamp low
   uint32_t reserved[1];
 } ni_session_stats_t; // 32 bytes (has to be 8 byte aligned)
 
@@ -134,7 +155,9 @@ typedef struct _ni_instance_mgr_allocation_info
   uint16_t frame_index;
   uint16_t session_id;
   uint8_t output_index;
-  uint8_t reserved0[3];
+  uint8_t input_index;
+  uint8_t orientation;
+  uint8_t reserved0;
   uint32_t reserved;
 } ni_instance_mgr_allocation_info_t;
 
@@ -184,7 +207,8 @@ typedef struct _ni_metadata_common
   uint16_t frame_width;
   uint16_t frame_height;
   uint16_t frame_type;
-  uint16_t reserved;
+  uint8_t has_b_frame;
+  uint8_t pkt_delay_cnt;
 } ni_metadata_common_t;
 
 // 48 bytes
@@ -218,6 +242,9 @@ typedef struct _ni_metadata_enc_frame
   uint8_t use_cur_src_as_long_term_pic;
   uint8_t use_long_term_ref;
   //uint32_t              reserved;
+  uint16_t              start_len[3];
+  uint8_t                inconsecutive_transfer;
+  uint8_t                reserved;
 } ni_metadata_enc_frame_t;
 
 typedef struct _ni_metadata_enc_bstream_rev61
@@ -244,10 +271,23 @@ typedef struct _ni_metadata_enc_bstream
     uint32_t      ssimY;
     uint32_t      ssimU;
     uint32_t      ssimV;
-    uint32_t      reserved;
+    //Added for Revision 6p
+    int16_t       max_mv_x[2]; // 1/4 pixel unit
+    int16_t       min_mv_x[2]; // 1/4 pixel unit
+    int16_t       max_mv_y[2]; // 1/4 pixel unit
+    int16_t       min_mv_y[2]; // 1/4 pixel unit
+    uint16_t      frame_size;
+    uint16_t      inter_total_count; // the inter includ the skip mode
+    uint16_t      intra_total_count;
+    uint8_t        gop_size;
+    uint8_t        reserved_bytes[3];
+    uint32_t      reserved[4];
 } ni_metadata_enc_bstream_t;
 
 /*!****** encoder paramters *********************************************/
+
+#define TUNE_BFRAME_VISUAL_MEDIUM     1
+#define TUNE_BFRAME_VISUAL_HIGH     2
 
 typedef enum _ni_gop_preset_idx
 {
@@ -264,6 +304,7 @@ typedef enum _ni_gop_preset_idx
     GOP_PRESET_IDX_RA_IB = 8, /*!*< Random Access, cyclic gopsize = 8 */
     GOP_PRESET_IDX_SP = 9, /*!*< Consecutive P, gopsize=1, similar to 2 but */
                            /* uses 1 instead of 2 reference frames */
+    GOP_PRESET_IDX_HIERARCHICAL_IPPPP = 10,   /*!*< Hierarchical P, cyclic gopsize = 4  */
 } ni_gop_preset_idx_t;
 
 /*!*
@@ -425,8 +466,8 @@ typedef struct _ni_t408_config_t
   int32_t rdoSkip;             /*!*< It skips RDO(rate distortion optimization). */
   int32_t lambdaScalingEnable; /*!*< It enables lambda scaling using custom GOP. */
   int32_t enable_transform_8x8;  /*!*< It enables 8x8 intra prediction and 8x8 transform. */
-  int32_t avc_slice_mode;
-  int32_t avc_slice_arg; /*!*< The number of MB for a slice when avc_slice_mode is set with 1  */
+  int32_t slice_mode;
+  int32_t slice_arg; /*!*< The number of MB for a slice when slice_mode is set with 1  */
   int32_t intra_mb_refresh_mode;
   int32_t intra_mb_refresh_arg;
   int32_t enable_mb_level_rc; /*!*< It enables MB-level rate control. */
@@ -467,7 +508,7 @@ typedef struct _ni_encoder_config_t
   uint32_t ui32sourceEndian;
 
   /**> 0=no HDR in VUI, 1=add HDR info to VUI **/
-  uint32_t hdrEnableVUI; //TODO: to be deprecated
+  uint32_t hdrEnableVUI; /* Ignored by Quadra. Kept for backward and forward compatibility. */
   uint32_t ui32VuiDataSizeBits;       /**< size of VUI RBSP in bits **/
   uint32_t ui32VuiDataSizeBytes;     /**< size of VUI RBSP in bytes up to NI_MAX_VUI_SIZE **/
   int32_t  i32hwframes;
@@ -507,21 +548,74 @@ typedef struct _ni_encoder_config_t
   uint8_t ui8videoFullRange;
   uint32_t ui32setLongTermInterval;     /* sets long-term reference interval */
   uint32_t ui32QLevel;                  /* JPEG Quantization scale (0-9) */
-  // not to be exposed to customers --->
   int8_t i8chromaQpOffset;
   int32_t i32tolCtbRcInter;
   int32_t i32tolCtbRcIntra;
   int16_t i16bitrateWindow;
+  // experimental parameters, not to be set by user --->
   uint8_t ui8inLoopDSRatio;
   uint8_t ui8blockRCSize;
+  // <--- experimental parameters, not to be set by user
   uint8_t ui8rcQpDeltaRange;
-  // <--- not to be exposed to customers
   uint8_t ui8LowDelay;
   uint8_t ui8setLongTermCount; /* sets long-term reference frames count */
   uint16_t ui16maxFrameSize;
   uint8_t ui8enableSSIM;
-  uint8_t ui8VuiRbsp[NI_MAX_VUI_SIZE]; /**< VUI raw byte sequence **/
+  uint8_t  ui8hdr10_enable;
+  uint16_t ui16hdr10_dx0;
+  uint16_t ui16hdr10_dy0;
+  uint16_t ui16hdr10_dx1;
+  uint16_t ui16hdr10_dy1;
+  uint16_t ui16hdr10_dx2;
+  uint16_t ui16hdr10_dy2;
+  uint16_t ui16hdr10_wx;
+  uint16_t ui16hdr10_wy;
+  uint32_t ui32hdr10_maxluma;
+  uint32_t ui32hdr10_minluma;
+  int8_t i8skipFrameEnable;
+  int8_t i8maxConsecutiveSkipFrameNum;
+  int8_t i8enableipRatio;
+  uint8_t u8skipFrameInterval;
+  uint16_t ui16iFrameSizeRatio;
+  uint8_t rsvd2;
   uint8_t ui8fixedframerate;
+  uint8_t ui8av1ErrResilientMode;
+  uint8_t ui8intraResetRefresh;              /**< reset intra refresh on force IDR frame. */
+  int16_t i16ctbRowQpStep;
+  uint8_t ui8NewRCEnable;  // <--- experimental parameters, not to be set by user
+  uint8_t ui8temporalLayersEnable;
+  uint8_t ui8AiEnhanceMode;
+  uint8_t ui8enable2PassGopPatern;
+  uint32_t ui32lumaLinesize;
+  uint32_t ui32chromaLinesize;
+  uint32_t ui32cropWidth;
+  uint32_t ui32cropHeight;
+  uint32_t ui32horOffset;
+  uint32_t ui32verOffset;
+  uint8_t ui8AiEnhanceLevel;
+  int8_t   i8crfMax;  // <--- experimental parameters, not to be set by user                  /* prevent quadra from reducing the ratefactor below the given value */
+  int32_t i32qcomp;
+  // experimental parameters, not to be set by user --->
+  uint8_t ui8noMbtree;
+  uint8_t ui8noHWMultiPassSupport;
+  int8_t   i8cuTreeFactor;
+  // <--- experimental parameters, not to be set by user
+  int32_t  i32ipRatio;
+  int32_t  i32pbRatio;
+  int32_t  i32cplxDecay;
+  uint32_t ui32vbvMaxRate;
+  int8_t i8ppsInitQp;
+  uint8_t ui8bitrateMode;
+  int8_t i8pass1Qp; // <--- experimental parameters, not to be set by user
+  int8_t i8crfDecimal;
+  int8_t    i8hvsBaseMbComplexity;
+  int8_t i8statisticOutputLevel;
+  uint8_t ui8crfMaxIframeEnable;
+  uint32_t ui32vbvMinRate;
+  uint8_t ui8disableBframeRDOQ;
+  int32_t i32forceBframeQpFactor;
+  uint8_t ui8tuneBframeVisual;
+  uint8_t ui8EnableAcqLimit;
 } ni_encoder_config_t;
 
 typedef struct _ni_uploader_config_t
@@ -532,6 +626,8 @@ typedef struct _ni_uploader_config_t
     uint8_t ui8PixelFormat;
     uint8_t ui8Pool;
     uint8_t ui8rsvd[1];
+    uint32_t   ui32lumaLinesize;
+    uint32_t   ui32chromaLinesize;
 } ni_uploader_config_t;
 
 // struct describing resolution change.
@@ -545,6 +641,9 @@ typedef struct _ni_resolution
 
     // bit depth factor
     int32_t bit_depth_factor;
+
+    int32_t luma_linesize;
+    int32_t chroma_linesize;
 } ni_resolution_t;
 
 #define NI_MINIMUM_CROPPED_LENGTH 48
@@ -572,8 +671,13 @@ typedef struct {
   uint8_t                           ui8CropMode;
   uint8_t                           ui8ScaleEnabled;
   uint8_t                           ui8SemiPlanarEnabled;
-  uint8_t                           ui8Rsvd1;
-  uint16_t                          ui16Rsvd2;
+  // ui8EnablePpuScaleAdapt 0: disable 1: enable long-edge adapt 2: enable short-edge adapt
+  // 3: enable long-edge adapt 4: enable short-edge adapt
+  // 1 and 2 is that default rounding down to 2, and don't check change in area before and after
+  // 3 and 4 is that default rounding up to 2, and will check change in area before and after
+  uint8_t                           ui8EnablePpuScaleAdapt;
+  uint8_t                           ui8EnablePpuScaleLimit;
+  uint8_t                           ui8ScaleResCeil;  // even is up, odd is down (odd+1)
   ni_decode_cropping_rectangle      sCroppingRectable;
   ni_decoder_output_picture_size    sOutputPictureSize;
 }ni_decoder_output_config_t;
@@ -586,9 +690,17 @@ typedef struct _ni_decoder_config_t
   uint32_t fps_number;
   uint32_t fps_denominator;
   uint8_t ui8MCMode;
-  uint8_t ui8rsrv[3];
+  uint8_t ui8DisablePictureReordering;
+  uint8_t ui8EnablelowDelayCheck;
+  uint8_t ui8MaxExtraHwFrameCnt;
   uint32_t ui32MaxPktSize;
   ni_decoder_output_config_t  asOutputConfig[NI_MAX_NUM_OF_DECODER_OUTPUTS];
+  uint8_t ui8EcPolicy;
+  uint8_t ui8EnableAdvancedEc;
+  uint8_t ui8DisableAdaptiveBuffers;
+  uint8_t ui8reserved;
+  uint32_t ui32SourceWidth;
+  uint32_t ui32SourceHeight;
 } ni_decoder_config_t;
 
 typedef struct _ni_ai_config_t
@@ -599,7 +711,13 @@ typedef struct _ni_ai_config_t
 
 typedef struct _ni_network_buffer
 {
-    uint32_t ui32Address;
+    uint16_t ui16FrameScale;
+    uint16_t ui16Width;
+    uint16_t ui16Height;
+    uint16_t ui16Option;
+    uint8_t ui8PoolSize;
+    uint8_t ui8MultiIn;
+    uint16_t ui16FrameIdx[4];
 } ni_network_buffer_t;
 
 typedef struct _ni_scaler_config
@@ -609,6 +727,12 @@ typedef struct _ni_scaler_config
     uint8_t ui8Reserved[2];
     uint32_t ui32Reserved[3];
 } ni_scaler_config_t;
+
+typedef struct _ni_ddr_priority_config
+{
+    uint8_t  ddr_mode;
+    uint8_t  ui8Reserved[7];
+} ni_ddr_priority_config_t;
 
 // the following enum and struct are copied from firmware/nvme/vpuapi/vpuapi.h
 /*!*
@@ -636,6 +760,19 @@ typedef enum
 
 #define NI_QUADRA_MEMORY_CONFIG_DR   0
 #define NI_QUADRA_MEMORY_CONFIG_SR    1
+#define NI_QUADRA_MEMORY_CONFIG_SR2_REMOVE_P2P    2
+#define NI_QUADRA_MEMORY_CONFIG_SR_4G   3
+
+
+#define NI_MAX_AI_NETWORK_BINARY_BUFFER_QUERY_RETRIES 300000
+#define NI_MAX_DEC_SESSION_READ_QUERY_EOS_RETRIES     15000
+#define NI_RETRY_INTERVAL_200US                       200
+#define NI_RETRY_INTERVAL_100US                       100
+
+// size of meta data sent together with bitstream: from f/w encoder to app for FW/SW before rev 6.1
+#define NI_FW_ENC_BITSTREAM_META_DATA_SIZE 32
+// size of meta data sent together with bitstream: from f/w encoder to app for FW/SW before rev 6.o
+#define NI_FW_ENC_BITSTREAM_META_DATA_SIZE_UNDER_MAJOR_6_MINOR_o 48
 
 int ni_create_frame(ni_frame_t* p_frame, uint32_t read_length, uint64_t* frame_offset, bool is_hw_frame);
 
@@ -670,10 +807,13 @@ void ni_populate_device_capability_struct(ni_device_capability_t* p_cap, void * 
 
 int ni_xcoder_session_query(ni_session_context_t *p_ctx,
                             ni_device_type_t device_type);
+int ni_xcoder_session_query_detail(ni_session_context_t *p_ctx,
+                            ni_device_type_t device_type, void *detail_data, int ver);
 
 ni_retcode_t ni_config_instance_set_decoder_params(ni_session_context_t* p_ctx, uint32_t max_pkt_size);
 ni_retcode_t ni_decoder_session_open(ni_session_context_t *p_ctx);
 ni_retcode_t ni_decoder_session_close(ni_session_context_t *p_ctx, int eos_recieved);
+ni_retcode_t ni_decoder_session_send_eos(ni_session_context_t *p_ctx);
 ni_retcode_t ni_decoder_session_flush(ni_session_context_t *p_ctx);
 
 int ni_decoder_session_write(ni_session_context_t *p_ctx, ni_packet_t *p_packet);
@@ -681,22 +821,29 @@ int ni_decoder_session_read(ni_session_context_t *p_ctx, ni_frame_t *p_frame);
 
 ni_retcode_t ni_encoder_session_open(ni_session_context_t *p_ctx);
 ni_retcode_t ni_encoder_session_close(ni_session_context_t *p_ctx, int eos_recieved);
-ni_retcode_t ni_encoder_session_flush(ni_session_context_t *p_ctx);
+ni_retcode_t ni_encoder_session_send_eos(ni_session_context_t *p_ctx);
 int ni_encoder_session_write(ni_session_context_t *p_ctx, ni_frame_t *p_frame);
 int ni_encoder_session_read(ni_session_context_t *p_ctx, ni_packet_t *p_packet);
 ni_retcode_t ni_encoder_session_sequence_change(ni_session_context_t *p_ctx, ni_resolution_t *p_resoluion);
 //int ni_encoder_session_reconfig(ni_session_context_t *p_ctx, ni_session_config_t *p_config, ni_param_change_flags_t change_flags);
 
 ni_retcode_t ni_query_general_status(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_instance_mgr_general_status_t* p_gen_status);
+ni_retcode_t ni_query_detail_status(ni_session_context_t* p_ctx, ni_device_type_t device_type, void* p_detail_status, int ver);
+
 ni_retcode_t ni_query_stream_info(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_instance_mgr_stream_info_t* p_stream_info);
 ni_retcode_t ni_query_eos(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_instance_mgr_stream_complete_t* p_stream_complete);
 
 ni_retcode_t ni_query_instance_buf_info(ni_session_context_t* p_ctx, ni_instance_buf_info_rw_type_t rw_type, ni_device_type_t device_type, ni_instance_buf_info_t *p_inst_buf_info);
 ni_retcode_t ni_query_session_stats(ni_session_context_t* p_ctx, ni_device_type_t device_type, ni_session_stats_t* p_session_stats, int rc, int opcode);
+ni_retcode_t
+ni_query_session_statistic_info(ni_session_context_t *p_ctx,
+                                ni_device_type_t device_type,
+                                ni_session_statistic_t *p_session_statistic);
 
 ni_retcode_t ni_config_session_rw(ni_session_context_t* p_ctx, ni_session_config_rw_type_t rw_type, uint8_t enable, uint8_t hw_action, uint16_t frame_id);
 ni_retcode_t ni_config_instance_sos(ni_session_context_t* p_ctx, ni_device_type_t device_type);
 ni_retcode_t ni_config_instance_eos(ni_session_context_t* p_ctx, ni_device_type_t device_type);
+ni_retcode_t ni_config_instance_flush(ni_session_context_t* p_ctx, ni_device_type_t device_type);
 ni_retcode_t ni_config_instance_set_encoder_params(ni_session_context_t* p_ctx);
 ni_retcode_t ni_config_instance_update_encoder_params(ni_session_context_t* p_ctx, ni_param_change_flags_t change_flags);
 ni_retcode_t ni_config_instance_set_encoder_frame_params(ni_session_context_t* p_ctx, ni_encoder_frame_params_t* p_params);
@@ -785,6 +932,16 @@ int ni_hwupload_session_read_hwdesc(ni_session_context_t *p_ctx,
 *******************************************************************************/
 int ni_hwdownload_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame, niFrameSurface1_t* hwdesc);
 
+/*!******************************************************************************
+*  \brief  Copy a src hw frame to a dst hw frame
+*
+*  \param
+*
+*  \return
+*******************************************************************************/
+ni_retcode_t ni_hwframe_clone(ni_session_context_t *p_ctx,
+                              ni_frameclone_desc_t *p_frameclone_desc);
+
 /*!*****************************************************************************
 *  \brief  clear a particular xcoder instance buffer/data
 *
@@ -794,8 +951,7 @@ int ni_hwdownload_session_read(ni_session_context_t* p_ctx, ni_frame_t* p_frame,
 *            or NI_RETCODE_ERROR_NVME_CMD_FAILED on
 *            failure
 ******************************************************************************/
-ni_retcode_t ni_clear_instance_buf(niFrameSurface1_t *surface,
-                                   int32_t device_handle);
+ni_retcode_t ni_clear_instance_buf(niFrameSurface1_t *surface);
 
 /*!******************************************************************************
  *  \brief  condif a scaler instance
@@ -970,6 +1126,20 @@ ni_retcode_t ni_get_memory_offset(ni_session_context_t * p_ctx, const niFrameSur
  ******************************************************************************/
 ni_retcode_t ni_device_get_ddr_configuration(ni_session_context_t *p_ctx);
 
+/*!*****************************************************************************
+ *  \brief  Set DDR configuration of Quadra device
+ *
+ *  \param[in] p_ctx  pointer to a session context with valid file handle
+ *  \param[in] ddr_priority_mode  ddr priority mode
+ * 
+ *  \return On success    NI_RETCODE_SUCCESS
+ *          On failure    NI_RETCODE_INVALID_PARAM
+ *                        NI_RETCODE_ERROR_MEM_ALOC
+ *                        NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+ni_retcode_t ni_device_set_ddr_configuration(ni_session_context_t *p_ctx,
+                                             uint8_t ddr_priority_mode);
+
 
 #define NI_AI_HW_ALIGN_SIZE 64
 
@@ -977,13 +1147,68 @@ ni_retcode_t ni_ai_session_open(ni_session_context_t *p_ctx);
 ni_retcode_t ni_ai_session_close(ni_session_context_t *p_ctx, int eos_received);
 ni_retcode_t ni_config_instance_network_binary(ni_session_context_t *p_ctx,
                                                void *nb_data, uint32_t nb_size);
+ni_retcode_t ni_ai_query_network_ready(ni_session_context_t *p_ctx);
 ni_retcode_t ni_ai_session_write(ni_session_context_t *p_ctx,
                                  ni_frame_t *p_frame);
 ni_retcode_t ni_ai_session_read(ni_session_context_t *p_ctx,
                                 ni_packet_t *p_packet);
 ni_retcode_t ni_config_read_inout_layers(ni_session_context_t *p_ctx,
                                          ni_network_data_t *p_network);
-ni_retcode_t ni_ai_alloc_hwframe(ni_session_context_t *p_ctx, int frame_index);
+ni_retcode_t ni_ai_alloc_hwframe(ni_session_context_t *p_ctx, int width,
+                                 int height, int options, int pool_size,
+                                 int frame_index);
+ni_retcode_t ni_ai_alloc_dst_frame(ni_session_context_t *p_ctx,
+                                   niFrameSurface1_t *p_out_surface);
+ni_retcode_t ni_ai_multi_config_frame(ni_session_context_t *p_ctx,
+                                          ni_frame_config_t p_cfg_in[],
+                                          int numInCfgs,
+                                          ni_frame_config_t *p_cfg_out);
+
+ni_retcode_t ni_ai_session_read_hwdesc(ni_session_context_t *p_ctx,
+                                       ni_frame_t *p_frame);
+/*!*****************************************************************************
+  *  \brief  Allocate memory for the metadata header and auxillary data for
+  *          encoder input data.
+  *
+  *  \param[in] p_frame       Pointer to a caller allocated ni_frame_t struct
+  *
+  *  \param[in] extra_len     Length header and auxillary data
+  *
+  *  \return On success
+  *                          NI_RETCODE_SUCCESS
+  *          On failure
+  *                          NI_RETCODE_INVALID_PARAM
+  *                          NI_RETCODE_ERROR_MEM_ALOC
+  *****************************************************************************/
+ni_retcode_t ni_encoder_metadata_buffer_alloc(ni_frame_t *p_frame,
+                                              int extra_len);
+
+ni_retcode_t ni_encoder_start_buffer_alloc(ni_frame_t *p_frame);
+
+ni_retcode_t ni_ai_session_query_metrics(ni_session_context_t *p_ctx,
+                                         ni_network_perf_metrics_t *p_metrics);
+
+
+/*!*****************************************************************************
+ *  \brief  Send namespace num / Opmode and SRIOv index/value to the device with 
+ *          specified logic block address.
+ *
+ *  \param[in] device_handle  Device handle obtained by calling ni_device_open
+ *  \param[in] Key            Represents either namespace num or opmode
+ *  \param[in] Value          Represents either SRIOv index or opmode value
+ *
+ *  \return On success
+ *                          NI_RETCODE_SUCCESS
+ *          On failure
+ *                          NI_RETCODE_ERROR_MEM_ALOC
+ *                          NI_RETCODE_ERROR_NVME_CMD_FAILED
+ ******************************************************************************/
+ni_retcode_t ni_device_config_ns_qos(ni_device_handle_t device_handle,
+                                     uint32_t key, uint32_t value);
+
+ni_retcode_t ni_dump_log_single_core(ni_session_context_t *p_ctx, void* p_data, uint32_t core_id, bool gen_log_file);
+ni_retcode_t ni_dump_log_all_cores(ni_session_context_t *p_ctx, void* p_data, bool gen_log_file);
+ni_retcode_t ni_send_to_target(niFrameSurface1_t *source, uint64_t ui64DestAddr, uint32_t ui32FrameSize);
 
 #ifdef __cplusplus
 }

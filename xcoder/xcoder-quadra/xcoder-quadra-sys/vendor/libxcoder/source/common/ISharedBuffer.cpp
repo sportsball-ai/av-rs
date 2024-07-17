@@ -20,11 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*   \file   ISharedBuffer.cpp
-*
-*  \brief  Exported routines related to resource management of NI Quadra devices
-*
-*******************************************************************************/
+ *  \file   ISharedBuffer.cpp
+ *
+ *  \brief  Public definitions related to resource management of NETINT video
+ *          processing devices on Android
+ *******************************************************************************/
 
 #define LOG_TAG "ISharedBuffer"
 
@@ -100,6 +100,7 @@ class BpSharedBuffer : public BpInterface<ISharedBuffer> {
     }
 };
 
+// NOLINTNEXTLINE
 IMPLEMENT_META_INTERFACE(SharedBuffer, "net.int.ISharedBuffer");
 
 /*!*****************************************************************************

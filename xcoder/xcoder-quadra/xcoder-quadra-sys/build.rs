@@ -24,6 +24,9 @@ fn main() {
             .env("XCODER_WIN_NVME_CUSTOM", "NO")
             .env("XCODER_SELF_KILL_ERR", "NO")
             .env("XCODER_LATENCY_DISPLAY", "NO")
+            .env("XCODER_SSIM_INFO_LEVEL_LOGGING", "NO")
+            .env("XCODER_LINUX_VIRT_IO_DRIVER", "NO")
+            .env("XCODER_DISABLE_BACKTRACE_PRINT", "NO")
             .args(["vendor/libxcoder/auto/auto_headers.sh"])
             .status()
             .unwrap();
@@ -42,7 +45,6 @@ fn main() {
             .files(c_source_files.iter().map(|name| source_path.join(name)))
             .warnings(false)
             .flag("-fPIC")
-            .flag("-Werror")
             .flag("-Wno-unused-command-line-argument")
             .flag("-std=gnu99")
             .flag("-DLIBXCODER_OBJS_BUILD")
@@ -65,7 +67,6 @@ fn main() {
             .files(cpp_source_files.iter().map(|name| source_path.join(name)))
             .warnings(false)
             .flag("-fPIC")
-            .flag("-Werror")
             .flag("-Wno-unused-command-line-argument")
             .flag("-DLIBXCODER_OBJS_BUILD")
             .compile("xcoder-cpp-sys");
@@ -77,9 +78,6 @@ fn main() {
             .allowlist_type("ni_.+")
             .allowlist_var("NI_.+")
             .allowlist_var("GC620_.+")
-            // bindgen 0.60.0 broke layout tests: https://github.com/rust-lang/rust-bindgen/issues/2218
-            // 0.60.1 claims to have fixed the issue, but does not.
-            .layout_tests(false)
             .clang_arg(format!("-I{}", source_path.to_str().unwrap()))
             .generate()
             .expect("unable to generate bindings");

@@ -20,11 +20,11 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_lat_meas.h
-*
-*  \brief  utility functions for measuring frame latency
-*
-*******************************************************************************/
+ *  \file   ni_lat_meas.h
+ *
+ *  \brief  Utility definitions for measuring frame/packet processing time in
+ *          NETINT video processing devices
+ ******************************************************************************/
 
 #pragma once
 
@@ -39,6 +39,7 @@ typedef struct _ni_lat_meas_q_entry_t
 typedef struct _ni_lat_meas_q_t
 {
     int front, rear, size, capacity;
+    uint64_t last_benchmark_time;
     ni_lat_meas_q_entry_t *array;
 } ni_lat_meas_q_t;
 

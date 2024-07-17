@@ -20,11 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
-*  \file   ni_p2p_ioctl.h
-*
-*  \brief  Definitions related to NETINT P2P kernel driver interface
-*
-*******************************************************************************/
+ *  \file   ni_p2p_ioctl.h
+ *
+ *  \brief  Definitions related to NETINT P2P kernel driver interface
+ ******************************************************************************/
 
 #ifndef _NETINT_IOCTL_H
 #define _NETINT_IOCTL_H
@@ -50,6 +49,20 @@ struct netint_iocmd_export_dmabuf
     int bar;
     unsigned long offset;
     unsigned long length;
+};
+
+struct netint_iocmd_import_dmabuf {
+    int fd;
+    unsigned int flags; // reserved for future use
+    int domain;
+    int bus;
+    int dev;
+    int fn;
+#ifdef __linux__
+    __u64 dma_addr;
+#else
+    unsigned long dma_addr;
+#endif
 };
 
 struct netint_iocmd_issue_request
@@ -81,4 +94,6 @@ struct netint_iocmd_signal_rfence
     _IOW('N', 0x83, struct netint_iocmd_signal_rfence)
 #define NETINT_IOCTL_ISSUE_REQ                                                 \
     _IOW('N', 0x85, struct netint_iocmd_issue_request)
+#define NETINT_IOCTL_IMPORT_DMABUF                                             \
+    _IOW('N', 0x88, struct netint_iocmd_import_dmabuf)
 #endif /* _NETINT_IOCTL_H */

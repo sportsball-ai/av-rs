@@ -20,15 +20,10 @@
  ******************************************************************************/
 
 /*!*****************************************************************************
+ *  \file   ni_rsrc_update.c
  *
- *   \file          ni_rsrc_update.c
- *
- *   @date          may 10, 2019
- *
- *   \brief
- *
- *   @author        
- *
+ *  \brief  Application for managing registration/deregistration of individual
+ *          NETINT video processing devices on system
  ******************************************************************************/
 
 #include <stdio.h>
@@ -55,27 +50,30 @@
 #endif
 
 /*!******************************************************************************
- *  \brief  get the NVMe device's character device name (e.g. /dev/nvmeX)
+ *  \brief  get the NVMe device's block device name (e.g. /dev/nvmeXnY)
  *
  *  \param  in        whole device name passed in
- *          dev_name  full device name without name-space/partition-number
+ *          dev_name  full block device name 
  *
  *  \return    0 if value device name is found, -1 otherwise
  ******************************************************************************/
 static int get_dev_name(const char *in, char *dev_name)
 {
-  char *tmp = NULL;
-  
-  if ( dev_name && (strlen(in) > strlen(DEV_NAME_PREFIX) && strstr(in, DEV_NAME_PREFIX)) ) 
-  {
-    tmp = (char *)in + strlen(DEV_NAME_PREFIX);
-    while (isdigit(*tmp))
-      tmp++;
-    strncpy(dev_name, in, tmp - in);
-    dev_name[tmp - in] = '\0';
+    if (!in || !dev_name)
+    {
+        ni_log(NI_LOG_ERROR,
+               "Error: one or more of the given arguments is NULL.\n");
+        return -1;
+    }
+
+    // for linux blk name (/dev/nvmeXnY)
+    // for apple blk name (/dev/diskX)
+    // for android blk name (/dev/nvmeXnY or /dev/block/nvmeXnY)
+    // for windows blk name (\\\\.\\PHYSICALDRIVEX)
+    strcpy(dev_name, in);
+
     return 0;
-  }
-  return -1;
+
 }
 
 static void display_help(void)
@@ -87,6 +85,8 @@ static void display_help(void)
            "transcoder card on host\n"
            "  -d device_file    Delete the resource entry for a transcoder "
            "card removed from host\n"
+           "  -D                Delete ALL the resource entries for transcoder "
+           "card on this host\n"
            "  -r                Init transcoder card resource regardless "
            "firmware release version\n"
            "                    Default is to only init cards matching current "
@@ -98,33 +98,35 @@ static void display_help(void)
            "  -v                Print version info and exit\n");
 }
 
-/*!******************************************************************************
- *  \brief  
- *
- *  \param  
- *
- *  \return
- ******************************************************************************/
 int main(int argc, char *argv[])
 {
-  int opt, rc = 0;
-  char char_dev_name[64];
-  int should_match_rev = 1;
-  int add_dev = 1; // default is to add(not delete) a resource
-  ni_log_level_t log_level = NI_LOG_INFO;
+    int opt, rc = 0;
+    char char_dev_name[64];
+    int should_match_rev = 1;
+    int add_dev = 0; // default is to add(not delete) a resource
+    int del_dev = 0;
+    int delete_all = 0; // delete ALL the resources on the host
+    ni_log_level_t log_level = NI_LOG_INFO;
 
-  if (argc == 1) {
-    display_help();
-    return 0;
-  }
+    if (argc == 1) {
+        display_help();
+        return 0;
+    }
 
     // arg handling
-    while ((opt = getopt(argc, argv, "hvra:d:l:")) != -1)
+    while ((opt = getopt(argc, argv, "hvrDa:d:l:")) != -1)
     {
         switch (opt)
         {
             case 'd':
-                add_dev = 0;
+                rc = get_dev_name(optarg, char_dev_name);
+                if (rc)
+                {
+                    fprintf(stderr, "ERROR: get_dev_name() returned %d\n", rc);
+                    return EXIT_FAILURE;
+                }
+                del_dev = 1;
+                break;
             case 'a':
 #ifdef __linux__
                 rc = get_dev_name(optarg, char_dev_name);
@@ -133,7 +135,11 @@ int main(int argc, char *argv[])
                     fprintf(stderr, "ERROR: get_dev_name() returned %d\n", rc);
                     return EXIT_FAILURE;
                 }
+                add_dev = 1;
 #endif
+                break;
+            case 'D':
+                delete_all = 1;
                 break;
             case 'r':
                 should_match_rev = 0;
@@ -164,22 +170,50 @@ int main(int argc, char *argv[])
         }
     }
 
-  if (add_dev)
-  {
-      rc = ni_rsrc_add_device(char_dev_name, should_match_rev);
-      if (rc)
-          printf("%s not added as transcoder.\n", optarg);
-      else
-          printf("Added transcoder %s successfully.\n", char_dev_name);
-      return rc;
-  }
-  else
-  {
-      rc = ni_rsrc_remove_device(char_dev_name);
-      if (rc)
-          printf("%s not removed as transcoder.\n", optarg);
-      else
-          printf("Removed transcoder %s successfully.\n", char_dev_name);
-      return rc;
-  }
+    // check option
+    if (add_dev && (del_dev || delete_all))
+    {
+        fprintf(stderr, "Error: can not add and delete device at the same time\n\n");
+        display_help();
+        return 1;
+    }
+    if (!should_match_rev && !add_dev)
+    {
+        fprintf(stderr, "Error: -r option must be used with -a option\n\n");
+        display_help();
+        return 1;
+    }
+    if (add_dev)
+    {
+        rc = ni_rsrc_add_device(char_dev_name, should_match_rev);
+        if (rc)
+            printf("%s not added as transcoder.\n", char_dev_name);
+        else
+            printf("Added transcoder %s successfully.\n", char_dev_name);
+        return rc;
+    }
+    else if (delete_all)
+    {
+        rc = ni_rsrc_remove_all_devices();
+        if (rc)
+            printf("Error removing all transcoder resources.\n");
+        else
+            printf("Removing all transcoder resources successfully.\n");
+        return rc;
+    }
+    else if (del_dev)
+    {
+        rc = ni_rsrc_remove_device(char_dev_name);
+        if (rc)
+            printf("%s not removed as transcoder.\n", char_dev_name);
+        else
+            printf("Removed transcoder %s successfully.\n", char_dev_name);
+        return rc;
+    }
+    else
+    {
+        fprintf(stderr, "Error: ni_rsrc_update option must be used with -a or -b or -D option\n\n");
+        display_help();
+        return 1;
+    }
 }
