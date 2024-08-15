@@ -67,6 +67,9 @@ impl XcoderScaler {
         let pixel_format_out = if self.config.bit_depth == 10 { sys::GC620_I010_ } else { sys::GC620_I420_ };
         unsafe {
             let frame_in = **f;
+            // Granting an exception here. This structure is valid in zeroed memory state and there is no
+            // officially sanctioned way to initialize it otherwise.
+            #[allow(clippy::disallowed_methods)]
             let mut frame_out: sys::ni_frame_t = mem::zeroed();
             frame_out.pts = frame_in.pts;
 
