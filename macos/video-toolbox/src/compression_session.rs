@@ -10,7 +10,7 @@ use std::{
 };
 
 struct CallbackContext<C> {
-    frames: mpsc::Sender<Result<CompressionSessionOutputFrame<C>, OSStatus>>,
+    frames: mpsc::SyncSender<Result<CompressionSessionOutputFrame<C>, OSStatus>>,
     _pinned: PhantomPinned,
 }
 
@@ -40,7 +40,7 @@ pub struct CompressionSessionConfig {
 
 impl<C: Send> CompressionSession<C> {
     pub fn new(config: CompressionSessionConfig) -> Result<Self, OSStatus> {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(1024);
 
         let callback_context = Box::pin(CallbackContext {
             frames: tx,

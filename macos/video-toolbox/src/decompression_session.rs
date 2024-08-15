@@ -44,7 +44,7 @@ impl DecompressionSession {
     }
 
     pub fn decode_frame(&mut self, frame_data: &[u8], format_desc: &VideoFormatDescription) -> Result<ImageBuffer, OSStatus> {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(1024);
         let mut cb: Pin<Box<Callback>> = Box::pin(Box::new(move |status, image_buffer| {
             tx.send(if image_buffer.is_null() {
                 Err(status.into())
