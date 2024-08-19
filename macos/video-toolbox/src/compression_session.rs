@@ -129,6 +129,8 @@ impl<C: Send> CompressionSession<C> {
         unsafe { result(sys::VTCompressionSessionPrepareToEncodeFrames(self.inner.0).into()) }
     }
 
+    /// Note: The sending half of this channel will be dropped when the channel exceeds its buffer capacity.
+    /// If that happens then you are not polling this channel frequently enough.
     pub fn frames(&self) -> &mpsc::Receiver<Result<CompressionSessionOutputFrame<C>, OSStatus>> {
         &self.frames
     }
