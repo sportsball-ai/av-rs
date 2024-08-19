@@ -25,14 +25,21 @@ pub use video_encoder_list::{Encoder, EncoderList};
 pub mod decompression_session;
 pub use decompression_session::*;
 
-pub struct Error {
-    context: &'static str,
-    inner: OSStatus,
+pub enum Error {
+    OSStatus { context: &'static str, inner: OSStatus },
+    InnerChannelDropped,
 }
 
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: {}", self.context, self.inner)
+        match self {
+            Self::OSStatus { context, inner } => {
+                write!(f, "{}: {}", context, inner)
+            }
+            Self::InnerChannelDropped => {
+                write!(f, "inner channel exceeded capacity and failed; channel must be polled more often")
+            }
+        }
     }
 }
 
@@ -50,6 +57,6 @@ trait ResultExt<T> {
 
 impl<T> ResultExt<T> for Result<T, OSStatus> {
     fn context(self, context: &'static str) -> Result<T, Error> {
-        self.map_err(|inner| Error { context, inner })
+        self.map_err(|inner| Error::OSStatus { context, inner })
     }
 }

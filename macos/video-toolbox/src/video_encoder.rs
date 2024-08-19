@@ -1,9 +1,9 @@
 use super::*;
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoderOutput};
-use core_foundation::{self as cf, Array, Boolean, CFType, Dictionary, MutableDictionary, Number, OSStatus};
+use core_foundation::{self as cf, Array, Boolean, CFType, Dictionary, MutableDictionary, Number};
 use core_media::{Time, VideoCodecType};
 use core_video::{PixelBuffer, PixelBufferPlane};
-use std::pin::Pin;
+use std::{pin::Pin, sync::mpsc::TryRecvError};
 
 #[derive(Copy, Clone, Debug)]
 pub enum H265ProfileLevel {
@@ -207,9 +207,9 @@ impl<F: Send> VideoEncoder<F> {
         Ok(Self { sess, config, frame_count: 0 })
     }
 
-    fn next_video_encoder_trait_frame(&mut self) -> Result<Option<VideoEncoderOutput<F>>, OSStatus> {
-        Ok(match self.sess.frames().try_recv().ok().transpose()? {
-            Some(frame) => {
+    fn next_video_encoder_trait_frame(&mut self) -> Result<Option<VideoEncoderOutput<F>>, Error> {
+        match self.sess.frames().try_recv() {
+            Ok(Ok(frame)) => {
                 let raw_frame = unsafe { *Pin::into_inner_unchecked(frame.context) };
                 let Some(sample_buffer) = frame.sample_buffer else {
                     return Ok(Some(VideoEncoderOutput {
@@ -232,13 +232,23 @@ impl<F: Send> VideoEncoder<F> {
                 }
 
                 let data_buffer = sample_buffer.data_buffer().expect("all frames should have data");
-                let data_buffer = data_buffer.create_contiguous(0, 0)?;
-                let mut avcc_data = data_buffer.data(0)?;
+                let data_buffer = data_buffer.create_contiguous(0, 0).context("create contiguous data buffer")?;
+                let mut avcc_data = data_buffer.data(0).context("access first entry of data buffer")?;
 
                 let format_desc = sample_buffer.format_description().expect("all frames should have format descriptions");
                 let prefix_len = match self.config.codec {
-                    VideoEncoderCodec::H264 { .. } => format_desc.h264_parameter_set_at_index(0)?.nal_unit_header_length,
-                    VideoEncoderCodec::H265 { .. } => format_desc.hevc_parameter_set_at_index(0)?.nal_unit_header_length,
+                    VideoEncoderCodec::H264 { .. } => {
+                        format_desc
+                            .h264_parameter_set_at_index(0)
+                            .context("h264_parameter_set_at_index")?
+                            .nal_unit_header_length
+                    }
+                    VideoEncoderCodec::H265 { .. } => {
+                        format_desc
+                            .hevc_parameter_set_at_index(0)
+                            .context("hevc_parameter_set_at_index")?
+                            .nal_unit_header_length
+                    }
                 };
 
                 let mut data = Vec::with_capacity(avcc_data.len() + 100);
@@ -248,14 +258,14 @@ impl<F: Send> VideoEncoder<F> {
                     match self.config.codec {
                         VideoEncoderCodec::H264 { .. } => {
                             for i in 0..2 {
-                                let ps = format_desc.h264_parameter_set_at_index(i)?;
+                                let ps = format_desc.h264_parameter_set_at_index(i).context("h264_parameter_set_at_index - keyframe")?;
                                 data.extend_from_slice(&[0, 0, 0, 1]);
                                 data.extend_from_slice(ps.data);
                             }
                         }
                         VideoEncoderCodec::H265 { .. } => {
                             for i in 0..3 {
-                                let ps = format_desc.hevc_parameter_set_at_index(i)?;
+                                let ps = format_desc.hevc_parameter_set_at_index(i).context("hevc_parameter_set_at_index - keyframe")?;
                                 data.extend_from_slice(&[0, 0, 0, 1]);
                                 data.extend_from_slice(ps.data);
                             }
@@ -280,15 +290,17 @@ impl<F: Send> VideoEncoder<F> {
 
                 let encoded_frame = Some(EncodedVideoFrame { data, is_keyframe });
 
-                Some(VideoEncoderOutput { encoded_frame, raw_frame })
+                Ok(Some(VideoEncoderOutput { encoded_frame, raw_frame }))
             }
-            None => None,
-        })
+            Ok(Err(e)) => Err(e).context("error from os session"),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Disconnected) => Err(Error::InnerChannelDropped),
+        }
     }
 }
 
 impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncoder<F> {
-    type Error = OSStatus;
+    type Error = Error;
     type RawVideoFrame = F;
 
     fn encode(&mut self, input: Self::RawVideoFrame, frame_type: EncodedFrameType) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error> {
@@ -320,7 +332,8 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
                             data: input.samples(2).as_ptr() as _,
                         },
                     ],
-                )?
+                )
+                .context("Yuv420Planar - with_planar_bytes")?
             },
             VideoEncoderInputFormat::Yuv444Planar => unsafe {
                 PixelBuffer::with_planar_bytes(
@@ -347,7 +360,8 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
                             data: input.samples(2).as_ptr() as _,
                         },
                     ],
-                )?
+                )
+                .context("Yuv444Planar - with_planar_bytes")?
             },
             VideoEncoderInputFormat::Bgra => unsafe {
                 PixelBuffer::with_bytes(
@@ -356,7 +370,8 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
                     sys::kCVPixelFormatType_32BGRA,
                     4,
                     input.samples(0).as_ptr() as _,
-                )?
+                )
+                .context("Bgra - with_bytes")?
             },
         };
 
@@ -366,12 +381,13 @@ impl<F: RawVideoFrame<u8> + Send + Unpin> av_traits::VideoEncoder for VideoEncod
         let frame_number = self.frame_count;
         self.frame_count += 1;
         self.sess
-            .encode_frame(pixel_buffer.into(), Time::new((fps_den * frame_number) as _, fps_num as _), input, frame_type)?;
+            .encode_frame(pixel_buffer.into(), Time::new((fps_den * frame_number) as _, fps_num as _), input, frame_type)
+            .context("session encode frame")?;
         self.next_video_encoder_trait_frame()
     }
 
     fn flush(&mut self) -> Result<Option<VideoEncoderOutput<Self::RawVideoFrame>>, Self::Error> {
-        self.sess.flush()?;
+        self.sess.flush().context("flush session")?;
         self.next_video_encoder_trait_frame()
     }
 }
