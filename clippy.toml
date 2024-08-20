@@ -1,0 +1,18 @@
+disallowed-methods = [
+    # These functions are very easy to misuse, please use `MaybeUninit` instead.
+    "std::mem::zeroed",
+    "std::mem::uninitialized",
+    # Unbounded memory growth is not approved for use. Use a bounded channel buffer.
+    "std::sync::mpsc::channel",
+    "tokio::sync::mpsc::unbounded_channel",
+    "crossbeam_channel::unbounded",
+    # These methods poll futures in a biased manner without containing the word "biased" in their name.
+    # This is a footgun and can result in the system starving itself out during high load scenarios.
+    # See https://github.com/rust-lang/futures-rs/issues/2135 for more.
+    "futures::future::select",
+    "futures_util::future::select",
+    "futures::future::try_select",
+    "futures_util::future::try_select",
+    "futures::future::select_ok",
+    "futures_util::future::select_ok",
+]

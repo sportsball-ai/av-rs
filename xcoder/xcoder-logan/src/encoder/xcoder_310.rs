@@ -13,15 +13,15 @@ struct EncodedFrame {
 impl EncodedFrame {
     pub fn new() -> Result<Self> {
         let packet = unsafe {
-            let mut packet = mem::zeroed();
-            let code = sys::ni_logan_packet_buffer_alloc(&mut packet as _, sys::NI_LOGAN_MAX_TX_SZ as _);
+            let mut packet = mem::MaybeUninit::zeroed();
+            let code = sys::ni_logan_packet_buffer_alloc(packet.as_mut_ptr(), sys::NI_LOGAN_MAX_TX_SZ as _);
             if code != sys::ni_logan_retcode_t_NI_LOGAN_RETCODE_SUCCESS {
                 return Err(XcoderEncoderError::Unknown {
                     code,
                     operation: "allocating packet buffer",
                 });
             }
-            packet
+            packet.assume_init()
         };
 
         Ok(Self {
@@ -90,9 +90,9 @@ impl<F> XcoderEncoder<F> {
         let fps_numerator = (config.fps * fps_denominator as f64).round() as _;
 
         unsafe {
-            let mut params: sys::ni_logan_encoder_params_t = mem::zeroed();
+            let mut params = mem::MaybeUninit::<sys::ni_logan_encoder_params_t>::zeroed();
             let code = sys::ni_logan_encoder_init_default_params(
-                &mut params as _,
+                params.as_mut_ptr(),
                 fps_numerator,
                 fps_denominator,
                 // There's nothing special about this default bitrate. It's not used unless
@@ -107,6 +107,7 @@ impl<F> XcoderEncoder<F> {
                     operation: "initializing parameters",
                 });
             }
+            let mut params = params.assume_init();
 
             params.hevc_enc_params.rc.enable_rate_control = if config.bitrate.is_some() { 1 } else { 0 };
 
@@ -197,9 +198,9 @@ impl<F> XcoderEncoder<F> {
             });
 
             let frame_data_io = {
-                let mut frame: sys::ni_logan_frame_t = std::mem::zeroed();
+                let mut frame = std::mem::MaybeUninit::<sys::ni_logan_frame_t>::zeroed();
                 let code = sys::ni_logan_frame_buffer_alloc(
-                    &mut frame as _,
+                    frame.as_mut_ptr(),
                     config.width as _,
                     config.height as _,
                     if align_to_16_bytes { 1 } else { 0 },
@@ -213,6 +214,7 @@ impl<F> XcoderEncoder<F> {
                         operation: "allocating frame buffer",
                     });
                 }
+                let frame = frame.assume_init();
                 sys::ni_logan_session_data_io_t {
                     data: sys::_ni_logan_session_data_io__bindgen_ty_1 { frame },
                 }

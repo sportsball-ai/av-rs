@@ -35,6 +35,9 @@ pub struct XcoderDecoderInputFrame {
 impl XcoderDecoderInputFrame {
     fn to_data_io<E: Error>(&self, pos: i64, width: i32, height: i32, is_start_of_stream: bool) -> Result<DataIo, XcoderDecoderError<E>> {
         unsafe {
+            // Granting an exception here. This structure is valid in zeroed memory state and there is no
+            // officially sanctioned way to initialize it otherwise. Plus the netint SDK zeroes this structure itself.
+            #[allow(clippy::disallowed_methods)]
             let mut packet: sys::ni_packet_t = mem::zeroed();
             packet.dts = self.dts as _;
             packet.pts = self.pts as _;
@@ -81,9 +84,9 @@ pub struct XcoderDecodedFrame {
 
 impl XcoderDecodedFrame {
     unsafe fn new_hardware_frame<E: Error>(session: *mut sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>> {
-        let mut frame: sys::ni_frame_t = mem::zeroed();
+        let mut frame = mem::MaybeUninit::<sys::ni_frame_t>::zeroed();
         let code = sys::ni_frame_buffer_alloc(
-            &mut frame as _,
+            frame.as_mut_ptr(),
             width,
             height,
             if (*session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264 {
@@ -102,6 +105,7 @@ impl XcoderDecodedFrame {
                 operation: "allocating frame",
             });
         }
+        let frame = frame.assume_init();
         Ok(Self {
             data_io: Some(sys::ni_session_data_io_t {
                 data: sys::_ni_session_data_io__bindgen_ty_1 { frame },

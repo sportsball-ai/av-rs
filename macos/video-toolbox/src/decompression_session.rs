@@ -2,7 +2,10 @@ use super::sys;
 use core_foundation::{result, CFType, OSStatus};
 use core_media::{BlockBuffer, SampleBuffer, VideoFormatDescription};
 use core_video::ImageBuffer;
-use std::{pin::Pin, sync::mpsc};
+use std::{
+    pin::Pin,
+    sync::{Arc, Mutex},
+};
 
 pub struct DecompressionSession(sys::VTDecompressionSessionRef);
 core_foundation::trait_impls!(DecompressionSession);
@@ -44,14 +47,18 @@ impl DecompressionSession {
     }
 
     pub fn decode_frame(&mut self, frame_data: &[u8], format_desc: &VideoFormatDescription) -> Result<ImageBuffer, OSStatus> {
-        let (tx, rx) = mpsc::channel();
+        let image_mutex = Arc::new(Mutex::new(None));
+        let cb_image_mutex = image_mutex.clone();
         let mut cb: Pin<Box<Callback>> = Box::pin(Box::new(move |status, image_buffer| {
-            tx.send(if image_buffer.is_null() {
-                Err(status.into())
-            } else {
-                result(status.into()).map(|_| unsafe { ImageBuffer::from_get_rule(image_buffer as _) })
-            })
-            .unwrap();
+            // SAFETY: Panicking is not allowed across an FFI boundary. If you add code that may panic here
+            // then you must wrap it in `std::panic::catch_unwind`.
+            if let Ok(mut lock) = cb_image_mutex.try_lock() {
+                *lock = Some(if image_buffer.is_null() {
+                    Err(status.into())
+                } else {
+                    result(status.into()).map(|_| unsafe { ImageBuffer::from_get_rule(image_buffer as _) })
+                });
+            }
         }));
         result(
             unsafe {
@@ -67,7 +74,8 @@ impl DecompressionSession {
             }
             .into(),
         )?;
-        rx.try_recv().unwrap()
+        let mut mutex_lock = image_mutex.lock().expect("lock shouldn't be poisoned");
+        mutex_lock.take().expect("mutex should be populated")
     }
 }
 

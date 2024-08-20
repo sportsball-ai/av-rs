@@ -5,7 +5,11 @@ use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
 use std::{
-    array, collections::VecDeque, mem::{self, MaybeUninit}, os::raw::c_void, ptr::null_mut
+    array,
+    collections::VecDeque,
+    mem::{self, MaybeUninit},
+    os::raw::c_void,
+    ptr::null_mut,
 };
 use xcoder_quadra_sys::{self as sys, ni_packet_t, ni_xcoder_params_t};
 
@@ -279,9 +283,9 @@ impl<F> XcoderEncoder<F> {
             });
 
             let frame_data_io = {
-                let mut frame: sys::ni_frame_t = mem::zeroed();
+                let mut frame = mem::MaybeUninit::<sys::ni_frame_t>::zeroed();
                 let code = sys::ni_frame_buffer_alloc_pixfmt(
-                    &mut frame as _,
+                    frame.as_mut_ptr(),
                     pixel_format,
                     config.width as _,
                     config.height as _,
@@ -295,6 +299,7 @@ impl<F> XcoderEncoder<F> {
                         operation: "allocating frame buffer",
                     });
                 }
+                let frame = frame.assume_init();
                 sys::ni_session_data_io_t {
                     data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
                 }
@@ -460,10 +465,12 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
             }
 
             let mut dst_data = [frame.p_data[0], frame.p_data[1], frame.p_data[2]];
-            let mut src_data: [*mut u8; 3] = array::from_fn(|i| if i < self.config.pixel_format.plane_count() {
-                f.samples(i).as_ptr() as *mut u8
-            } else {
-                null_mut()
+            let mut src_data: [*mut u8; 3] = array::from_fn(|i| {
+                if i < self.config.pixel_format.plane_count() {
+                    f.samples(i).as_ptr() as *mut u8
+                } else {
+                    null_mut()
+                }
             });
             let mut src_strides = self.config.pixel_format.strides(self.config.width as i32);
             let mut src_heights = self.config.pixel_format.heights(self.config.height as i32);

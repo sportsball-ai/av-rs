@@ -69,14 +69,15 @@ impl XcoderCropper {
         let pixel_format = if f.surface().bit_depth == 2 { sys::GC620_I010_ } else { sys::GC620_I420_ };
         unsafe {
             let frame_in = **f;
-            let mut frame_out: sys::ni_frame_t = mem::zeroed();
-            let code = sys::ni_frame_buffer_alloc_hwenc(&mut frame_out as _, crop.width, crop.height, 0);
+            let mut frame_out = mem::MaybeUninit::<sys::ni_frame_t>::zeroed();
+            let code = sys::ni_frame_buffer_alloc_hwenc(frame_out.as_mut_ptr(), crop.width, crop.height, 0);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderCropperError::Unknown {
                     code,
                     operation: "allocating frame",
                 });
             }
+            let frame_out = frame_out.assume_init();
             let data_io_out = sys::ni_session_data_io_t {
                 data: sys::_ni_session_data_io__bindgen_ty_1 { frame: frame_out },
             };

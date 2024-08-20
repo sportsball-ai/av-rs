@@ -277,12 +277,12 @@ impl Socket {
 
     fn raw_stats(&mut self, clear: bool, instantaneous: bool) -> Result<sys::SRT_TRACEBSTATS> {
         unsafe {
-            let mut perf: sys::SRT_TRACEBSTATS = mem::zeroed();
+            let mut perf = mem::MaybeUninit::<sys::SRT_TRACEBSTATS>::zeroed();
             check_code(
                 "srt_bistats",
-                sys::srt_bistats(self.raw(), &mut perf, if clear { 1 } else { 0 }, if instantaneous { 1 } else { 0 }),
+                sys::srt_bistats(self.raw(), perf.as_mut_ptr(), if clear { 1 } else { 0 }, if instantaneous { 1 } else { 0 }),
             )?;
-            Ok(perf)
+            Ok(perf.assume_init())
         }
     }
 
@@ -368,24 +368,24 @@ fn sockaddr_from_storage(storage: &sys::sockaddr_storage, len: sys::socklen_t) -
 
 fn to_sockaddr(addr: &SocketAddr) -> (sys::sockaddr_storage, sys::socklen_t) {
     use libc::{AF_INET, AF_INET6};
-    let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
+    let mut storage = mem::MaybeUninit::<sys::sockaddr_storage>::zeroed();
     let socklen = match addr {
         SocketAddr::V4(ref a) => {
-            let storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in) };
+            let storage = unsafe { &mut *(storage.as_mut_ptr() as *mut sockaddr_in) };
             storage.sin_family = AF_INET as _;
             storage.sin_port = u16::to_be(a.port());
             storage.sin_addr.s_addr = u32::from_ne_bytes(a.ip().octets());
             mem::size_of::<sockaddr_in>()
         }
         SocketAddr::V6(ref a) => {
-            let storage = unsafe { &mut *(&mut storage as *mut _ as *mut sockaddr_in6) };
+            let storage = unsafe { &mut *(storage.as_mut_ptr() as *mut sockaddr_in6) };
             storage.sin6_family = AF_INET6 as _;
             storage.sin6_port = u16::to_be(a.port());
             storage.sin6_addr.s6_addr.copy_from_slice(&a.ip().octets());
             mem::size_of::<sockaddr_in6>()
         }
     };
-    (storage, socklen as _)
+    (unsafe { storage.assume_init() }, socklen as _)
 }
 
 pub trait ListenerCallback: Send + Sync {
@@ -495,12 +495,15 @@ impl<'c> Listener<'c> {
     }
 
     pub fn accept(&self) -> Result<(Stream, SocketAddr)> {
-        let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
+        let mut storage = mem::MaybeUninit::<sys::sockaddr_storage>::zeroed();
         let mut len = mem::size_of_val(&storage) as sys::socklen_t;
-        let sock = unsafe { sys::srt_accept(self.socket.raw(), &mut storage as *mut _ as *mut _, &mut len as *mut _ as *mut _) };
-        let socket = Socket {
-            api: self.socket.api.clone(),
-            sock,
+        let (storage, socket) = unsafe {
+            let sock = sys::srt_accept(self.socket.raw(), storage.as_mut_ptr() as *mut _, &mut len as *mut _ as *mut _);
+            let socket = Socket {
+                api: self.socket.api.clone(),
+                sock,
+            };
+            (storage.assume_init(), socket)
         };
         let addr = sockaddr_from_storage(&storage, len)?;
         let max_send_payload_size = socket

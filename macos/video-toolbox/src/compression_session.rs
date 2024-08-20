@@ -10,7 +10,7 @@ use std::{
 };
 
 struct CallbackContext<C> {
-    frames: mpsc::Sender<Result<CompressionSessionOutputFrame<C>, OSStatus>>,
+    frames: Option<mpsc::SyncSender<Result<CompressionSessionOutputFrame<C>, OSStatus>>>,
     _pinned: PhantomPinned,
 }
 
@@ -40,10 +40,10 @@ pub struct CompressionSessionConfig {
 
 impl<C: Send> CompressionSession<C> {
     pub fn new(config: CompressionSessionConfig) -> Result<Self, OSStatus> {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(120);
 
         let callback_context = Box::pin(CallbackContext {
-            frames: tx,
+            frames: Some(tx),
             _pinned: PhantomPinned,
         });
 
@@ -54,16 +54,24 @@ impl<C: Send> CompressionSession<C> {
             _info_flags: sys::VTDecodeInfoFlags,
             sample_buffer: sys::CMSampleBufferRef,
         ) {
-            let ctx = &*(output_callback_ref_con as *mut CallbackContext<C>);
+            // SAFETY: Panicking is not allowed across an FFI boundary. If you add code that may panic here
+            // then you must wrap it in `std::panic::catch_unwind`.
+            let ctx = &mut *(output_callback_ref_con as *mut CallbackContext<C>);
             let frame_context = *Box::<C>::from_raw(source_frame_ref_con as *mut C);
-            let _ = ctx.frames.send(result(status.into()).map(|_| CompressionSessionOutputFrame {
-                sample_buffer: if sample_buffer.is_null() {
-                    None
-                } else {
-                    Some(SampleBuffer::from_get_rule(sample_buffer as _))
-                },
-                context: frame_context,
-            }));
+            if let Some(frames) = ctx.frames.as_ref() {
+                let r = frames.try_send(result(status.into()).map(|_| CompressionSessionOutputFrame {
+                    sample_buffer: if sample_buffer.is_null() {
+                        None
+                    } else {
+                        Some(SampleBuffer::from_get_rule(sample_buffer as _))
+                    },
+                    context: frame_context,
+                }));
+                if r.is_err() {
+                    // Send correct data, or send nothing at all. Do not block.
+                    ctx.frames = None;
+                }
+            }
         }
 
         let mut sess = std::ptr::null_mut();
@@ -121,6 +129,8 @@ impl<C: Send> CompressionSession<C> {
         unsafe { result(sys::VTCompressionSessionPrepareToEncodeFrames(self.inner.0).into()) }
     }
 
+    /// Note: The sending half of this channel will be dropped when the channel exceeds its buffer capacity.
+    /// If that happens then you are not polling this channel frequently enough.
     pub fn frames(&self) -> &mpsc::Receiver<Result<CompressionSessionOutputFrame<C>, OSStatus>> {
         &self.frames
     }

@@ -137,19 +137,16 @@ mod linux_impl {
         /// types of data is still considered to be one plane.
         pub fn plane_count(&self) -> usize {
             match self {
-                XcoderPixelFormat::Yuv420Planar |
-                XcoderPixelFormat::Yuv420Planar10BitLittleEndian => 3,
-                XcoderPixelFormat::Nv12 |
-                XcoderPixelFormat::Nv16 |
-                XcoderPixelFormat::P010LittleEndian => 2,
-                XcoderPixelFormat::Rgba |
-                XcoderPixelFormat::Bgra |
-                XcoderPixelFormat::Argb |
-                XcoderPixelFormat::Abgr |
-                XcoderPixelFormat::Bgr0 |
-                XcoderPixelFormat::Bgrp |
-                XcoderPixelFormat::Yuyv422 |
-                XcoderPixelFormat::Uyvy422 => 1,
+                XcoderPixelFormat::Yuv420Planar | XcoderPixelFormat::Yuv420Planar10BitLittleEndian => 3,
+                XcoderPixelFormat::Nv12 | XcoderPixelFormat::Nv16 | XcoderPixelFormat::P010LittleEndian => 2,
+                XcoderPixelFormat::Rgba
+                | XcoderPixelFormat::Bgra
+                | XcoderPixelFormat::Argb
+                | XcoderPixelFormat::Abgr
+                | XcoderPixelFormat::Bgr0
+                | XcoderPixelFormat::Bgrp
+                | XcoderPixelFormat::Yuyv422
+                | XcoderPixelFormat::Uyvy422 => 1,
                 XcoderPixelFormat::None => 0,
             }
         }
@@ -160,38 +157,29 @@ mod linux_impl {
                 XcoderPixelFormat::Yuv420Planar10BitLittleEndian => [width * 2, width, width],
                 XcoderPixelFormat::Nv12 => [width, width, 0],
                 XcoderPixelFormat::P010LittleEndian => [width * 2, width * 2, 0],
-                XcoderPixelFormat::Rgba |
-                XcoderPixelFormat::Bgra |
-                XcoderPixelFormat::Argb |
-                XcoderPixelFormat::Abgr |
-                XcoderPixelFormat::Bgr0 => [width * 4, 0, 0],
+                XcoderPixelFormat::Rgba | XcoderPixelFormat::Bgra | XcoderPixelFormat::Argb | XcoderPixelFormat::Abgr | XcoderPixelFormat::Bgr0 => {
+                    [width * 4, 0, 0]
+                }
                 XcoderPixelFormat::Bgrp => [width * 3, 0, 0],
-                XcoderPixelFormat::Nv16 |
-                XcoderPixelFormat::Yuyv422 |
-                XcoderPixelFormat::Uyvy422 => [width, width / 2, 0],
+                XcoderPixelFormat::Nv16 | XcoderPixelFormat::Yuyv422 | XcoderPixelFormat::Uyvy422 => [width, width / 2, 0],
                 XcoderPixelFormat::None => [0; 3],
             }
         }
 
         pub fn heights(&self, height: i32) -> [i32; 3] {
             match self {
-                XcoderPixelFormat::Yuv420Planar |
-                XcoderPixelFormat::Yuv420Planar10BitLittleEndian => [height, height / 2, height / 2],
-                XcoderPixelFormat::Nv12 |
-                XcoderPixelFormat::P010LittleEndian => [height, height / 2, 0],
-                XcoderPixelFormat::Rgba |
-                XcoderPixelFormat::Bgra |
-                XcoderPixelFormat::Argb |
-                XcoderPixelFormat::Abgr |
-                XcoderPixelFormat::Bgr0 |
-                XcoderPixelFormat::Bgrp => [height, 0, 0],
-                XcoderPixelFormat::Nv16 |
-                XcoderPixelFormat::Yuyv422 |
-                XcoderPixelFormat::Uyvy422 => [height, height, 0],
+                XcoderPixelFormat::Yuv420Planar | XcoderPixelFormat::Yuv420Planar10BitLittleEndian => [height, height / 2, height / 2],
+                XcoderPixelFormat::Nv12 | XcoderPixelFormat::P010LittleEndian => [height, height / 2, 0],
+                XcoderPixelFormat::Rgba
+                | XcoderPixelFormat::Bgra
+                | XcoderPixelFormat::Argb
+                | XcoderPixelFormat::Abgr
+                | XcoderPixelFormat::Bgr0
+                | XcoderPixelFormat::Bgrp => [height, 0, 0],
+                XcoderPixelFormat::Nv16 | XcoderPixelFormat::Yuyv422 | XcoderPixelFormat::Uyvy422 => [height, height, 0],
                 XcoderPixelFormat::None => [0; 3],
             }
         }
-
     }
 }
 

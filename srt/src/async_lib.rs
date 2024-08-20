@@ -93,10 +93,11 @@ impl<'a, 'c> Future for Accept<'a, 'c> {
                 let api = self.listener.socket.api.clone();
                 // TODO: use epoll instead of spawn_blocking
                 let mut handle = spawn_blocking(move || {
-                    let mut storage: sys::sockaddr_storage = unsafe { mem::zeroed() };
+                    let mut storage = mem::MaybeUninit::<sys::sockaddr_storage>::zeroed();
                     let mut len = mem::size_of_val(&storage) as sys::socklen_t;
-                    let sock = unsafe { sys::srt_accept(sock, &mut storage as *mut _ as *mut _, &mut len as *mut _ as *mut _) };
+                    let sock = unsafe { sys::srt_accept(sock, storage.as_mut_ptr() as *mut _, &mut len as *mut _ as *mut _) };
                     let socket = Socket { api, sock };
+                    let storage = unsafe { storage.assume_init() };
                     let addr = sockaddr_from_storage(&storage, len)?;
                     Ok((AsyncStream::new(socket.get(sys::SRT_SOCKOPT_SRTO_STREAMID)?, socket)?, addr))
                 });
