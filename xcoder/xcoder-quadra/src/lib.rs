@@ -31,11 +31,15 @@ mod linux_impl {
     #[derive(Clone)]
     pub struct XcoderSoftwareFrame {
         data_io: sys::ni_session_data_io_t,
+        return_to_buffer_pool: bool,
     }
 
     impl XcoderSoftwareFrame {
-        pub(crate) unsafe fn new(data_io: sys::ni_session_data_io_t) -> Self {
-            Self { data_io }
+        pub(crate) unsafe fn new(data_io: sys::ni_session_data_io_t, return_to_buffer_pool: bool) -> Self {
+            Self {
+                data_io,
+                return_to_buffer_pool,
+            }
         }
 
         pub fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t {
@@ -61,7 +65,11 @@ mod linux_impl {
     impl Drop for XcoderSoftwareFrame {
         fn drop(&mut self) {
             unsafe {
-                sys::ni_decoder_frame_buffer_free(std::ptr::addr_of_mut!(self.data_io.data.frame));
+                if self.return_to_buffer_pool {
+                    sys::ni_decoder_frame_buffer_free(std::ptr::addr_of_mut!(self.data_io.data.frame));
+                } else {
+                    sys::ni_frame_buffer_free(std::ptr::addr_of_mut!(self.data_io.data.frame));
+                }
             }
         }
     }
