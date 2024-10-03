@@ -1,9 +1,10 @@
 #[cfg(target_os = "linux")]
 #[path = ""]
 mod linux_impl {
+    use av_traits::RawVideoFrame;
     use snafu::Snafu;
-    use std::{ffi::c_uint, ops::Deref};
-    use xcoder_quadra_sys as sys;
+    use std::{ffi::c_uint, ops::Deref, slice};
+    pub use xcoder_quadra_sys as sys;
 
     pub mod cropper;
     pub mod decoder;
@@ -25,6 +26,60 @@ mod linux_impl {
     pub struct XcoderHardware {
         pub id: i32,
         pub device_handle: i32,
+    }
+
+    #[derive(Clone)]
+    pub struct XcoderSoftwareFrame {
+        data_io: sys::ni_session_data_io_t,
+    }
+
+    impl XcoderSoftwareFrame {
+        pub(crate) unsafe fn new(data_io: sys::ni_session_data_io_t) -> Self {
+            Self { data_io }
+        }
+
+        pub fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t {
+            &mut self.data_io as _
+        }
+
+        pub fn surface(&self) -> &sys::niFrameSurface1_t {
+            unsafe { &*(self.p_data[3] as *const sys::niFrameSurface1_t) }
+        }
+    }
+
+    unsafe impl Send for XcoderSoftwareFrame {}
+    unsafe impl Sync for XcoderSoftwareFrame {}
+
+    impl Deref for XcoderSoftwareFrame {
+        type Target = sys::ni_frame_t;
+
+        fn deref(&self) -> &Self::Target {
+            unsafe { &self.data_io.data.frame }
+        }
+    }
+
+    impl Drop for XcoderSoftwareFrame {
+        fn drop(&mut self) {
+            unsafe {
+                sys::ni_decoder_frame_buffer_free(std::ptr::addr_of_mut!(self.data_io.data.frame));
+            }
+        }
+    }
+
+    impl RawVideoFrame<u8> for XcoderSoftwareFrame {
+        fn samples(&self, plane: usize) -> &[u8] {
+            let subsampling = match plane {
+                0 => 1,
+                _ => 2,
+            };
+
+            let frame = unsafe { &self.data_io.data.frame };
+            let src_line_stride = frame.video_width as usize / subsampling;
+
+            let raw_source = frame.p_data[plane];
+
+            unsafe { slice::from_raw_parts(raw_source, src_line_stride) }
+        }
     }
 
     pub struct XcoderHardwareFrame {
@@ -213,6 +268,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
+                buffer_count: 0,
             },
             frames,
         )
@@ -290,6 +346,7 @@ mod test {
                 fps: 24.0,
                 hardware_id: None,
                 multicore_joint_mode: true,
+                buffer_count: 0,
             },
             frames,
         )
