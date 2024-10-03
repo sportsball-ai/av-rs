@@ -395,6 +395,7 @@ impl<E: Error, I> XcoderDecoder<I, E> {
         &self,
         p_src_frame: &XcoderDecodedFrame,
         mut hwdl_session_data: ni_session_data_io_t,
+        return_to_buffer_pool: bool,
     ) -> Result<XcoderSoftwareFrame, XcoderDecoderError<E>> {
         let source_surface: *mut niFrameSurface1_t = p_src_frame.p_data[3] as _;
 
@@ -420,7 +421,7 @@ impl<E: Error, I> XcoderDecoder<I, E> {
             });
         }
 
-        Ok(unsafe { XcoderSoftwareFrame::new(hwdl_session_data) })
+        Ok(unsafe { XcoderSoftwareFrame::new(hwdl_session_data, return_to_buffer_pool) })
     }
 
     pub fn download_frame(&self, p_src_frame: &XcoderDecodedFrame) -> Result<XcoderSoftwareFrame, XcoderDecoderError<E>> {
@@ -456,7 +457,7 @@ impl<E: Error, I> XcoderDecoder<I, E> {
             });
         }
 
-        self.download_frame_into_buffer(p_src_frame, hwdl_session_data)
+        self.download_frame_into_buffer(p_src_frame, hwdl_session_data, !(unsafe { *self.session }).dec_fme_buf_pool.is_null())
     }
 }
 
