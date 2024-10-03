@@ -62,12 +62,12 @@ pub enum EncodedFrameType {
 /// {
 ///     while let Some(frame) = source.next() {
 ///         if let Some(output) = encoder.encode(frame, EncodedFrameType::Auto)? {
-///             // do something with output  
+///             // do something with output
 ///         }
 ///     }
 ///
 ///     while let Some(output) = encoder.flush()? {
-///         // do something with output  
+///         // do something with output
 ///     }
 ///
 ///     Ok(())
