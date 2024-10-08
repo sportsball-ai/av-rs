@@ -3,8 +3,9 @@
 mod linux_impl {
     use av_traits::RawVideoFrame;
     use snafu::Snafu;
-    use std::{ffi::c_uint, ops::Deref, slice};
+    use std::{ffi::c_uint, mem, ops::Deref, ptr::addr_of_mut, slice};
     pub use xcoder_quadra_sys as sys;
+    use xcoder_quadra_sys::{_ni_codec_format_NI_CODEC_FORMAT_H264, ni_decoder_frame_buffer_alloc, ni_frame_buffer_alloc_dl};
 
     pub mod cropper;
     pub mod decoder;
@@ -35,13 +36,6 @@ mod linux_impl {
     }
 
     impl XcoderSoftwareFrame {
-        pub(crate) unsafe fn new(data_io: sys::ni_session_data_io_t, return_to_buffer_pool: bool) -> Self {
-            Self {
-                data_io,
-                return_to_buffer_pool,
-            }
-        }
-
         pub fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t {
             &mut self.data_io as _
         }
@@ -66,9 +60,9 @@ mod linux_impl {
         fn drop(&mut self) {
             unsafe {
                 if self.return_to_buffer_pool {
-                    sys::ni_decoder_frame_buffer_free(std::ptr::addr_of_mut!(self.data_io.data.frame));
+                    sys::ni_decoder_frame_buffer_free(addr_of_mut!(self.data_io.data.frame));
                 } else {
-                    sys::ni_frame_buffer_free(std::ptr::addr_of_mut!(self.data_io.data.frame));
+                    sys::ni_frame_buffer_free(addr_of_mut!(self.data_io.data.frame));
                 }
             }
         }
@@ -87,6 +81,114 @@ mod linux_impl {
             let raw_source = frame.p_data[plane];
 
             unsafe { slice::from_raw_parts(raw_source, src_line_stride) }
+        }
+    }
+
+    impl XcoderDecodedFrame for XcoderHardwareFrame {
+        const HARDWARE: bool = true;
+
+        unsafe fn from_session<E>(session: *mut xcoder_quadra_sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>>
+        where
+            Self: Sized,
+            E: std::error::Error,
+        {
+            let mut frame = mem::MaybeUninit::<sys::ni_frame_t>::zeroed();
+            let code = unsafe {
+                sys::ni_frame_buffer_alloc(
+                    frame.as_mut_ptr(),
+                    width,
+                    height,
+                    if (*session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264 {
+                        1
+                    } else {
+                        0
+                    },
+                    1,
+                    (*session).bit_depth_factor,
+                    3,
+                    1,
+                )
+            };
+
+            if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
+                return Err(XcoderDecoderError::Unknown {
+                    code,
+                    operation: "allocating frame",
+                });
+            }
+
+            let frame = unsafe { frame.assume_init() };
+
+            Ok(Self {
+                data_io: sys::ni_session_data_io_t {
+                    data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
+                },
+            })
+        }
+
+        fn as_data_io_mut_ptr(&mut self) -> *mut xcoder_quadra_sys::ni_session_data_io_t {
+            &mut self.data_io as _
+        }
+
+        fn is_end_of_stream(&self) -> bool {
+            let end_of_stream = unsafe { self.data_io.data.frame.end_of_stream };
+
+            end_of_stream == 1
+        }
+    }
+
+    impl XcoderDecodedFrame for XcoderSoftwareFrame {
+        const HARDWARE: bool = false;
+        unsafe fn from_session<E>(session: *mut xcoder_quadra_sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>>
+        where
+            Self: Sized,
+            E: std::error::Error,
+        {
+            // safety: all zeroes are valid for ni_session_data_io_t
+            let mut frame = unsafe { mem::MaybeUninit::<sys::ni_frame_t>::zeroed().assume_init() };
+
+            let use_pool = !(unsafe { *session }).dec_fme_buf_pool.is_null();
+
+            let code = if use_pool {
+                unsafe {
+                    ni_decoder_frame_buffer_alloc(
+                        (*session).dec_fme_buf_pool,
+                        &mut frame,
+                        1,
+                        width,
+                        height,
+                        ((*session).codec_format == _ni_codec_format_NI_CODEC_FORMAT_H264).into(),
+                        (*session).bit_depth_factor,
+                        1,
+                    )
+                }
+            } else {
+                unsafe { ni_frame_buffer_alloc_dl(&mut frame, width, height, (*session).pixel_format) }
+            };
+
+            if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
+                return Err(XcoderDecoderError::Unknown {
+                    code,
+                    operation: "ni_decoder_frame_buffer_alloc / ni_frame_buffer_alloc_dl",
+                });
+            }
+
+            Ok(Self {
+                data_io: sys::ni_session_data_io_t {
+                    data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
+                },
+                return_to_buffer_pool: use_pool,
+            })
+        }
+
+        fn as_data_io_mut_ptr(&mut self) -> *mut xcoder_quadra_sys::ni_session_data_io_t {
+            &mut self.data_io as _
+        }
+
+        fn is_end_of_stream(&self) -> bool {
+            let end_of_stream = unsafe { (self.data_io).data.frame.end_of_stream };
+
+            end_of_stream == 1
         }
     }
 
@@ -267,7 +369,7 @@ mod test {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
 
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -313,7 +415,7 @@ mod test {
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
             let frame = cropper
                 .crop(
-                    &frame.into(),
+                    &frame,
                     XcoderCrop {
                         x: 0,
                         y: 0,
@@ -345,7 +447,7 @@ mod test {
     fn test_8k_ladder() {
         let frames = read_frames("src/testdata/8k-high-bitrate.h265");
 
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 7680,
                 height: 4320,
@@ -407,8 +509,6 @@ mod test {
 
         let mut frame_number = 0;
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
-            let frame = frame.into();
-
             encodings
                 .par_iter_mut()
                 .map(|enc| {
