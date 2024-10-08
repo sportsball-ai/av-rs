@@ -1,18 +1,12 @@
-use crate::XcoderSoftwareFrame;
-
-use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use super::{alloc_zeroed, fps_to_rational, XcoderHardware};
 use scopeguard::{guard, ScopeGuard};
 use snafu::{Error, Snafu};
 use std::{
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    ops::Deref,
     os::raw::c_void,
 };
-use xcoder_quadra_sys::{
-    self as sys, _ni_codec_format_NI_CODEC_FORMAT_H264, niFrameSurface1_t, ni_decoder_frame_buffer_alloc, ni_device_session_hwdl, ni_frame_buffer_alloc_dl,
-    ni_frame_buffer_free, ni_hwframe_buffer_recycle2, ni_retcode_t_NI_RETCODE_SUCCESS, ni_session_data_io_t,
-};
+use xcoder_quadra_sys::{self as sys};
 
 #[derive(Clone, Copy, Debug)]
 pub enum XcoderDecoderCodec {
@@ -84,89 +78,11 @@ impl XcoderDecoderInputFrame {
     }
 }
 
-pub struct XcoderDecodedFrame {
-    data_io: Option<sys::ni_session_data_io_t>,
-}
-
-impl XcoderDecodedFrame {
-    unsafe fn new_hardware_frame<E: Error>(session: *mut sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>> {
-        let mut frame = mem::MaybeUninit::<sys::ni_frame_t>::zeroed();
-        let code = sys::ni_frame_buffer_alloc(
-            frame.as_mut_ptr(),
-            width,
-            height,
-            if (*session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264 {
-                1
-            } else {
-                0
-            },
-            1,
-            (*session).bit_depth_factor,
-            3,
-            1,
-        );
-        if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
-            return Err(XcoderDecoderError::Unknown {
-                code,
-                operation: "allocating frame",
-            });
-        }
-        let frame = frame.assume_init();
-        Ok(Self {
-            data_io: Some(sys::ni_session_data_io_t {
-                data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
-            }),
-        })
-    }
-
-    pub fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t {
-        self.data_io.as_mut().expect("data_io should be some until we're dropped or consumed") as _
-    }
-}
-
-impl From<XcoderDecodedFrame> for XcoderHardwareFrame {
-    fn from(mut frame: XcoderDecodedFrame) -> Self {
-        unsafe { Self::new(frame.data_io.take().expect("data_io should be some until we're dropped or consumed")) }
-    }
-}
-
-unsafe impl Send for XcoderDecodedFrame {}
-unsafe impl Sync for XcoderDecodedFrame {}
-
-impl Deref for XcoderDecodedFrame {
-    type Target = sys::ni_frame_t;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe {
-            &self
-                .data_io
-                .as_ref()
-                .expect("data_io should be some until we're dropped or consumed")
-                .data
-                .frame
-        }
-    }
-}
-
-impl Drop for XcoderDecodedFrame {
-    fn drop(&mut self) {
-        if let Some(mut data_io) = self.data_io.take() {
-            unsafe {
-                let index = (*(data_io.data.frame.p_data[3] as *const sys::niFrameSurface1_t)).ui16FrameIdx;
-                if index > 0 {
-                    sys::ni_hwframe_p2p_buffer_recycle(&mut data_io.data.frame as _);
-                }
-                sys::ni_frame_buffer_free(&mut data_io.data.frame as _);
-            }
-        }
-    }
-}
-
 pub trait XcoderDecoderInput<E>: Iterator<Item = Result<XcoderDecoderInputFrame, E>> {}
 
 impl<T, E> XcoderDecoderInput<E> for T where T: Iterator<Item = Result<XcoderDecoderInputFrame, E>> {}
 
-pub struct XcoderDecoder<I, E> {
+pub struct XcoderDecoder<F, I, E> {
     config: XcoderDecoderConfig,
     input: I,
     pos: i64,
@@ -176,11 +92,11 @@ pub struct XcoderDecoder<I, E> {
     _params: Box<sys::ni_xcoder_params_t>,
     eos_received: bool,
     next_packet_data_io: Option<DataIo>,
-    next_decoded_frame: XcoderDecodedFrame,
+    next_decoded_frame: F,
     _input_error_type: PhantomData<E>,
 }
 
-unsafe impl<I, E> Send for XcoderDecoder<I, E> {}
+unsafe impl<F, I, E> Send for XcoderDecoder<F, I, E> {}
 
 #[derive(Debug, Snafu)]
 pub enum XcoderDecoderError<E: Error + 'static> {
@@ -214,7 +130,25 @@ impl Drop for DataIo {
     }
 }
 
-impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
+pub trait XcoderDecodedFrame {
+    const HARDWARE: bool;
+
+    /// Downloads a frame from teh current session
+    ///
+    /// # Safety
+    ///
+    /// Expects session to be a valid pointer
+    unsafe fn from_session<E>(session: *mut sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>>
+    where
+        Self: Sized,
+        E: Error;
+
+    fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t;
+
+    fn is_end_of_stream(&self) -> bool;
+}
+
+impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F, I, E> {
     pub fn new<II>(config: XcoderDecoderConfig, input: II) -> Result<Self, XcoderDecoderError<E>>
     where
         II: IntoIterator<IntoIter = I>,
@@ -243,7 +177,9 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
             });
 
             (**session).hw_id = config.hardware_id.unwrap_or(-1);
-            (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
+            if F::HARDWARE {
+                (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
+            }
             (**session).p_session_config = params.as_mut() as *mut sys::ni_xcoder_params_t as *mut c_void;
             (**session).codec_format = match config.codec {
                 XcoderDecoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
@@ -280,7 +216,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
             }
 
             Ok(Self {
-                next_decoded_frame: XcoderDecodedFrame::new_hardware_frame(*session, config.width, config.height)?,
+                next_decoded_frame: F::from_session(*session, config.width, config.height)?,
                 config,
                 did_start: false,
                 did_flush: false,
@@ -309,7 +245,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     }
 
     /// Reads a decoded frame. Returns None once the decoder is finished.
-    pub fn read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+    pub fn read_decoded_frame(&mut self) -> Result<Option<F>, XcoderDecoderError<E>> {
         while !self.is_finished() {
             if let Some(frame) = self.try_read_decoded_frame()? {
                 return Ok(Some(frame));
@@ -319,7 +255,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     }
 
     /// Tries to read a decoded frame. If none is returned and `is_finished` returns false, the caller should try again later.
-    fn try_read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+    fn try_read_decoded_frame(&mut self) -> Result<Option<F>, XcoderDecoderError<E>> {
         if self.is_finished() {
             return Ok(None);
         }
@@ -364,22 +300,30 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
 
             // try reading a decoded frame from the decoder
             {
-                let code = sys::ni_device_session_read_hwdesc(
-                    self.session,
-                    self.next_decoded_frame.as_data_io_mut_ptr(),
-                    sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER,
-                );
+                let code = if F::HARDWARE {
+                    sys::ni_device_session_read_hwdesc(
+                        self.session,
+                        self.next_decoded_frame.as_data_io_mut_ptr(),
+                        sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER,
+                    )
+                } else {
+                    sys::ni_device_session_read(
+                        self.session,
+                        self.next_decoded_frame.as_data_io_mut_ptr(),
+                        sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER,
+                    )
+                };
                 if code < 0 {
                     return Err(XcoderDecoderError::Unknown {
                         code,
                         operation: "reading decoded frame",
                     });
                 }
-                self.eos_received = self.next_decoded_frame.end_of_stream != 0;
+                self.eos_received = self.next_decoded_frame.is_end_of_stream();
                 if code > 0 {
                     let frame = mem::replace(
                         &mut self.next_decoded_frame,
-                        XcoderDecodedFrame::new_hardware_frame(self.session, self.config.width, self.config.height)?,
+                        F::from_session(self.session, self.config.width, self.config.height)?,
                     );
                     return Ok(Some(frame));
                 }
@@ -390,78 +334,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     }
 }
 
-impl<E: Error, I> XcoderDecoder<I, E> {
-    pub fn download_frame_into_buffer(
-        &self,
-        p_src_frame: &XcoderDecodedFrame,
-        mut hwdl_session_data: ni_session_data_io_t,
-        return_to_buffer_pool: bool,
-    ) -> Result<XcoderSoftwareFrame, XcoderDecoderError<E>> {
-        let source_surface: *mut niFrameSurface1_t = p_src_frame.p_data[3] as _;
-
-        // TODO don't set this every time, unset later on?
-        (unsafe { *self.session }).is_auto_dl = false.into();
-
-        let bytes_read_or_code = unsafe { ni_device_session_hwdl(self.session, &mut hwdl_session_data, source_surface) };
-        if bytes_read_or_code < 0 {
-            return Err(XcoderDecoderError::Unknown {
-                code: bytes_read_or_code,
-                operation: "ni_device_session_hwdl",
-            });
-        }
-
-        // Unref the hwframe if hwframe tracking used.
-        // Below is if no other entity is using the hwframe
-        let code = unsafe { ni_hwframe_buffer_recycle2(source_surface) };
-        if code != ni_retcode_t_NI_RETCODE_SUCCESS {
-            unsafe { ni_frame_buffer_free(&mut hwdl_session_data.data.frame) };
-            return Err(XcoderDecoderError::Unknown {
-                code,
-                operation: "ni_hwframe_buffer_recycle2",
-            });
-        }
-
-        Ok(unsafe { XcoderSoftwareFrame::new(hwdl_session_data, return_to_buffer_pool) })
-    }
-
-    pub fn download_frame(&self, p_src_frame: &XcoderDecodedFrame) -> Result<XcoderSoftwareFrame, XcoderDecoderError<E>> {
-        // safety: all zeroes are valid for ni_session_data_io_t
-        let mut hwdl_session_data: ni_session_data_io_t = unsafe { MaybeUninit::zeroed().assume_init() };
-
-        let source_surface: *mut niFrameSurface1_t = p_src_frame.p_data[3] as _;
-
-        let width = (unsafe { *source_surface }).ui16width;
-        let height = (unsafe { *source_surface }).ui16height;
-
-        let code = if !(unsafe { *self.session }).dec_fme_buf_pool.is_null() {
-            unsafe {
-                ni_decoder_frame_buffer_alloc(
-                    (*self.session).dec_fme_buf_pool,
-                    &mut hwdl_session_data.data.frame,
-                    1,
-                    width.into(),
-                    height.into(),
-                    ((*self.session).codec_format == _ni_codec_format_NI_CODEC_FORMAT_H264).into(),
-                    (*self.session).bit_depth_factor,
-                    1,
-                )
-            }
-        } else {
-            unsafe { ni_frame_buffer_alloc_dl(&mut hwdl_session_data.data.frame, width.into(), height.into(), (*self.session).pixel_format) }
-        };
-
-        if code != ni_retcode_t_NI_RETCODE_SUCCESS {
-            return Err(XcoderDecoderError::Unknown {
-                code,
-                operation: "ni_frame_buffer_alloc_dl",
-            });
-        }
-
-        self.download_frame_into_buffer(p_src_frame, hwdl_session_data, !(unsafe { *self.session }).dec_fme_buf_pool.is_null())
-    }
-}
-
-impl<I, E> Drop for XcoderDecoder<I, E> {
+impl<I, E, O> Drop for XcoderDecoder<I, E, O> {
     fn drop(&mut self) {
         unsafe {
             sys::ni_device_session_close(
@@ -529,7 +402,7 @@ mod test {
     fn test_decoder() {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -556,7 +429,7 @@ mod test {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
 
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -591,7 +464,7 @@ mod test {
         let mut encoded = vec![];
 
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
-            if let Some(output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
+            if let Some(output) = encoder.encode_hardware_frame((), frame).unwrap() {
                 encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
@@ -609,7 +482,7 @@ mod test {
     fn test_decoder_2() {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -639,7 +512,7 @@ mod test {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
 
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderSoftwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: original_width,
                 height: original_height,
@@ -674,7 +547,7 @@ mod test {
         let mut encoded = vec![];
 
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
-            let xcoder_sw_frame = decoder.download_frame(&frame).expect("Failed to download frame from Quadra");
+            let xcoder_sw_frame = frame;
 
             if let Some(output) = encoder.encode(xcoder_sw_frame, av_traits::EncodedFrameType::Auto).unwrap() {
                 encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);

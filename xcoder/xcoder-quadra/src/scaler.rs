@@ -196,7 +196,7 @@ mod test {
     fn test_scaler() {
         let frames = read_frames("src/testdata/smptebars.h264");
 
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -220,7 +220,7 @@ mod test {
         .unwrap();
 
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
-            scaler.scale(&frame.into()).unwrap();
+            scaler.scale(&frame).unwrap();
         }
     }
 }
