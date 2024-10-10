@@ -23,7 +23,13 @@ pub struct XcoderDecoderConfig {
     pub codec: XcoderDecoderCodec,
     pub hardware_id: Option<i32>,
     pub multicore_joint_mode: bool,
-    pub buffer_count: usize,
+    /// Only used with software frames, ignored for hardware frames
+    /// If set, determines the initial count of frame buffers
+    /// Note that:
+    /// 1) This does not allocate the space for the frame buffer itself (which could be ~50MB for an 8K 8bit frame),
+    ///     that only happens on first usage of a specific buffer
+    /// 2) This is an initial amount. The NETINT codebase will grow the buffer as needed
+    pub frame_buffer: Option<usize>,
 }
 
 pub struct XcoderDecoderInputFrame {
@@ -133,7 +139,7 @@ impl Drop for DataIo {
 pub trait XcoderDecodedFrame {
     const HARDWARE: bool;
 
-    /// Downloads a frame from teh current session
+    /// Downloads a frame from the current session
     ///
     /// # Safety
     ///
@@ -202,17 +208,27 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
                 sys::ni_device_session_close(*session, if eos_received { 1 } else { 0 }, sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER);
             });
 
-            if config.buffer_count > 0 {
-                let buffer = sys::ni_dec_fme_buffer_pool_initialize(
-                    *session,
-                    config.buffer_count as i32,
-                    config.width,
-                    config.height,
-                    ((**session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264).into(),
-                    (**session).bit_depth_factor,
-                );
+            if !F::HARDWARE {
+                if let Some(frame_buffer) = config.frame_buffer {
+                    // no drop guard needed here, the `(*self.session).dec_fme_buf_pool`
+                    // is cleaned up by `ni_device_session_close`, which calls `ni_decoder_session_close`
 
-                assert!(buffer == 0);
+                    let code = sys::ni_dec_fme_buffer_pool_initialize(
+                        *session,
+                        frame_buffer as i32,
+                        config.width,
+                        config.height,
+                        ((**session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264).into(),
+                        (**session).bit_depth_factor,
+                    );
+
+                    if code != 0 {
+                        return Err(XcoderDecoderError::Unknown {
+                            code,
+                            operation: "ni_dec_fme_buffer_pool_initialize",
+                        });
+                    }
+                }
             }
 
             Ok(Self {
@@ -337,6 +353,9 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
 impl<I, E, O> Drop for XcoderDecoder<I, E, O> {
     fn drop(&mut self) {
         unsafe {
+            // do NOT clean up `(*self.session).dec_fme_buf_pool` with `ni_dec_fme_buffer_pool_free`,
+            // as it breaks `ni_device_session_close`
+
             sys::ni_device_session_close(
                 self.session,
                 if self.eos_received { 1 } else { 0 },
@@ -411,7 +430,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                buffer_count: 0,
+                frame_buffer: None,
             },
             frames,
         )
@@ -438,7 +457,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                buffer_count: 0,
+                frame_buffer: None,
             },
             frames,
         )
@@ -479,10 +498,10 @@ mod test {
     }
 
     #[test]
-    fn test_decoder_2() {
+    fn test_decoder_sw_framebuffer() {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
-        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
+        let mut decoder = XcoderDecoder::<XcoderSoftwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -491,7 +510,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                buffer_count: 0,
+                frame_buffer: Some(4),
             },
             frames,
         )
@@ -521,7 +540,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                buffer_count: 0,
+                frame_buffer: None,
             },
             frames,
         )

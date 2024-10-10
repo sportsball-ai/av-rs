@@ -205,7 +205,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                buffer_count: 0,
+                frame_buffer: None,
             },
             frames,
         )
