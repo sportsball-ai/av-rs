@@ -147,9 +147,9 @@ mod linux_impl {
             // safety: all zeroes are valid for ni_session_data_io_t
             let mut frame = unsafe { mem::MaybeUninit::<sys::ni_frame_t>::zeroed().assume_init() };
 
-            let use_pool = !(unsafe { *session }).dec_fme_buf_pool.is_null();
+            let return_to_buffer_pool = !(unsafe { *session }).dec_fme_buf_pool.is_null();
 
-            let code = if use_pool {
+            let code = if return_to_buffer_pool {
                 unsafe {
                     ni_decoder_frame_buffer_alloc(
                         (*session).dec_fme_buf_pool,
@@ -177,7 +177,7 @@ mod linux_impl {
                 data_io: sys::ni_session_data_io_t {
                     data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
                 },
-                return_to_buffer_pool: use_pool,
+                return_to_buffer_pool,
             })
         }
 
@@ -378,7 +378,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                buffer_count: 0,
+                frame_buffer: None,
             },
             frames,
         )
@@ -456,7 +456,7 @@ mod test {
                 fps: 24.0,
                 hardware_id: None,
                 multicore_joint_mode: true,
-                buffer_count: 0,
+                frame_buffer: None,
             },
             frames,
         )
