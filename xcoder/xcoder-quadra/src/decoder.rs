@@ -162,7 +162,7 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
         let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
 
         unsafe {
-            let mut params: Box<MaybeUninit<xcoder_quadra_sys::_ni_xcoder_params>> = alloc_zeroed();
+            let mut params = alloc_zeroed();
             let code = sys::ni_decoder_init_default_params(params.as_mut_ptr(), fps_numerator, fps_denominator, 0, config.width, config.height);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderDecoderError::Unknown {
