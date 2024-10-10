@@ -29,7 +29,7 @@ pub struct XcoderDecoderConfig {
     /// 1) This does not allocate the space for the frame buffer itself (which could be ~50MB for an 8K 8bit frame),
     ///     that only happens on first usage of a specific buffer
     /// 2) This is an initial amount. The NETINT codebase will grow the buffer as needed
-    pub frame_buffer: Option<usize>,
+    pub number_of_frame_buffers: Option<usize>,
 }
 
 pub struct XcoderDecoderInputFrame {
@@ -209,13 +209,13 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
             });
 
             if !F::HARDWARE {
-                if let Some(frame_buffer) = config.frame_buffer {
+                if let Some(number_of_frame_buffers) = config.number_of_frame_buffers {
                     // no drop guard needed here, the `(*self.session).dec_fme_buf_pool`
                     // is cleaned up by `ni_device_session_close`, which calls `ni_decoder_session_close`
 
                     let code = sys::ni_dec_fme_buffer_pool_initialize(
                         *session,
-                        frame_buffer as i32,
+                        number_of_frame_buffers as i32,
                         config.width,
                         config.height,
                         ((**session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264).into(),
@@ -430,7 +430,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                frame_buffer: None,
+                number_of_frame_buffers: None,
             },
             frames,
         )
@@ -457,7 +457,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                frame_buffer: None,
+                number_of_frame_buffers: None,
             },
             frames,
         )
@@ -510,7 +510,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                frame_buffer: Some(4),
+                number_of_frame_buffers: Some(4),
             },
             frames,
         )
@@ -540,7 +540,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
-                frame_buffer: None,
+                number_of_frame_buffers: None,
             },
             frames,
         )
