@@ -35,8 +35,9 @@ jobs:
       with:
         toolchain: 1.77.2
         components: clippy
-    - name: Build
+    - name: Build quadra
       run: |
+        rustc --version
         cd xcoder/xcoder-quadra/
         cargo build --verbose
     - name: Build
