@@ -61,7 +61,7 @@ dependencies = [
 name = "audio-toolbox"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "core-audio",
  "core-foundation 0.1.0",
  "mpeg4",
@@ -113,7 +113,6 @@ dependencies = [
  "clang-sys",
  "lazy_static",
  "lazycell",
- "log",
  "peeking_take_while",
  "proc-macro2",
  "quote",
@@ -121,7 +120,26 @@ dependencies = [
  "rustc-hash",
  "shlex",
  "syn 1.0.109",
- "which",
+]
+
+[[package]]
+name = "bindgen"
+version = "0.70.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49d8fed880d473ea71efb9bf597651e77201bdd4893efe54c9e5d65ae04ce6f"
+dependencies = [
+ "bitflags 2.4.1",
+ "cexpr",
+ "clang-sys",
+ "itertools",
+ "log",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "rustc-hash",
+ "shlex",
+ "syn 2.0.58",
 ]
 
 [[package]]
@@ -305,7 +323,7 @@ dependencies = [
 name = "core-audio"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "bitflags 1.3.2",
  "core-foundation 0.1.0",
 ]
@@ -314,7 +332,7 @@ dependencies = [
 name = "core-foundation"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
 ]
 
 [[package]]
@@ -337,7 +355,7 @@ checksum = "e496a50fda8aacccc86d7529e2c1e0892dbd0f898a6b5645b5561b89c3210efa"
 name = "core-media"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "core-foundation 0.1.0",
  "core-video",
 ]
@@ -346,7 +364,7 @@ dependencies = [
 name = "core-video"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "core-foundation 0.1.0",
 ]
 
@@ -524,7 +542,7 @@ version = "6.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf650f461ccf130f4eef4927affed703cc387b183bfc4a7dfee86a076c131127"
 dependencies = [
- "bindgen",
+ "bindgen 0.64.0",
  "cc",
  "libc",
  "num_cpus",
@@ -891,7 +909,7 @@ dependencies = [
 name = "kvazaar_sys"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "pkg-config",
 ]
 
@@ -1223,6 +1241,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbc83ee4a840062f368f9096d80077a9841ec117e17e7f700df81958f1451254"
 
 [[package]]
+name = "prettyplease"
+version = "0.2.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d3928fb5db768cb86f891ff014f0144589297e3c6a1aba6ed7cecfdace270c7"
+dependencies = [
+ "proc-macro2",
+ "syn 2.0.58",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.79"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1420,7 +1448,7 @@ dependencies = [
 name = "rkmpp-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "libloading 0.8.3",
 ]
 
@@ -1628,7 +1656,7 @@ dependencies = [
 name = "srt-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "cmake",
  "libc",
 ]
@@ -1992,7 +2020,7 @@ name = "video-toolbox"
 version = "0.1.0"
 dependencies = [
  "av-traits",
- "bindgen",
+ "bindgen 0.70.1",
  "core-foundation 0.1.0",
  "core-media",
  "core-video",
@@ -2101,17 +2129,6 @@ checksum = "e33b99f4b23ba3eec1a53ac264e35a755f00e966e0065077d6027c0f575b0b97"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "which"
-version = "4.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2441c784c52b289a054b7201fc93253e288f094e2f4be9058343127c4226a269"
-dependencies = [
- "either",
- "libc",
- "once_cell",
 ]
 
 [[package]]
@@ -2380,7 +2397,7 @@ dependencies = [
 name = "x264-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "cc",
  "pkg-config",
 ]
@@ -2401,7 +2418,7 @@ dependencies = [
 name = "xcoder-logan-259-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "cc",
 ]
 
@@ -2409,7 +2426,7 @@ dependencies = [
 name = "xcoder-logan-310-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "cc",
  "log",
 ]
@@ -2434,7 +2451,7 @@ dependencies = [
 name = "xcoder-quadra-sys"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "cc",
  "log",
 ]
@@ -2443,7 +2460,7 @@ dependencies = [
 name = "xilinx"
 version = "0.1.0"
 dependencies = [
- "bindgen",
+ "bindgen 0.70.1",
  "h264",
  "h265",
  "libloading 0.8.3",
