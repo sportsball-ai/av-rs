@@ -41,6 +41,10 @@ jobs:
         rustc --version
         cd xcoder/xcoder-quadra/xcoder-quadra-sys/
         cargo build --verbose
+      continue-on-error: true
+    - name: Dump bindings
+      run: |
+        find . -name bindings.rs | grep quadra | xargs cat
     - name: Build
       run: cargo build --verbose --workspace --exclude xilinx --features srt/async ${{ matrix.args }}
     - name: Lint
