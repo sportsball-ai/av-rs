@@ -8,7 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-12-large]
+        os: [ubuntu-22.04, macos-12-large]
         include:
           - os: macos-12-large
             args: --exclude v4l2
