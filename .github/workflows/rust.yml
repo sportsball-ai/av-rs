@@ -35,10 +35,10 @@ jobs:
       with:
         toolchain: 1.77.2
         components: clippy
-    - name: Build quadra
+    - name: Build quadra sys
       run: |
         rustc --version
-        cd xcoder/xcoder-quadra/
+        cd xcoder/xcoder-quadra/xcoder-quadra-sys/
         cargo build --verbose
     - name: Build
       run: cargo build --verbose --workspace --exclude xilinx --features srt/async ${{ matrix.args }}
