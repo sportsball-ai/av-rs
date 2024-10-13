@@ -1,6 +1,6 @@
 #[cfg(target_os = "linux")]
 #[path = ""]
-mod linux_impl {
+pub mod linux_impl {
     use snafu::Snafu;
     use std::{ffi::c_uint, ops::Deref};
     use xcoder_quadra_sys as sys;
