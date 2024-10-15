@@ -171,7 +171,9 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
                 });
             }
             let mut params = mem::transmute::<Box<MaybeUninit<sys::ni_xcoder_params_t>>, Box<sys::ni_xcoder_params_t>>(params);
-            params.__bindgen_anon_1.dec_input_params.hwframes = 1;
+            if F::HARDWARE {
+                params.__bindgen_anon_1.dec_input_params.hwframes = 1;
+            }
             params.__bindgen_anon_1.dec_input_params.mcmode = config.multicore_joint_mode.into();
 
             let session = sys::ni_device_session_context_alloc_init();
