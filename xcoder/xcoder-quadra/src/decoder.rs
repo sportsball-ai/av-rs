@@ -6,7 +6,7 @@ use std::{
     mem::{self, MaybeUninit},
     os::raw::c_void,
 };
-use xcoder_quadra_sys::{self as sys};
+use xcoder_quadra_sys::{self as sys, ni_pix_fmt_t_NI_PIX_FMT_YUV420P, ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE};
 
 #[derive(Clone, Copy, Debug)]
 pub enum XcoderDecoderCodec {
@@ -196,6 +196,12 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
             (**session).bit_depth_factor = match config.bit_depth {
                 8 => 1,
                 10 => 2,
+                _ => return Err(XcoderDecoderError::UnsupportedBitDepth),
+            };
+
+            (**session).pixel_format = match config.bit_depth {
+                8 => ni_pix_fmt_t_NI_PIX_FMT_YUV420P as i32,
+                10 => ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE as i32,
                 _ => return Err(XcoderDecoderError::UnsupportedBitDepth),
             };
 

@@ -147,7 +147,8 @@ mod linux_impl {
             // safety: all zeroes are valid for ni_session_data_io_t
             let mut frame = unsafe { mem::MaybeUninit::<sys::ni_frame_t>::zeroed().assume_init() };
 
-            let return_to_buffer_pool = !(unsafe { *session }).dec_fme_buf_pool.is_null();
+            // This is buggy, this is always set, so we're always pulling from the pool
+            let return_to_buffer_pool = !(*session).dec_fme_buf_pool.is_null();
 
             let code = if return_to_buffer_pool {
                 unsafe {
@@ -165,6 +166,8 @@ mod linux_impl {
             } else {
                 unsafe { ni_frame_buffer_alloc_dl(&mut frame, width, height, (*session).pixel_format) }
             };
+
+            frame.pixel_format = (*session).pixel_format;
 
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderDecoderError::Unknown {
