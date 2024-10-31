@@ -39,10 +39,6 @@ mod linux_impl {
         pub fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t {
             &mut self.data_io as _
         }
-
-        pub fn surface(&self) -> &sys::niFrameSurface1_t {
-            unsafe { &*(self.p_data[3] as *const sys::niFrameSurface1_t) }
-        }
     }
 
     unsafe impl Send for XcoderSoftwareFrame {}
