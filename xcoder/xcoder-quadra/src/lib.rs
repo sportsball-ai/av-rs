@@ -5,7 +5,7 @@ mod linux_impl {
     use snafu::Snafu;
     use std::{ffi::c_uint, mem, ops::Deref, ptr::addr_of_mut, slice};
     pub use xcoder_quadra_sys as sys;
-    use xcoder_quadra_sys::{_ni_codec_format_NI_CODEC_FORMAT_H264, ni_decoder_frame_buffer_alloc, ni_frame_buffer_alloc_dl};
+    use xcoder_quadra_sys::{_ni_codec_format_NI_CODEC_FORMAT_H264, ni_decoder_frame_buffer_alloc};
 
     pub mod cropper;
     pub mod decoder;
@@ -32,7 +32,6 @@ mod linux_impl {
     #[derive(Clone)]
     pub struct XcoderSoftwareFrame {
         data_io: sys::ni_session_data_io_t,
-        return_to_buffer_pool: bool,
     }
 
     impl XcoderSoftwareFrame {
@@ -55,11 +54,7 @@ mod linux_impl {
     impl Drop for XcoderSoftwareFrame {
         fn drop(&mut self) {
             unsafe {
-                if self.return_to_buffer_pool {
-                    sys::ni_decoder_frame_buffer_free(addr_of_mut!(self.data_io.data.frame));
-                } else {
-                    sys::ni_frame_buffer_free(addr_of_mut!(self.data_io.data.frame));
-                }
+                sys::ni_decoder_frame_buffer_free(addr_of_mut!(self.data_io.data.frame));
             }
         }
     }
@@ -135,6 +130,7 @@ mod linux_impl {
 
     impl XcoderDecodedFrame for XcoderSoftwareFrame {
         const HARDWARE: bool = false;
+
         unsafe fn from_session<E>(session: *mut xcoder_quadra_sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>>
         where
             Self: Sized,
@@ -143,24 +139,17 @@ mod linux_impl {
             // safety: all zeroes are valid for ni_session_data_io_t
             let mut frame = unsafe { mem::MaybeUninit::<sys::ni_frame_t>::zeroed().assume_init() };
 
-            // This is buggy, this is always set, so we're always pulling from the pool
-            let return_to_buffer_pool = !(*session).dec_fme_buf_pool.is_null();
-
-            let code = if return_to_buffer_pool {
-                unsafe {
-                    ni_decoder_frame_buffer_alloc(
-                        (*session).dec_fme_buf_pool,
-                        &mut frame,
-                        1,
-                        width,
-                        height,
-                        ((*session).codec_format == _ni_codec_format_NI_CODEC_FORMAT_H264).into(),
-                        (*session).bit_depth_factor,
-                        1,
-                    )
-                }
-            } else {
-                unsafe { ni_frame_buffer_alloc_dl(&mut frame, width, height, (*session).pixel_format) }
+            let code = unsafe {
+                ni_decoder_frame_buffer_alloc(
+                    (*session).dec_fme_buf_pool,
+                    &mut frame,
+                    1,
+                    width,
+                    height,
+                    ((*session).codec_format == _ni_codec_format_NI_CODEC_FORMAT_H264).into(),
+                    (*session).bit_depth_factor,
+                    1,
+                )
             };
 
             frame.pixel_format = (*session).pixel_format;
@@ -168,7 +157,7 @@ mod linux_impl {
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderDecoderError::Unknown {
                     code,
-                    operation: "ni_decoder_frame_buffer_alloc / ni_frame_buffer_alloc_dl",
+                    operation: "ni_decoder_frame_buffer_alloc",
                 });
             }
 
@@ -176,7 +165,6 @@ mod linux_impl {
                 data_io: sys::ni_session_data_io_t {
                     data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
                 },
-                return_to_buffer_pool,
             })
         }
 

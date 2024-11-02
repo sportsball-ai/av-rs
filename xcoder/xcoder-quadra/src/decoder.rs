@@ -6,7 +6,7 @@ use std::{
     mem::{self, MaybeUninit},
     os::raw::c_void,
 };
-use xcoder_quadra_sys::{self as sys, ni_pix_fmt_t_NI_PIX_FMT_YUV420P, ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE};
+use xcoder_quadra_sys::{self as sys, ni_pix_fmt_t_NI_PIX_FMT_YUV420P, ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE, NI_DEC_FRAME_BUF_POOL_SIZE_INIT};
 
 #[derive(Clone, Copy, Debug)]
 pub enum XcoderDecoderCodec {
@@ -24,7 +24,8 @@ pub struct XcoderDecoderConfig {
     pub hardware_id: Option<i32>,
     pub multicore_joint_mode: bool,
     /// Only used with software frames, ignored for hardware frames
-    /// If set, determines the initial count of frame buffers
+    /// If set, determines the initial count of frame buffers, if unset, defaults to `NI_DEC_FRAME_BUF_POOL_SIZE_INIT`
+    ///
     /// Note that:
     /// 1) This does not allocate the space for the frame buffer itself (which could be ~50MB for an 8K 8bit frame),
     ///     that only happens on first usage of a specific buffer
@@ -88,7 +89,7 @@ pub trait XcoderDecoderInput<E>: Iterator<Item = Result<XcoderDecoderInputFrame,
 
 impl<T, E> XcoderDecoderInput<E> for T where T: Iterator<Item = Result<XcoderDecoderInputFrame, E>> {}
 
-pub struct XcoderDecoder<F, I, E> {
+pub struct XcoderDecoder<F: XcoderDecodedFrame, I, E> {
     config: XcoderDecoderConfig,
     input: I,
     pos: i64,
@@ -102,7 +103,7 @@ pub struct XcoderDecoder<F, I, E> {
     _input_error_type: PhantomData<E>,
 }
 
-unsafe impl<F, I, E> Send for XcoderDecoder<F, I, E> {}
+unsafe impl<F: XcoderDecodedFrame, I, E> Send for XcoderDecoder<F, I, E> {}
 
 #[derive(Debug, Snafu)]
 pub enum XcoderDecoderError<E: Error + 'static> {
@@ -185,9 +186,13 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
             });
 
             (**session).hw_id = config.hardware_id.unwrap_or(-1);
+
             if F::HARDWARE {
                 (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
+            } else {
+                (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_NONE as _;
             }
+
             (**session).p_session_config = params.as_mut() as *mut sys::ni_xcoder_params_t as *mut c_void;
             (**session).codec_format = match config.codec {
                 XcoderDecoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
@@ -217,25 +222,27 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
             });
 
             if !F::HARDWARE {
-                if let Some(number_of_frame_buffers) = config.number_of_frame_buffers {
-                    // no drop guard needed here, the `(*self.session).dec_fme_buf_pool`
-                    // is cleaned up by `ni_device_session_close`, which calls `ni_decoder_session_close`
+                // we always initialize the buffer pool so that software frames can always allocate from this pool
+                // avoiding the hit on the first frame
 
-                    let code = sys::ni_dec_fme_buffer_pool_initialize(
-                        *session,
-                        number_of_frame_buffers as i32,
-                        config.width,
-                        config.height,
-                        ((**session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264).into(),
-                        (**session).bit_depth_factor,
-                    );
+                let number_of_frame_buffers = config.number_of_frame_buffers.map(|n| n as u32).unwrap_or(NI_DEC_FRAME_BUF_POOL_SIZE_INIT);
 
-                    if code != 0 {
-                        return Err(XcoderDecoderError::Unknown {
-                            code,
-                            operation: "ni_dec_fme_buffer_pool_initialize",
-                        });
-                    }
+                // no drop guard needed here, the `(*self.session).dec_fme_buf_pool`
+                // is cleaned up by `ni_device_session_close`, which calls `ni_decoder_session_close`
+                let code = sys::ni_dec_fme_buffer_pool_initialize(
+                    *session,
+                    number_of_frame_buffers as i32,
+                    config.width,
+                    config.height,
+                    ((**session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264).into(),
+                    (**session).bit_depth_factor,
+                );
+
+                if code != 0 {
+                    return Err(XcoderDecoderError::Unknown {
+                        code,
+                        operation: "ni_dec_fme_buffer_pool_initialize",
+                    });
                 }
             }
 
@@ -358,11 +365,20 @@ impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F,
     }
 }
 
-impl<I, E, O> Drop for XcoderDecoder<I, E, O> {
+impl<F: XcoderDecodedFrame, I, E> Drop for XcoderDecoder<F, I, E> {
     fn drop(&mut self) {
         unsafe {
             // do NOT clean up `(*self.session).dec_fme_buf_pool` with `ni_dec_fme_buffer_pool_free`,
             // as it breaks `ni_device_session_close`
+
+            // clean up our last frame, as it needs to be dropped before we close our buffer,
+            // otherwise valgrind finds an invalid read:
+            //    Error Invalid read of size 8
+            //     Info main stack trace (user code at the bottom)
+            //          at ni_decoder_frame_buffer_free (ni_device_api.c:3571)
+            //          at <xcoder_quadra::linux_impl::XcoderSoftwareFrame as core::ops::drop::Drop>::drop (lib.rs:57)
+            let session_data = self.next_decoded_frame.as_data_io_mut_ptr();
+            sys::ni_decoder_frame_buffer_free(&mut (*session_data).data.frame);
 
             sys::ni_device_session_close(
                 self.session,
