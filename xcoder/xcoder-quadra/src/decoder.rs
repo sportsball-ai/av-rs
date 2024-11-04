@@ -371,14 +371,17 @@ impl<F: XcoderDecodedFrame, I, E> Drop for XcoderDecoder<F, I, E> {
             // do NOT clean up `(*self.session).dec_fme_buf_pool` with `ni_dec_fme_buffer_pool_free`,
             // as it breaks `ni_device_session_close`
 
-            // clean up our last frame, as it needs to be dropped before we close our buffer,
-            // otherwise valgrind finds an invalid read:
-            //    Error Invalid read of size 8
-            //     Info main stack trace (user code at the bottom)
-            //          at ni_decoder_frame_buffer_free (ni_device_api.c:3571)
-            //          at <xcoder_quadra::linux_impl::XcoderSoftwareFrame as core::ops::drop::Drop>::drop (lib.rs:57)
-            let session_data = self.next_decoded_frame.as_data_io_mut_ptr();
-            sys::ni_decoder_frame_buffer_free(&mut (*session_data).data.frame);
+            if !F::HARDWARE {
+                // on software our frames come from a buffer pool our `next_decoded_frame`
+                // must be cleaned up before we close our buffer,
+                // otherwise valgrind finds an invalid read:
+                //    Error Invalid read of size 8
+                //     Info main stack trace (user code at the bottom)
+                //          at ni_decoder_frame_buffer_free (ni_device_api.c:3571)
+                //          at <xcoder_quadra::linux_impl::XcoderSoftwareFrame as core::ops::drop::Drop>::drop (lib.rs:57)
+                let session_data = self.next_decoded_frame.as_data_io_mut_ptr();
+                sys::ni_decoder_frame_buffer_free(&mut (*session_data).data.frame);
+            }
 
             sys::ni_device_session_close(
                 self.session,
