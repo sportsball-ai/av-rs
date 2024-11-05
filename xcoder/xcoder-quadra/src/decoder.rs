@@ -1,13 +1,12 @@
-use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use super::{alloc_zeroed, fps_to_rational, XcoderHardware};
 use scopeguard::{guard, ScopeGuard};
 use snafu::{Error, Snafu};
 use std::{
     marker::PhantomData,
     mem::{self, MaybeUninit},
-    ops::Deref,
     os::raw::c_void,
 };
-use xcoder_quadra_sys as sys;
+use xcoder_quadra_sys::{self as sys, ni_pix_fmt_t_NI_PIX_FMT_YUV420P, ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE, NI_DEC_FRAME_BUF_POOL_SIZE_INIT};
 
 #[derive(Clone, Copy, Debug)]
 pub enum XcoderDecoderCodec {
@@ -24,6 +23,14 @@ pub struct XcoderDecoderConfig {
     pub codec: XcoderDecoderCodec,
     pub hardware_id: Option<i32>,
     pub multicore_joint_mode: bool,
+    /// Only used with software frames, ignored for hardware frames
+    /// If set, determines the initial count of frame buffers, if unset, defaults to `NI_DEC_FRAME_BUF_POOL_SIZE_INIT`
+    ///
+    /// Note that:
+    /// 1) This does not allocate the space for the frame buffer itself (which could be ~50MB for an 8K 8bit frame),
+    ///     that only happens on first usage of a specific buffer
+    /// 2) This is an initial amount. The NETINT codebase will grow the buffer as needed
+    pub number_of_frame_buffers: Option<usize>,
 }
 
 pub struct XcoderDecoderInputFrame {
@@ -78,89 +85,11 @@ impl XcoderDecoderInputFrame {
     }
 }
 
-pub struct XcoderDecodedFrame {
-    data_io: Option<sys::ni_session_data_io_t>,
-}
-
-impl XcoderDecodedFrame {
-    unsafe fn new_hardware_frame<E: Error>(session: *mut sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>> {
-        let mut frame = mem::MaybeUninit::<sys::ni_frame_t>::zeroed();
-        let code = sys::ni_frame_buffer_alloc(
-            frame.as_mut_ptr(),
-            width,
-            height,
-            if (*session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264 {
-                1
-            } else {
-                0
-            },
-            1,
-            (*session).bit_depth_factor,
-            3,
-            1,
-        );
-        if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
-            return Err(XcoderDecoderError::Unknown {
-                code,
-                operation: "allocating frame",
-            });
-        }
-        let frame = frame.assume_init();
-        Ok(Self {
-            data_io: Some(sys::ni_session_data_io_t {
-                data: sys::_ni_session_data_io__bindgen_ty_1 { frame },
-            }),
-        })
-    }
-
-    pub fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t {
-        self.data_io.as_mut().expect("data_io should be some until we're dropped or consumed") as _
-    }
-}
-
-impl From<XcoderDecodedFrame> for XcoderHardwareFrame {
-    fn from(mut frame: XcoderDecodedFrame) -> Self {
-        unsafe { Self::new(frame.data_io.take().expect("data_io should be some until we're dropped or consumed")) }
-    }
-}
-
-unsafe impl Send for XcoderDecodedFrame {}
-unsafe impl Sync for XcoderDecodedFrame {}
-
-impl Deref for XcoderDecodedFrame {
-    type Target = sys::ni_frame_t;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe {
-            &self
-                .data_io
-                .as_ref()
-                .expect("data_io should be some until we're dropped or consumed")
-                .data
-                .frame
-        }
-    }
-}
-
-impl Drop for XcoderDecodedFrame {
-    fn drop(&mut self) {
-        if let Some(mut data_io) = self.data_io.take() {
-            unsafe {
-                let index = (*(data_io.data.frame.p_data[3] as *const sys::niFrameSurface1_t)).ui16FrameIdx;
-                if index > 0 {
-                    sys::ni_hwframe_p2p_buffer_recycle(&mut data_io.data.frame as _);
-                }
-                sys::ni_frame_buffer_free(&mut data_io.data.frame as _);
-            }
-        }
-    }
-}
-
 pub trait XcoderDecoderInput<E>: Iterator<Item = Result<XcoderDecoderInputFrame, E>> {}
 
 impl<T, E> XcoderDecoderInput<E> for T where T: Iterator<Item = Result<XcoderDecoderInputFrame, E>> {}
 
-pub struct XcoderDecoder<I, E> {
+pub struct XcoderDecoder<F: XcoderDecodedFrame, I, E> {
     config: XcoderDecoderConfig,
     input: I,
     pos: i64,
@@ -170,9 +99,11 @@ pub struct XcoderDecoder<I, E> {
     _params: Box<sys::ni_xcoder_params_t>,
     eos_received: bool,
     next_packet_data_io: Option<DataIo>,
-    next_decoded_frame: XcoderDecodedFrame,
+    next_decoded_frame: F,
     _input_error_type: PhantomData<E>,
 }
+
+unsafe impl<F: XcoderDecodedFrame, I, E> Send for XcoderDecoder<F, I, E> {}
 
 #[derive(Debug, Snafu)]
 pub enum XcoderDecoderError<E: Error + 'static> {
@@ -206,7 +137,25 @@ impl Drop for DataIo {
     }
 }
 
-impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
+pub trait XcoderDecodedFrame {
+    const HARDWARE: bool;
+
+    /// Downloads a frame from the current session
+    ///
+    /// # Safety
+    ///
+    /// Expects session to be a valid pointer
+    unsafe fn from_session<E>(session: *mut sys::ni_session_context_t, width: i32, height: i32) -> Result<Self, XcoderDecoderError<E>>
+    where
+        Self: Sized,
+        E: Error;
+
+    fn as_data_io_mut_ptr(&mut self) -> *mut sys::ni_session_data_io_t;
+
+    fn is_end_of_stream(&self) -> bool;
+}
+
+impl<F: XcoderDecodedFrame, E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<F, I, E> {
     pub fn new<II>(config: XcoderDecoderConfig, input: II) -> Result<Self, XcoderDecoderError<E>>
     where
         II: IntoIterator<IntoIter = I>,
@@ -223,7 +172,9 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
                 });
             }
             let mut params = mem::transmute::<Box<MaybeUninit<sys::ni_xcoder_params_t>>, Box<sys::ni_xcoder_params_t>>(params);
-            params.__bindgen_anon_1.dec_input_params.hwframes = 1;
+            if F::HARDWARE {
+                params.__bindgen_anon_1.dec_input_params.hwframes = 1;
+            }
             params.__bindgen_anon_1.dec_input_params.mcmode = config.multicore_joint_mode.into();
 
             let session = sys::ni_device_session_context_alloc_init();
@@ -235,7 +186,13 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
             });
 
             (**session).hw_id = config.hardware_id.unwrap_or(-1);
-            (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
+
+            if F::HARDWARE {
+                (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_ENABLE as _;
+            } else {
+                (**session).hw_action = sys::ni_codec_hw_actions_NI_CODEC_HW_NONE as _;
+            }
+
             (**session).p_session_config = params.as_mut() as *mut sys::ni_xcoder_params_t as *mut c_void;
             (**session).codec_format = match config.codec {
                 XcoderDecoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
@@ -244,6 +201,12 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
             (**session).bit_depth_factor = match config.bit_depth {
                 8 => 1,
                 10 => 2,
+                _ => return Err(XcoderDecoderError::UnsupportedBitDepth),
+            };
+
+            (**session).pixel_format = match config.bit_depth {
+                8 => ni_pix_fmt_t_NI_PIX_FMT_YUV420P as i32,
+                10 => ni_pix_fmt_t_NI_PIX_FMT_YUV420P10LE as i32,
                 _ => return Err(XcoderDecoderError::UnsupportedBitDepth),
             };
 
@@ -258,8 +221,33 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
                 sys::ni_device_session_close(*session, if eos_received { 1 } else { 0 }, sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER);
             });
 
+            if !F::HARDWARE {
+                // we always initialize the buffer pool so that software frames can always allocate from this pool
+                // avoiding the hit on the first frame
+
+                let number_of_frame_buffers = config.number_of_frame_buffers.map(|n| n as u32).unwrap_or(NI_DEC_FRAME_BUF_POOL_SIZE_INIT);
+
+                // no drop guard needed here, the `(*self.session).dec_fme_buf_pool`
+                // is cleaned up by `ni_device_session_close`, which calls `ni_decoder_session_close`
+                let code = sys::ni_dec_fme_buffer_pool_initialize(
+                    *session,
+                    number_of_frame_buffers as i32,
+                    config.width,
+                    config.height,
+                    ((**session).codec_format == sys::_ni_codec_format_NI_CODEC_FORMAT_H264).into(),
+                    (**session).bit_depth_factor,
+                );
+
+                if code != 0 {
+                    return Err(XcoderDecoderError::Unknown {
+                        code,
+                        operation: "ni_dec_fme_buffer_pool_initialize",
+                    });
+                }
+            }
+
             Ok(Self {
-                next_decoded_frame: XcoderDecodedFrame::new_hardware_frame(*session, config.width, config.height)?,
+                next_decoded_frame: F::from_session(*session, config.width, config.height)?,
                 config,
                 did_start: false,
                 did_flush: false,
@@ -288,7 +276,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     }
 
     /// Reads a decoded frame. Returns None once the decoder is finished.
-    pub fn read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+    pub fn read_decoded_frame(&mut self) -> Result<Option<F>, XcoderDecoderError<E>> {
         while !self.is_finished() {
             if let Some(frame) = self.try_read_decoded_frame()? {
                 return Ok(Some(frame));
@@ -298,7 +286,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     }
 
     /// Tries to read a decoded frame. If none is returned and `is_finished` returns false, the caller should try again later.
-    fn try_read_decoded_frame(&mut self) -> Result<Option<XcoderDecodedFrame>, XcoderDecoderError<E>> {
+    fn try_read_decoded_frame(&mut self) -> Result<Option<F>, XcoderDecoderError<E>> {
         if self.is_finished() {
             return Ok(None);
         }
@@ -343,22 +331,30 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
 
             // try reading a decoded frame from the decoder
             {
-                let code = sys::ni_device_session_read_hwdesc(
-                    self.session,
-                    self.next_decoded_frame.as_data_io_mut_ptr(),
-                    sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER,
-                );
+                let code = if F::HARDWARE {
+                    sys::ni_device_session_read_hwdesc(
+                        self.session,
+                        self.next_decoded_frame.as_data_io_mut_ptr(),
+                        sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER,
+                    )
+                } else {
+                    sys::ni_device_session_read(
+                        self.session,
+                        self.next_decoded_frame.as_data_io_mut_ptr(),
+                        sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER,
+                    )
+                };
                 if code < 0 {
                     return Err(XcoderDecoderError::Unknown {
                         code,
                         operation: "reading decoded frame",
                     });
                 }
-                self.eos_received = self.next_decoded_frame.end_of_stream != 0;
+                self.eos_received = self.next_decoded_frame.is_end_of_stream();
                 if code > 0 {
                     let frame = mem::replace(
                         &mut self.next_decoded_frame,
-                        XcoderDecodedFrame::new_hardware_frame(self.session, self.config.width, self.config.height)?,
+                        F::from_session(self.session, self.config.width, self.config.height)?,
                     );
                     return Ok(Some(frame));
                 }
@@ -369,9 +365,24 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     }
 }
 
-impl<I, E> Drop for XcoderDecoder<I, E> {
+impl<F: XcoderDecodedFrame, I, E> Drop for XcoderDecoder<F, I, E> {
     fn drop(&mut self) {
         unsafe {
+            // do NOT clean up `(*self.session).dec_fme_buf_pool` with `ni_dec_fme_buffer_pool_free`,
+            // as it breaks `ni_device_session_close`
+
+            if !F::HARDWARE {
+                // on software our frames come from a buffer pool our `next_decoded_frame`
+                // must be cleaned up before we close our buffer,
+                // otherwise valgrind finds an invalid read:
+                //    Error Invalid read of size 8
+                //     Info main stack trace (user code at the bottom)
+                //          at ni_decoder_frame_buffer_free (ni_device_api.c:3571)
+                //          at <xcoder_quadra::linux_impl::XcoderSoftwareFrame as core::ops::drop::Drop>::drop (lib.rs:57)
+                let session_data = self.next_decoded_frame.as_data_io_mut_ptr();
+                sys::ni_decoder_frame_buffer_free(&mut (*session_data).data.frame);
+            }
+
             sys::ni_device_session_close(
                 self.session,
                 if self.eos_received { 1 } else { 0 },
@@ -429,13 +440,15 @@ pub fn read_frames(path: &str) -> Vec<Result<XcoderDecoderInputFrame, std::io::E
 
 #[cfg(test)]
 mod test {
+    use av_traits::VideoEncoder;
+
     use super::{super::*, *};
 
     #[test]
     fn test_decoder() {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -444,6 +457,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
+                number_of_frame_buffers: None,
             },
             frames,
         )
@@ -461,7 +475,7 @@ mod test {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
 
-        let mut decoder = XcoderDecoder::new(
+        let mut decoder = XcoderDecoder::<XcoderHardwareFrame, _, _>::new(
             XcoderDecoderConfig {
                 width: 1280,
                 height: 720,
@@ -470,6 +484,7 @@ mod test {
                 fps: 29.97,
                 hardware_id: None,
                 multicore_joint_mode: false,
+                number_of_frame_buffers: None,
             },
             frames,
         )
@@ -495,7 +510,7 @@ mod test {
         let mut encoded = vec![];
 
         while let Some(frame) = decoder.read_decoded_frame().unwrap() {
-            if let Some(output) = encoder.encode_hardware_frame((), frame.into()).unwrap() {
+            if let Some(output) = encoder.encode_hardware_frame((), frame).unwrap() {
                 encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
                 encoded_frames += 1;
             }
@@ -507,5 +522,92 @@ mod test {
 
         assert_eq!(encoded_frames, expected_frame_count);
         assert!(encoded.len() > 5000);
+    }
+
+    #[test]
+    fn test_decoder_sw_framebuffer() {
+        let frames = read_frames("src/testdata/smptebars.h264");
+        let expected_frame_count = frames.len();
+        let mut decoder = XcoderDecoder::<XcoderSoftwareFrame, _, _>::new(
+            XcoderDecoderConfig {
+                width: 1280,
+                height: 720,
+                codec: XcoderDecoderCodec::H264,
+                bit_depth: 8,
+                fps: 29.97,
+                hardware_id: None,
+                multicore_joint_mode: false,
+                number_of_frame_buffers: Some(4),
+            },
+            frames,
+        )
+        .unwrap();
+
+        let mut frame_count = 0;
+        while decoder.read_decoded_frame().unwrap().is_some() {
+            frame_count += 1;
+        }
+        assert_eq!(frame_count, expected_frame_count);
+    }
+
+    #[test]
+    fn test_decoder_encoder_sw() {
+        let original_width = 1280;
+        let original_height = 720;
+
+        let frames = read_frames("src/testdata/smptebars.h264");
+        let expected_frame_count = frames.len();
+
+        let mut decoder = XcoderDecoder::<XcoderSoftwareFrame, _, _>::new(
+            XcoderDecoderConfig {
+                width: original_width,
+                height: original_height,
+                codec: XcoderDecoderCodec::H264,
+                bit_depth: 8,
+                fps: 29.97,
+                hardware_id: None,
+                multicore_joint_mode: false,
+                number_of_frame_buffers: None,
+            },
+            frames,
+        )
+        .unwrap();
+
+        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+            width: original_width as u16,
+            height: original_height as u16,
+            fps: 29.97,
+            bitrate: None,
+            codec: XcoderEncoderCodec::H265 {
+                profile: None,
+                level_idc: None,
+            },
+            bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
+            hardware: None,
+            multicore_joint_mode: false,
+        })
+        .unwrap();
+
+        let mut frame_count = 0;
+        let mut encoded = vec![];
+
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            let xcoder_sw_frame = frame;
+
+            if let Some(output) = encoder.encode(xcoder_sw_frame, av_traits::EncodedFrameType::Auto).unwrap() {
+                encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+                frame_count += 1;
+            }
+        }
+        while let Some(output) = encoder.flush().unwrap() {
+            encoded.append(&mut output.encoded_frame.expect("frame was not dropped").data);
+            frame_count += 1;
+        }
+
+        // To inspect the output, uncomment these lines:
+        // std::io::Write::write_all(&mut std::fs::File::create("cropped.h265").unwrap(), &encoded).unwrap();
+
+        assert_eq!(frame_count, expected_frame_count);
     }
 }
