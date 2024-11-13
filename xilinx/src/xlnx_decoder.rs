@@ -48,7 +48,7 @@ impl XlnxDecoder {
     ///
     /// @buf: buffer of input data.
     /// @size: size of input data.
-    pub fn xlnx_dec_send_pkt(&mut self, buf: &mut [u8], pts: i32) -> Result<(), XlnxError> {
+    pub fn xlnx_dec_send_pkt(&mut self, buf: &mut [u8], pts: i64) -> Result<(), XlnxError> {
         if buf.len() > (self.frame_props.width * self.frame_props.height * self.frame_props.bits_per_pixel / 8) as usize {
             return Err(XlnxError {
                 err: XlnxErrorType::ErrorInvalid,
@@ -195,14 +195,14 @@ mod decoder_tests {
         }
 
         for (frame_count, nalu) in nalus.into_iter().enumerate() {
-            let pts = (frame_duration_secs * 90000.0 * frame_count as f64) as i32;
+            let pts = (frame_duration_secs * 90000.0 * frame_count as f64) as i64;
             let mut data = vec![0, 0, 0, 1];
             data.extend_from_slice(nalu);
             let data = data.as_mut_slice();
 
             loop {
                 let mut packet_send_success = false;
-                match decoder.xlnx_dec_send_pkt(data, pts as i32) {
+                match decoder.xlnx_dec_send_pkt(data, pts) {
                     Ok(_) => {
                         packets_sent += 1;
                         packet_send_success = true;
