@@ -43,6 +43,6 @@ impl NSError {
 
 impl Drop for NSError {
     fn drop(&mut self) {
-        unsafe { super::sys::avrs_foundation_release_object(self.0) }
+        unsafe { core_foundation::sys::CFRelease(self.0) }
     }
 }
