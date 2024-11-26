@@ -215,18 +215,6 @@ impl<F> XcoderEncoder<F> {
                             XcoderH265Profile::Main10 => 2,
                         };
                     }
-                    if let Some(bitrate) = config.bitrate {
-                        // This specifies the size of the VBV (CPB) buffer in milliseconds.
-                        // The range of supported values of `vbvBufferSize` is 0, and 10 to 3000. For example 3000 should be set for 3 seconds.
-                        // Given a particular bitrate value, the maximum value of vbvBufferSize without leading to insufficient resource error is not documented.
-                        // For each bitrate range, we maximize vbvBufferSize value that does not exceed the Quadra encoder's processing capacity by trial and error.
-                        cfg_enc_params.rc.vbv_buffer_size = match bitrate {
-                            0..=80_000_000 => 3000,
-                            80_000_001..=120_000_000 => 2000,
-                            120_000_001..=240_000_000 => 1000,
-                            _ => 0,
-                        }
-                    };
                 }
             }
 
