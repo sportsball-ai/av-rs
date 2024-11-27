@@ -585,6 +585,7 @@ name = "foundation"
 version = "0.1.0"
 dependencies = [
  "cc",
+ "core-foundation 0.1.0",
 ]
 
 [[package]]
