@@ -1,6 +1,10 @@
 pub mod sys;
 pub use sys::*;
 
+/*---- context ----*/
+pub mod xrm_context;
+pub use xrm_context::*;
+
 /*---- transcoder ----*/
 pub mod xlnx_transcoder_utils;
 pub use xlnx_transcoder_utils::*;

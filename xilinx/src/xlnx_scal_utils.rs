@@ -2,22 +2,22 @@ use libloading::{Library, Symbol};
 use simple_error::{bail, SimpleError};
 use std::{ffi::CString, os::raw::c_char, str::from_utf8};
 
-use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask};
+use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask, XrmContext};
 
 const SCAL_PLUGIN_NAME: &[u8] = b"xrmU30ScalPlugin\0";
 
-pub struct XlnxScalerXrmCtx {
+pub struct XlnxScalerXrmCtx<'a> {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
     pub scal_load: i32,
     pub(crate) scal_res_in_use: bool,
     pub num_outputs: i32,
-    pub(crate) xrm_ctx: xrmContext,
+    pub(crate) xrm_ctx: &'a XrmContext,
     pub(crate) cu_res: Box<xrmCuResourceV2>,
 }
 
-impl XlnxScalerXrmCtx {
-    pub fn new(xrm_ctx: xrmContext, device_id: Option<u32>, reserve_id: Option<u64>, scal_load: i32, num_outputs: i32) -> Self {
+impl<'a> XlnxScalerXrmCtx<'a> {
+    pub fn new(xrm_ctx: &'a XrmContext, device_id: Option<u32>, reserve_id: Option<u64>, scal_load: i32, num_outputs: i32) -> Self {
         Self {
             xrm_reserve_id: reserve_id,
             device_id,
@@ -31,7 +31,7 @@ impl XlnxScalerXrmCtx {
 }
 
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn xlnx_calc_scal_load(xrm_ctx: xrmContext, xma_scal_props: *mut XmaScalerProperties) -> Result<i32, SimpleError> {
+pub fn xlnx_calc_scal_load(xrm_ctx: &XrmContext, xma_scal_props: *mut XmaScalerProperties) -> Result<i32, SimpleError> {
     let func_id = 0;
     let mut plugin_param: xrmPluginFuncParam = Default::default();
     unsafe {
@@ -52,7 +52,7 @@ pub fn xlnx_calc_scal_load(xrm_ctx: xrmContext, xma_scal_props: *mut XmaScalerPr
     }
 
     unsafe {
-        let ret = xrmExecPluginFunc(xrm_ctx, SCAL_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
+        let ret = xrmExecPluginFunc(xrm_ctx.raw(), SCAL_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
         if ret != XRM_SUCCESS as i32 {
             bail!("XRM Scaler plugin failed to calculate scaler load. error: {}", ret);
         }
@@ -99,12 +99,12 @@ pub fn xlnx_reserve_scal_resource(xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Resul
     xlnx_fill_scal_pool_props(&mut cu_pool_prop, xlnx_scal_ctx.scal_load, xlnx_scal_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_scal_ctx.xrm_ctx, cu_pool_prop.as_mut());
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_scal_ctx.xrm_ctx.raw(), cu_pool_prop.as_mut());
         if num_cu_pool == 0 {
             bail!("no scaler resources available for allocation")
         }
 
-        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_scal_ctx.xrm_ctx, cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
+        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_scal_ctx.xrm_ctx.raw(), cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
         if xrm_reserve_id == 0 {
             bail!("failed to reserve scaler cu pool")
         }
@@ -129,7 +129,7 @@ pub(crate) fn xlnx_create_scal_session(
     Ok(scal_session)
 }
 
-fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &mut XlnxScalerXrmCtx) -> Result<(), SimpleError> {
+fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &mut XlnxScalerXrmCtx<'_>) -> Result<(), SimpleError> {
     let mut scaler_cu_prop: Box<xrmCuPropertyV2> = Box::new(Default::default());
 
     strcpy_to_arr_i8(&mut scaler_cu_prop.kernelName, "scaler")?;
@@ -157,7 +157,7 @@ fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &
         }
     }
 
-    if unsafe { xrmCuAllocV2(xlnx_scal_ctx.xrm_ctx, scaler_cu_prop.as_mut(), xlnx_scal_ctx.cu_res.as_mut()) } != XRM_SUCCESS as _ {
+    if unsafe { xrmCuAllocV2(xlnx_scal_ctx.xrm_ctx.raw(), scaler_cu_prop.as_mut(), xlnx_scal_ctx.cu_res.as_mut()) } != XRM_SUCCESS as _ {
         bail!(
             "failed to allocate scaler cu from reserve id {:?} and device id {:?}",
             xlnx_scal_ctx.xrm_reserve_id,
@@ -177,17 +177,17 @@ fn xlnx_scal_cu_alloc(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &
     Ok(())
 }
 
-impl Drop for XlnxScalerXrmCtx {
+impl<'a> Drop for XlnxScalerXrmCtx<'a> {
     fn drop(&mut self) {
-        if self.xrm_ctx.is_null() {
-            return;
-        }
         unsafe {
+            if self.xrm_ctx.raw().is_null() {
+                return;
+            }
             if let Some(xrm_reserve_id) = self.xrm_reserve_id {
-                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx.raw(), xrm_reserve_id);
             }
             if self.scal_res_in_use {
-                xrmCuReleaseV2(self.xrm_ctx, self.cu_res.as_mut());
+                xrmCuReleaseV2(self.xrm_ctx.raw(), self.cu_res.as_mut());
             }
         }
     }

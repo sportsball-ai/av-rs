@@ -1,14 +1,17 @@
+use std::marker::PhantomData;
+
 use crate::{sys::*, xlnx_enc_utils::*, xlnx_error::*};
 use simple_error::SimpleError;
 
-pub struct XlnxEncoder {
+pub struct XlnxEncoder<'a> {
     enc_session: *mut XmaEncoderSession,
     pub out_buffer: *mut XmaDataBuffer,
     pub flush_frame_sent: bool,
+    encoder_ctx_lifetime: PhantomData<XlnxEncoderXrmCtx<'a>>,
 }
 
-impl XlnxEncoder {
-    pub fn new(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<Self, SimpleError> {
+impl<'a> XlnxEncoder<'a> {
+    pub fn new(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx<'a>) -> Result<Self, SimpleError> {
         let enc_session = xlnx_create_enc_session(xma_enc_props, xlnx_enc_ctx)?;
 
         let buffer_size = xma_enc_props.height * xma_enc_props.width * xma_enc_props.bits_per_pixel;
@@ -18,10 +21,11 @@ impl XlnxEncoder {
             enc_session,
             out_buffer,
             flush_frame_sent: false,
+            encoder_ctx_lifetime: PhantomData,
         })
     }
 
-    /// Sends raw frames to Xilinx Encoder plugin and receives back decoded frames.  
+    /// Sends raw frames to Xilinx Encoder plugin and receives back decoded frames.
     pub fn process_frame(&mut self, enc_in_frame: *mut XmaFrame, enc_null_frame: bool, enc_out_size: &mut i32) -> Result<(), XlnxError> {
         if !self.flush_frame_sent {
             match self.send_frame(enc_in_frame) {
@@ -76,7 +80,7 @@ impl XlnxEncoder {
     }
 }
 
-impl Drop for XlnxEncoder {
+impl<'a> Drop for XlnxEncoder<'a> {
     fn drop(&mut self) {
         unsafe {
             if !self.enc_session.is_null() {
@@ -91,7 +95,7 @@ impl Drop for XlnxEncoder {
 
 #[cfg(test)]
 mod encoder_tests {
-    use crate::{tests::*, xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*};
+    use crate::{tests::*, xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*, xrm_context::*};
 
     fn encode_raw(codec_id: i32, profile: i32, level: i32) -> i32 {
         let mut frame_props = XmaFrameProperties {
@@ -152,9 +156,9 @@ mod encoder_tests {
 
         let mut xma_enc_props = XlnxXmaEncoderProperties::try_from(enc_props).unwrap();
 
-        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-        let enc_load = xlnx_calc_enc_load(xrm_ctx, xma_enc_props.as_mut()).unwrap();
-        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(xrm_ctx, None, None, enc_load);
+        let xrm_ctx = XrmContext::new();
+        let enc_load = xlnx_calc_enc_load(&xrm_ctx, xma_enc_props.as_mut()).unwrap();
+        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(&xrm_ctx, None, None, enc_load);
 
         xlnx_reserve_enc_resource(&mut xlnx_enc_ctx).unwrap();
 

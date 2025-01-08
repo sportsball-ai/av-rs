@@ -1,4 +1,4 @@
-use crate::{strcpy_to_arr_i8, sys::*, xlnx_dec_utils::*, xlnx_enc_utils::*, xlnx_scal_utils::*, xrm_precision_1000000_bitmask};
+use crate::{strcpy_to_arr_i8, sys::*, xlnx_dec_utils::*, xlnx_enc_utils::*, xlnx_scal_utils::*, xrm_precision_1000000_bitmask, XrmContext};
 use simple_error::{bail, SimpleError};
 
 /// This struct is used to hold the load information for the transcode
@@ -13,17 +13,15 @@ pub struct XlnxTranscodeLoad {
     pub enc_loads: Vec<i32>,
 }
 
-pub struct XlnxTranscodeXrmCtx {
-    pub xrm_ctx: xrmContext,
+pub struct XlnxTranscodeXrmCtx<'a> {
+    pub xrm_ctx: &'a XrmContext,
     pub transcode_load: XlnxTranscodeLoad,
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
 }
 
-impl XlnxTranscodeXrmCtx {
-    pub fn new() -> Self {
-        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-
+impl<'a> XlnxTranscodeXrmCtx<'a> {
+    pub fn new(xrm_ctx: &'a XrmContext) -> Self {
         Self {
             xrm_ctx,
             transcode_load: XlnxTranscodeLoad {
@@ -132,11 +130,15 @@ pub fn xlnx_reserve_transcode_resource(
         &mut transcode_cu_pool_prop,
     )?;
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_transcode_xrm_ctx.xrm_ctx, transcode_cu_pool_prop.as_mut());
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_transcode_xrm_ctx.xrm_ctx.raw(), transcode_cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
             bail!("no xilinx hardware resources avaliable for allocation")
         }
-        let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_transcode_xrm_ctx.xrm_ctx, transcode_cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
+        let xrm_reserve_id = xrmCuPoolReserveV2(
+            xlnx_transcode_xrm_ctx.xrm_ctx.raw(),
+            transcode_cu_pool_prop.as_mut(),
+            cu_pool_res_infor.as_mut(),
+        );
         if xrm_reserve_id == 0 {
             bail!("failed to reserve transcode cu pool")
         }
@@ -146,23 +148,15 @@ pub fn xlnx_reserve_transcode_resource(
     Ok(cu_pool_res_infor)
 }
 
-impl Default for XlnxTranscodeXrmCtx {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Drop for XlnxTranscodeXrmCtx {
+impl<'a> Drop for XlnxTranscodeXrmCtx<'a> {
     fn drop(&mut self) {
-        if self.xrm_ctx.is_null() {
-            return;
-        }
         unsafe {
-            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
-                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
+            if self.xrm_ctx.raw().is_null() {
+                return;
             }
-
-            xrmDestroyContext(self.xrm_ctx);
+            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx.raw(), xrm_reserve_id);
+            }
         }
     }
 }

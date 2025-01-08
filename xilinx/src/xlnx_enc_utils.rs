@@ -1,21 +1,21 @@
-use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask};
+use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask, XrmContext};
 use libloading::{Library, Symbol};
 use simple_error::{bail, SimpleError};
 use std::{ffi::CString, os::raw::c_char, str::from_utf8};
 
 const ENC_PLUGIN_NAME: &[u8] = b"xrmU30EncPlugin\0";
 
-pub struct XlnxEncoderXrmCtx {
+pub struct XlnxEncoderXrmCtx<'a> {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
     pub enc_load: i32,
     pub(crate) encode_res_in_use: bool,
-    pub(crate) xrm_ctx: xrmContext,
+    pub(crate) xrm_ctx: &'a XrmContext,
     pub(crate) cu_list_res: Box<xrmCuListResourceV2>,
 }
 
-impl XlnxEncoderXrmCtx {
-    pub fn new(xrm_ctx: xrmContext, device_id: Option<u32>, reserve_id: Option<u64>, enc_load: i32) -> Self {
+impl<'a> XlnxEncoderXrmCtx<'a> {
+    pub fn new(xrm_ctx: &'a XrmContext, device_id: Option<u32>, reserve_id: Option<u64>, enc_load: i32) -> Self {
         Self {
             xrm_reserve_id: reserve_id,
             device_id,
@@ -29,7 +29,7 @@ impl XlnxEncoderXrmCtx {
 
 /// Calculates the encoder load uing the xrmU30Enc plugin.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn xlnx_calc_enc_load(xrm_ctx: xrmContext, xma_enc_props: *mut XmaEncoderProperties) -> Result<i32, SimpleError> {
+pub fn xlnx_calc_enc_load(xrm_ctx: &XrmContext, xma_enc_props: *mut XmaEncoderProperties) -> Result<i32, SimpleError> {
     let func_id = 0;
     let mut plugin_param: xrmPluginFuncParam = Default::default();
     unsafe {
@@ -50,7 +50,7 @@ pub fn xlnx_calc_enc_load(xrm_ctx: xrmContext, xma_enc_props: *mut XmaEncoderPro
     }
 
     unsafe {
-        let ret = xrmExecPluginFunc(xrm_ctx, ENC_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
+        let ret = xrmExecPluginFunc(xrm_ctx.raw(), ENC_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
         if ret != XRM_SUCCESS as i32 {
             bail!("XRM encoder plugin failed to calculate encoder load. error: {}", ret);
         }
@@ -110,12 +110,12 @@ pub fn xlnx_reserve_enc_resource(xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result
     xlnx_fill_enc_pool_props(&mut cu_pool_prop, enc_count, xlnx_enc_ctx.enc_load, xlnx_enc_ctx.device_id)?;
 
     unsafe {
-        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_enc_ctx.xrm_ctx, cu_pool_prop.as_mut());
+        let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_enc_ctx.xrm_ctx.raw(), cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
             bail!("no encoder resources avaliable for allocation")
         }
 
-        let xrm_reserve_id: u64 = xrmCuPoolReserveV2(xlnx_enc_ctx.xrm_ctx, cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
+        let xrm_reserve_id: u64 = xrmCuPoolReserveV2(xlnx_enc_ctx.xrm_ctx.raw(), cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
         if xrm_reserve_id == 0 {
             bail!("failed to reserve encode cu pool")
         }
@@ -166,7 +166,7 @@ fn xlnx_enc_cu_alloc(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mu
         }
     }
 
-    if unsafe { xrmCuListAllocV2(xlnx_enc_ctx.xrm_ctx, encode_cu_list_prop.as_mut(), xlnx_enc_ctx.cu_list_res.as_mut()) } != XRM_SUCCESS as _ {
+    if unsafe { xrmCuListAllocV2(xlnx_enc_ctx.xrm_ctx.raw(), encode_cu_list_prop.as_mut(), xlnx_enc_ctx.cu_list_res.as_mut()) } != XRM_SUCCESS as _ {
         bail!(
             "failed to allocate encode cu list from reserve id {:?} and device id {:?}",
             xlnx_enc_ctx.xrm_reserve_id,
@@ -202,17 +202,17 @@ pub(crate) fn xlnx_create_enc_session(
     Ok(enc_session)
 }
 
-impl Drop for XlnxEncoderXrmCtx {
+impl<'a> Drop for XlnxEncoderXrmCtx<'a> {
     fn drop(&mut self) {
-        if self.xrm_ctx.is_null() {
-            return;
-        }
         unsafe {
+            if self.xrm_ctx.raw().is_null() {
+                return;
+            }
             if let Some(xrm_reserve_id) = self.xrm_reserve_id {
-                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx, xrm_reserve_id);
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx.raw(), xrm_reserve_id);
             }
             if self.encode_res_in_use {
-                let _ = xrmCuListReleaseV2(self.xrm_ctx, self.cu_list_res.as_mut());
+                let _ = xrmCuListReleaseV2(self.xrm_ctx.raw(), self.cu_list_res.as_mut());
             }
         }
     }
