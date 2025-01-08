@@ -27,9 +27,7 @@ impl Default for XrmContext {
 impl Drop for XrmContext {
     fn drop(&mut self) {
         unsafe {
-            unsafe {
-                sys::xrmDestroyContext(self.context);
-            }
+            sys::xrmDestroyContext(self.context);
         }
     }
 }

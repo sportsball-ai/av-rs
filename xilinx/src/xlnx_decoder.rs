@@ -145,7 +145,7 @@ impl<'a> Drop for XlnxDecoder<'a> {
 
 #[cfg(test)]
 mod decoder_tests {
-    use crate::{tests::*, xlnx_dec_props::*, xlnx_dec_utils::*, xlnx_decoder::*, xlnx_error::*};
+    use crate::{tests::*, xlnx_dec_props::*, xlnx_dec_utils::*, xlnx_decoder::*, xlnx_error::*, xrm_context::*};
     use std::{fs::File, io::Read};
 
     const H265_TEST_FILE_PATH: &str = "src/testdata/hvc1.1.6.L150.90.h265";
@@ -175,9 +175,9 @@ mod decoder_tests {
 
         let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
 
-        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-        let dec_load = xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap();
-        let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(xrm_ctx, None, None, dec_load);
+        let xrm_ctx = XrmContext::new();
+        let dec_load = xlnx_calc_dec_load(&xrm_ctx, xma_dec_props.as_mut()).unwrap();
+        let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(&xrm_ctx, None, None, dec_load);
 
         xlnx_reserve_dec_resource(&mut xlnx_dec_ctx).unwrap();
 
@@ -313,9 +313,9 @@ mod decoder_tests {
 
             let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
 
-            let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-            let dec_load = xlnx_calc_dec_load(xrm_ctx, xma_dec_props.as_mut()).unwrap();
-            let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(xrm_ctx, None, None, dec_load);
+            let xrm_ctx = XrmContext::new();
+            let dec_load = xlnx_calc_dec_load(&xrm_ctx, xma_dec_props.as_mut()).unwrap();
+            let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(&xrm_ctx, None, None, dec_load);
 
             xlnx_reserve_dec_resource(&mut xlnx_dec_ctx).unwrap();
 

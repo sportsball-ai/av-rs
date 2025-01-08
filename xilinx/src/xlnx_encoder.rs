@@ -95,7 +95,7 @@ impl<'a> Drop for XlnxEncoder<'a> {
 
 #[cfg(test)]
 mod encoder_tests {
-    use crate::{tests::*, xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*};
+    use crate::{tests::*, xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*, xrm_context::*};
 
     fn encode_raw(codec_id: i32, profile: i32, level: i32) -> i32 {
         let mut frame_props = XmaFrameProperties {
@@ -156,9 +156,9 @@ mod encoder_tests {
 
         let mut xma_enc_props = XlnxXmaEncoderProperties::try_from(enc_props).unwrap();
 
-        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-        let enc_load = xlnx_calc_enc_load(xrm_ctx, xma_enc_props.as_mut()).unwrap();
-        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(xrm_ctx, None, None, enc_load);
+        let xrm_ctx = XrmContext::new();
+        let enc_load = xlnx_calc_enc_load(&xrm_ctx, xma_enc_props.as_mut()).unwrap();
+        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(&xrm_ctx, None, None, enc_load);
 
         xlnx_reserve_enc_resource(&mut xlnx_enc_ctx).unwrap();
 

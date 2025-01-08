@@ -115,7 +115,7 @@ impl<'a> Drop for XlnxScaler<'a> {
 
 #[cfg(test)]
 mod scaler_tests {
-    use crate::{tests::*, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*};
+    use crate::{tests::*, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*, xrm_context::*};
 
     #[test]
     fn test_abr_scale() {
@@ -146,9 +146,9 @@ mod scaler_tests {
 
         let mut xma_scal_props = XlnxXmaScalerProperties::from(scal_props);
 
-        let xrm_ctx = unsafe { xrmCreateContext(XRM_API_VERSION_1) };
-        let scal_load = xlnx_calc_scal_load(xrm_ctx, xma_scal_props.as_mut()).unwrap();
-        let mut xlnx_scal_ctx = XlnxScalerXrmCtx::new(xrm_ctx, None, None, scal_load, 3);
+        let xrm_ctx = XrmContext::new();
+        let scal_load = xlnx_calc_scal_load(&xrm_ctx, xma_scal_props.as_mut()).unwrap();
+        let mut xlnx_scal_ctx = XlnxScalerXrmCtx::new(&xrm_ctx, None, None, scal_load, 3);
 
         xlnx_reserve_scal_resource(&mut xlnx_scal_ctx).unwrap();
 
