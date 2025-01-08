@@ -1,18 +1,21 @@
+use std::marker::PhantomData;
+
 use crate::sys::*;
 use crate::xlnx_dec_utils::*;
 use crate::{XlnxError, XlnxErrorType};
 use simple_error::{bail, SimpleError};
 
-pub struct XlnxDecoder {
+pub struct XlnxDecoder<'a> {
     pub dec_session: *mut XmaDecoderSession,
     pub frame_props: XmaFrameProperties,
     in_buf: XmaDataBuffer,
     pub out_frame: *mut XmaFrame,
     pub flush_sent: bool,
+    decoder_ctx_lifetime: PhantomData<XlnxDecoderXrmCtx<'a>>,
 }
 
-impl XlnxDecoder {
-    pub fn new(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx) -> Result<Self, SimpleError> {
+impl<'a> XlnxDecoder<'a> {
+    pub fn new(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'a>) -> Result<Self, SimpleError> {
         let dec_session = xlnx_create_dec_session(xma_dec_props, xlnx_dec_ctx)?;
 
         let mut frame_props: XmaFrameProperties = Default::default();
@@ -41,6 +44,7 @@ impl XlnxDecoder {
             in_buf,
             out_frame,
             flush_sent: false,
+            decoder_ctx_lifetime: PhantomData,
         })
     }
 
@@ -126,7 +130,7 @@ impl XlnxDecoder {
     }
 }
 
-impl Drop for XlnxDecoder {
+impl<'a> Drop for XlnxDecoder<'a> {
     fn drop(&mut self) {
         unsafe {
             if !self.dec_session.is_null() {

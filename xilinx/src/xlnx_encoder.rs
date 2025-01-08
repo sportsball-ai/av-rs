@@ -1,14 +1,17 @@
+use std::marker::PhantomData;
+
 use crate::{sys::*, xlnx_enc_utils::*, xlnx_error::*};
 use simple_error::SimpleError;
 
-pub struct XlnxEncoder {
+pub struct XlnxEncoder<'a> {
     enc_session: *mut XmaEncoderSession,
     pub out_buffer: *mut XmaDataBuffer,
     pub flush_frame_sent: bool,
+    encoder_ctx_lifetime: PhantomData<XlnxEncoderXrmCtx<'a>>,
 }
 
-impl XlnxEncoder {
-    pub fn new(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx) -> Result<Self, SimpleError> {
+impl<'a> XlnxEncoder<'a> {
+    pub fn new(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx<'a>) -> Result<Self, SimpleError> {
         let enc_session = xlnx_create_enc_session(xma_enc_props, xlnx_enc_ctx)?;
 
         let buffer_size = xma_enc_props.height * xma_enc_props.width * xma_enc_props.bits_per_pixel;
@@ -18,10 +21,11 @@ impl XlnxEncoder {
             enc_session,
             out_buffer,
             flush_frame_sent: false,
+            encoder_ctx_lifetime: PhantomData,
         })
     }
 
-    /// Sends raw frames to Xilinx Encoder plugin and receives back decoded frames.  
+    /// Sends raw frames to Xilinx Encoder plugin and receives back decoded frames.
     pub fn process_frame(&mut self, enc_in_frame: *mut XmaFrame, enc_null_frame: bool, enc_out_size: &mut i32) -> Result<(), XlnxError> {
         if !self.flush_frame_sent {
             match self.send_frame(enc_in_frame) {
@@ -76,7 +80,7 @@ impl XlnxEncoder {
     }
 }
 
-impl Drop for XlnxEncoder {
+impl<'a> Drop for XlnxEncoder<'a> {
     fn drop(&mut self) {
         unsafe {
             if !self.enc_session.is_null() {
