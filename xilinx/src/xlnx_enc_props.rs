@@ -1,6 +1,4 @@
-use simple_error::{bail, SimpleError};
-
-use crate::{strcpy_to_arr_i8, sys::*};
+use crate::{strcpy_to_arr_i8, sys::*, Error, XrmCodec, XrmPlugin};
 
 pub const MAX_ENC_PARAMS: usize = 6;
 
@@ -80,9 +78,9 @@ pub struct XlnxXmaEncoderProperties {
 }
 
 impl TryFrom<XlnxEncoderProperties> for XlnxXmaEncoderProperties {
-    type Error = SimpleError;
+    type Error = Error;
 
-    fn try_from(props: XlnxEncoderProperties) -> Result<Self, SimpleError> {
+    fn try_from(props: XlnxEncoderProperties) -> Result<Self, Error> {
         let mut props = Box::new(props);
         let mut params: Box<[XmaParameter; MAX_ENC_PARAMS]> = Default::default();
 
@@ -135,15 +133,32 @@ impl TryFrom<XlnxEncoderProperties> for XlnxXmaEncoderProperties {
                 ENC_H264_BASELINE => "AVC_BASELINE",
                 ENC_H264_MAIN => "AVC_MAIN",
                 ENC_H264_HIGH => "AVC_HIGH",
-                _ => bail!("invalid profile {} specified to H264 xilinx encoder", props.profile),
+                other => {
+                    return Err(Error::InvalidCodecProfile {
+                        plugin: XrmPlugin::Encoder,
+                        number: other,
+                        codec: XrmCodec::H264,
+                    })
+                }
             },
             // h265
             CODEC_ID_HEVC => match props.profile {
                 ENC_HEVC_MAIN => "HEVC_MAIN",
                 ENC_HEVC_MAIN_INTRA => "HEVC_MAIN_INTRA",
-                _ => bail!("invalid profile {} specified to HEVC xilinx encoder", props.profile),
+                other => {
+                    return Err(Error::InvalidCodecProfile {
+                        plugin: XrmPlugin::Encoder,
+                        number: other,
+                        codec: XrmCodec::Hevc,
+                    })
+                }
             },
-            _ => bail!("incompatible codec_id {}", props.codec_id),
+            other => {
+                return Err(Error::InvalidCodecId {
+                    plugin: XrmPlugin::Encoder,
+                    codec: other,
+                })
+            }
         };
 
         let mut is_level_found = true;
@@ -174,10 +189,22 @@ impl TryFrom<XlnxEncoderProperties> for XlnxXmaEncoderProperties {
                         32 => "3.2",
                         42 => "4.2",
                         52 => "5.2",
-                        _ => bail!("invalid H264 codec level value {}", props.level),
+                        other => {
+                            return Err(Error::InvalidCodecLevel {
+                                plugin: XrmPlugin::Encoder,
+                                level: other,
+                                codec: XrmCodec::H264,
+                            })
+                        }
                     }
                 }
-                CODEC_ID_HEVC => bail!("invalid HEVC codec level value{}", props.level),
+                CODEC_ID_HEVC => {
+                    return Err(Error::InvalidCodecLevel {
+                        plugin: XrmPlugin::Encoder,
+                        level: props.level,
+                        codec: XrmCodec::Hevc,
+                    })
+                }
                 _ => {}
             }
         }

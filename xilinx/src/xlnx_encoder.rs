@@ -1,18 +1,25 @@
-use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 
-use crate::{sys::*, xlnx_enc_utils::*, xlnx_error::*};
-use simple_error::SimpleError;
+use crate::{sys::*, xlnx_enc_utils::*, xlnx_error::*, XrmContext};
 
 pub struct XlnxEncoder<'a> {
     enc_session: *mut XmaEncoderSession,
     pub out_buffer: *mut XmaDataBuffer,
     pub flush_frame_sent: bool,
-    encoder_ctx_lifetime: PhantomData<XlnxEncoderXrmCtx<'a>>,
+    xlnx_enc_ctx: ManuallyDrop<XlnxEncoderXrmCtx<'a>>,
 }
 
 impl<'a> XlnxEncoder<'a> {
-    pub fn new(xma_enc_props: &mut XmaEncoderProperties, xlnx_enc_ctx: &mut XlnxEncoderXrmCtx<'a>) -> Result<Self, SimpleError> {
-        let enc_session = xlnx_create_enc_session(xma_enc_props, xlnx_enc_ctx)?;
+    pub fn new(
+        xrm_ctx: &'a XrmContext,
+        xma_enc_props: &mut XmaEncoderProperties,
+        device_id: Option<u32>,
+        reserve_id: Option<u64>,
+        enc_load: i32,
+    ) -> Result<Self, Error> {
+        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(xrm_ctx, device_id, reserve_id, enc_load);
+        xlnx_reserve_enc_resource(&mut xlnx_enc_ctx)?;
+        let enc_session = xlnx_create_enc_session(xma_enc_props, &mut xlnx_enc_ctx)?;
 
         let buffer_size = xma_enc_props.height * xma_enc_props.width * xma_enc_props.bits_per_pixel;
         let out_buffer = unsafe { xma_data_buffer_alloc(buffer_size as usize, false) };
@@ -21,7 +28,7 @@ impl<'a> XlnxEncoder<'a> {
             enc_session,
             out_buffer,
             flush_frame_sent: false,
-            encoder_ctx_lifetime: PhantomData,
+            xlnx_enc_ctx: ManuallyDrop::new(xlnx_enc_ctx),
         })
     }
 
@@ -89,13 +96,14 @@ impl<'a> Drop for XlnxEncoder<'a> {
             if !self.out_buffer.is_null() {
                 xma_data_buffer_free(self.out_buffer);
             }
+            ManuallyDrop::drop(&mut self.xlnx_enc_ctx);
         }
     }
 }
 
 #[cfg(test)]
 mod encoder_tests {
-    use crate::{tests::*, xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*, xrm_context::*};
+    use crate::{tests::*, xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*};
 
     fn encode_raw(codec_id: i32, profile: i32, level: i32) -> i32 {
         let mut frame_props = XmaFrameProperties {
@@ -158,12 +166,9 @@ mod encoder_tests {
 
         let xrm_ctx = XrmContext::new();
         let enc_load = xlnx_calc_enc_load(&xrm_ctx, xma_enc_props.as_mut()).unwrap();
-        let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(&xrm_ctx, None, None, enc_load);
-
-        xlnx_reserve_enc_resource(&mut xlnx_enc_ctx).unwrap();
 
         // create xlnx encoder
-        let mut encoder = XlnxEncoder::new(xma_enc_props.as_mut(), &mut xlnx_enc_ctx).unwrap();
+        let mut encoder = XlnxEncoder::new(&xrm_ctx, xma_enc_props.as_mut(), None, None, enc_load).unwrap();
 
         let mut processed_frame_count = 0;
 

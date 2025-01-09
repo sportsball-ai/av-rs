@@ -1,9 +1,10 @@
-use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 
 use crate::sys::*;
 use crate::xlnx_dec_utils::*;
+use crate::Error;
+use crate::XrmContext;
 use crate::{XlnxError, XlnxErrorType};
-use simple_error::{bail, SimpleError};
 
 pub struct XlnxDecoder<'a> {
     pub dec_session: *mut XmaDecoderSession,
@@ -11,17 +12,27 @@ pub struct XlnxDecoder<'a> {
     in_buf: XmaDataBuffer,
     pub out_frame: *mut XmaFrame,
     pub flush_sent: bool,
-    decoder_ctx_lifetime: PhantomData<XlnxDecoderXrmCtx<'a>>,
+    xlnx_dec_ctx: ManuallyDrop<XlnxDecoderXrmCtx<'a>>,
 }
 
 impl<'a> XlnxDecoder<'a> {
-    pub fn new(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'a>) -> Result<Self, SimpleError> {
-        let dec_session = xlnx_create_dec_session(xma_dec_props, xlnx_dec_ctx)?;
+    pub fn new(
+        xrm_ctx: &'a XrmContext,
+        xma_dec_props: &mut XmaDecoderProperties,
+        device_id: Option<u32>,
+        reserve_id: Option<u64>,
+        dec_load: i32,
+    ) -> Result<Self, Error> {
+        let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(xrm_ctx, device_id, reserve_id, dec_load);
+        xlnx_reserve_dec_resource(&mut xlnx_dec_ctx)?;
+        let dec_session = xlnx_create_dec_session(xma_dec_props, &mut xlnx_dec_ctx)?;
 
         let mut frame_props: XmaFrameProperties = Default::default();
         let ret = unsafe { xma_dec_session_get_properties(dec_session, &mut frame_props) };
         if ret != XMA_SUCCESS as i32 {
-            bail!("unable to get frame properties from decoder session")
+            return Err(Error::XlnxError {
+                source: XlnxError::new(ret, Some("unable to get frame properties from decoder session".to_string())),
+            });
         }
 
         let in_buf: XmaDataBuffer = Default::default();
@@ -44,7 +55,7 @@ impl<'a> XlnxDecoder<'a> {
             in_buf,
             out_frame,
             flush_sent: false,
-            decoder_ctx_lifetime: PhantomData,
+            xlnx_dec_ctx: ManuallyDrop::new(xlnx_dec_ctx),
         })
     }
 
@@ -139,13 +150,14 @@ impl<'a> Drop for XlnxDecoder<'a> {
             if !self.out_frame.is_null() {
                 xma_frame_free(self.out_frame);
             }
+            ManuallyDrop::drop(&mut self.xlnx_dec_ctx);
         }
     }
 }
 
 #[cfg(test)]
 mod decoder_tests {
-    use crate::{tests::*, xlnx_dec_props::*, xlnx_dec_utils::*, xlnx_decoder::*, xlnx_error::*, xrm_context::*};
+    use crate::{tests::*, xlnx_dec_props::*, xlnx_dec_utils::*, xlnx_decoder::*, xlnx_error::*};
     use std::{fs::File, io::Read};
 
     const H265_TEST_FILE_PATH: &str = "src/testdata/hvc1.1.6.L150.90.h265";
@@ -177,12 +189,9 @@ mod decoder_tests {
 
         let xrm_ctx = XrmContext::new();
         let dec_load = xlnx_calc_dec_load(&xrm_ctx, xma_dec_props.as_mut()).unwrap();
-        let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(&xrm_ctx, None, None, dec_load);
-
-        xlnx_reserve_dec_resource(&mut xlnx_dec_ctx).unwrap();
 
         // create Xlnx decoder
-        let mut decoder = XlnxDecoder::new(xma_dec_props.as_mut(), &mut xlnx_dec_ctx).unwrap();
+        let mut decoder = XlnxDecoder::new(&xrm_ctx, xma_dec_props.as_mut(), None, None, dec_load).unwrap();
         let mut frames_decoded = 0;
         let mut packets_sent = 0;
 
@@ -315,11 +324,8 @@ mod decoder_tests {
 
             let xrm_ctx = XrmContext::new();
             let dec_load = xlnx_calc_dec_load(&xrm_ctx, xma_dec_props.as_mut()).unwrap();
-            let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(&xrm_ctx, None, None, dec_load);
 
-            xlnx_reserve_dec_resource(&mut xlnx_dec_ctx).unwrap();
-
-            let mut decoder = XlnxDecoder::new(xma_dec_props.as_mut(), &mut xlnx_dec_ctx).unwrap();
+            let mut decoder = XlnxDecoder::new(&xrm_ctx, xma_dec_props.as_mut(), None, None, dec_load).unwrap();
 
             let mut data = vec![0u8; packet_len];
             if packet_len <= 1280 * 720 {
