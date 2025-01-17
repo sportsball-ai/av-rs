@@ -68,6 +68,10 @@ impl<'a> XlnxScaler<'a> {
         self.flush_sent
     }
 
+    pub fn out_frame_list(&self) -> &[*mut XmaFrame] {
+        &self.out_frame_list
+    }
+
     /// Sends frame to xilinx scaler using xma plugin
     ///
     /// @in_frame: decoded frame input to be scaled.

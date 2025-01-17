@@ -13,7 +13,7 @@ pub struct XlnxDecBuffer<'a> {
     pub allocated: usize,
 }
 
-pub struct XlnxDecoderXrmCtx<'a> {
+pub(crate) struct XlnxDecoderXrmCtx<'a> {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
     pub dec_load: i32,
@@ -37,7 +37,7 @@ impl<'a> XlnxDecoderXrmCtx<'a> {
 
 /// Calculates the decoder load uing the xrmU30Dec plugin.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub(crate) fn xlnx_calc_dec_load(xrm_ctx: &XrmContext, xma_dec_props: *mut XmaDecoderProperties) -> Result<i32, Error> {
+pub fn xlnx_calc_dec_load(xrm_ctx: &XrmContext, xma_dec_props: *mut XmaDecoderProperties) -> Result<i32, Error> {
     let func_id = 0;
     let mut plugin_param: xrmPluginFuncParam = Default::default();
     unsafe {

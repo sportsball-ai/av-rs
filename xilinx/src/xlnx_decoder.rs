@@ -80,7 +80,7 @@ impl<'a> XlnxDecoder<'a> {
             unsafe {
                 self.in_buf.data.buffer = buf.as_mut_ptr() as *mut _ as *mut std::ffi::c_void;
                 self.in_buf.alloc_size = buf.len() as i32;
-                self.in_buf.pts = pts;
+                self.in_buf.pts = pts as i32;
                 self.in_buf.is_eof = 0;
 
                 ret = xma_dec_session_send_data(self.dec_session, &mut self.in_buf, &mut data_used);
