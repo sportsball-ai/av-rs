@@ -1,7 +1,6 @@
-use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 
-use crate::{sys::*, xlnx_error::*, xlnx_scal_utils::*};
-use simple_error::SimpleError;
+use crate::{sys::*, xlnx_error::*, xlnx_scal_utils::*, XrmContext};
 
 pub const SCAL_MAX_ABR_CHANNELS: usize = 8;
 pub const SCAL_MAX_SESSIONS: usize = 2;
@@ -9,15 +8,23 @@ pub const SCAL_RATE_STRING_LEN: usize = 8;
 
 pub struct XlnxScaler<'a> {
     scal_session: *mut XmaScalerSession,
-    pub out_frame_list: Vec<*mut XmaFrame>,
-    pub xrm_scalres_count: i32,
-    pub flush_sent: bool,
-    scaler_ctx_lifetime: PhantomData<XlnxScalerXrmCtx<'a>>,
+    out_frame_list: Vec<*mut XmaFrame>,
+    xrm_scalres_count: i32,
+    flush_sent: bool,
+    xlnx_scaler_ctx: ManuallyDrop<XlnxScalerXrmCtx<'a>>,
 }
 
 impl<'a> XlnxScaler<'a> {
-    pub fn new(xma_scal_props: &mut XmaScalerProperties, xlnx_scal_ctx: &mut XlnxScalerXrmCtx<'a>) -> Result<Self, SimpleError> {
-        let scal_session = xlnx_create_scal_session(xma_scal_props, xlnx_scal_ctx)?;
+    pub fn new(
+        xrm_ctx: &'a XrmContext,
+        xma_scal_props: &mut XmaScalerProperties,
+        device_id: Option<u32>,
+        reserve_id: Option<u64>,
+        scal_load: i32,
+    ) -> Result<Self, Error> {
+        let mut xlnx_scaler_ctx = XlnxScalerXrmCtx::new(xrm_ctx, device_id, reserve_id, scal_load, xma_scal_props.num_outputs);
+        xlnx_reserve_scal_resource(&mut xlnx_scaler_ctx)?;
+        let scal_session = xlnx_create_scal_session(xma_scal_props, &mut xlnx_scaler_ctx)?;
 
         let mut out_frame_list = Vec::new();
 
@@ -49,8 +56,20 @@ impl<'a> XlnxScaler<'a> {
             out_frame_list,
             xrm_scalres_count: xma_scal_props.num_outputs,
             flush_sent: false,
-            scaler_ctx_lifetime: PhantomData,
+            xlnx_scaler_ctx: ManuallyDrop::new(xlnx_scaler_ctx),
         })
+    }
+
+    pub fn num_outputs(&self) -> i32 {
+        self.xrm_scalres_count
+    }
+
+    pub fn flush_sent(&self) -> bool {
+        self.flush_sent
+    }
+
+    pub fn out_frame_list(&self) -> &[*mut XmaFrame] {
+        &self.out_frame_list
     }
 
     /// Sends frame to xilinx scaler using xma plugin
@@ -109,13 +128,14 @@ impl<'a> Drop for XlnxScaler<'a> {
                     xma_frame_free(f);
                 }
             }
+            ManuallyDrop::drop(&mut self.xlnx_scaler_ctx);
         }
     }
 }
 
 #[cfg(test)]
 mod scaler_tests {
-    use crate::{tests::*, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*, xrm_context::*};
+    use crate::{tests::*, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*};
 
     #[test]
     fn test_abr_scale() {
@@ -148,12 +168,9 @@ mod scaler_tests {
 
         let xrm_ctx = XrmContext::new();
         let scal_load = xlnx_calc_scal_load(&xrm_ctx, xma_scal_props.as_mut()).unwrap();
-        let mut xlnx_scal_ctx = XlnxScalerXrmCtx::new(&xrm_ctx, None, None, scal_load, 3);
-
-        xlnx_reserve_scal_resource(&mut xlnx_scal_ctx).unwrap();
 
         // create xlnx scaler
-        let mut scaler = XlnxScaler::new(xma_scal_props.as_mut(), &mut xlnx_scal_ctx).unwrap();
+        let mut scaler = XlnxScaler::new(&xrm_ctx, xma_scal_props.as_mut(), None, None, scal_load).unwrap();
 
         let mut processed_frame_count = 0;
 
@@ -163,7 +180,7 @@ mod scaler_tests {
                     // successfully scaled frame.
                     processed_frame_count += 1;
                     // clear xvbm buffers for each return frame
-                    for i in 0..xlnx_scal_ctx.num_outputs as usize {
+                    for i in 0..scaler.num_outputs() as usize {
                         unsafe {
                             let handle: XvbmBufferHandle = (*scaler.out_frame_list[i]).data[0].buffer;
                             xvbm_buffer_pool_entry_free(handle);
@@ -197,7 +214,7 @@ mod scaler_tests {
                         // successfully scaled frame.
                         processed_frame_count += 1;
                         // clear xvbm buffers for each return frame
-                        for i in 0..xlnx_scal_ctx.num_outputs as usize {
+                        for i in 0..scaler.num_outputs() as usize {
                             let handle: XvbmBufferHandle = (*scaler.out_frame_list[i]).data[0].buffer;
                             xvbm_buffer_pool_entry_free(handle);
                         }

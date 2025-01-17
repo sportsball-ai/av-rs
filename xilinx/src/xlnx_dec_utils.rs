@@ -1,9 +1,8 @@
 use std::{ffi::CString, os::raw::c_char, str::from_utf8};
 
 use libloading::{Library, Symbol};
-use simple_error::{bail, SimpleError};
 
-use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask, XrmContext};
+use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask, Error, XlnxError, XrmContext, XrmPlugin};
 
 const DEC_PLUGIN_NAME: &[u8] = b"xrmU30DecPlugin\0";
 
@@ -14,7 +13,7 @@ pub struct XlnxDecBuffer<'a> {
     pub allocated: usize,
 }
 
-pub struct XlnxDecoderXrmCtx<'a> {
+pub(crate) struct XlnxDecoderXrmCtx<'a> {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
     pub dec_load: i32,
@@ -38,30 +37,21 @@ impl<'a> XlnxDecoderXrmCtx<'a> {
 
 /// Calculates the decoder load uing the xrmU30Dec plugin.
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
-pub fn xlnx_calc_dec_load(xrm_ctx: &XrmContext, xma_dec_props: *mut XmaDecoderProperties) -> Result<i32, SimpleError> {
+pub fn xlnx_calc_dec_load(xrm_ctx: &XrmContext, xma_dec_props: *mut XmaDecoderProperties) -> Result<i32, Error> {
     let func_id = 0;
     let mut plugin_param: xrmPluginFuncParam = Default::default();
     unsafe {
-        match Library::new("/opt/xilinx/xrm/plugin/libxmaPropsTOjson.so") {
-            Ok(lib) => {
-                match lib
-                    .get::<Symbol<extern "C" fn(props: *mut XmaDecoderProperties, function: *const c_char, json_params: *mut c_char)>>(b"convertXmaPropsToJson")
-                {
-                    Ok(convert_xma_props_to_json) => {
-                        let function = CString::new("DECODER").unwrap();
-                        convert_xma_props_to_json(xma_dec_props, function.as_ptr(), plugin_param.input.as_mut_ptr());
-                    }
-                    Err(e) => bail!("{}", e),
-                }
-            }
-            Err(e) => bail!("{}", e),
-        };
+        let lib = Library::new("/opt/xilinx/xrm/plugin/libxmaPropsTOjson.so")?;
+        let convert_xma_props_to_json =
+            lib.get::<Symbol<extern "C" fn(props: *mut XmaDecoderProperties, function: *const c_char, json_params: *mut c_char)>>(b"convertXmaPropsToJson")?;
+        let function = CString::new("DECODER").unwrap();
+        convert_xma_props_to_json(xma_dec_props, function.as_ptr(), plugin_param.input.as_mut_ptr());
     }
 
     unsafe {
         let ret = xrmExecPluginFunc(xrm_ctx.raw(), DEC_PLUGIN_NAME.as_ptr() as *mut i8, func_id, &mut plugin_param);
         if ret != XRM_SUCCESS as i32 {
-            bail!("XRM decoder plugin failed to calculate decoder load. error: {}", ret);
+            return Err(XlnxError::new(ret, Some("XRM decoder plugin failed to calculate decoder load.".to_string())).into());
         }
     }
     // parse the load from the output buffer of plugin param.
@@ -74,13 +64,13 @@ pub fn xlnx_calc_dec_load(xrm_ctx: &XrmContext, xma_dec_props: *mut XmaDecoderPr
     let load = dec_plugin_output.parse::<i32>().unwrap_or(-1);
 
     if load == -1 {
-        bail!("unable to parse load calculation from XRM decoder plugin");
+        return Err(Error::MalformedPluginResponse { plugin: XrmPlugin::Decoder });
     }
 
     Ok(load)
 }
 
-fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i32, device_id: Option<u32>) -> Result<(), SimpleError> {
+fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i32, device_id: Option<u32>) -> Result<(), Error> {
     cu_pool_prop.cuListNum = 1;
 
     let mut device_info = 0;
@@ -107,20 +97,31 @@ fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i3
     Ok(())
 }
 
-pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'_>) -> Result<Box<xrmCuPoolResInforV2>, SimpleError> {
+pub(crate) fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'_>) -> Result<Box<xrmCuPoolResInforV2>, Error> {
     let mut cu_pool_prop: Box<xrmCuPoolPropertyV2> = Box::new(Default::default());
     let mut cu_pool_res_infor: Box<xrmCuPoolResInforV2> = Box::new(Default::default());
     xlnx_fill_dec_pool_props(&mut cu_pool_prop, xlnx_dec_ctx.dec_load, xlnx_dec_ctx.device_id)?;
 
     unsafe {
+        // If this context was used for an allocation previously, release it now.
+        // It's expected that this is dead code, but if it does somehow get run
+        // it would prevent a leak of the CU pool.
+        if let Some(xrm_reserve_id) = xlnx_dec_ctx.xrm_reserve_id {
+            if xrmCuPoolRelinquishV2(xlnx_dec_ctx.xrm_ctx.raw(), xrm_reserve_id) {
+                xlnx_dec_ctx.xrm_reserve_id = None;
+            } else {
+                return Err(Error::FailedToReleaseCuPool { plugin: XrmPlugin::Decoder });
+            }
+        }
+
         let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_dec_ctx.xrm_ctx.raw(), cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
-            bail!("no decoder resources available for allocation")
+            return Err(Error::ReserveCuPoolError { plugin: XrmPlugin::Decoder });
         }
 
         let xrm_reserve_id = xrmCuPoolReserveV2(xlnx_dec_ctx.xrm_ctx.raw(), cu_pool_prop.as_mut(), cu_pool_res_infor.as_mut());
         if xrm_reserve_id == 0 {
-            bail!("failed to reserve decode cu pool")
+            return Err(Error::ReserveCuPoolError { plugin: XrmPlugin::Decoder });
         }
         xlnx_dec_ctx.xrm_reserve_id = Some(xrm_reserve_id);
     }
@@ -129,7 +130,7 @@ pub fn xlnx_reserve_dec_resource(xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'_>) -> Re
 }
 
 /// Allocates decoder CU
-fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'_>) -> Result<(), SimpleError> {
+fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'_>) -> Result<(), Error> {
     // Allocate xrm decoder
     let mut decode_cu_list_prop = Box::new(xrmCuListPropertyV2 {
         cuNum: 2,
@@ -165,16 +166,30 @@ fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mu
             decode_cu_list_prop.cuProps[1].poolId = reserve_id;
         }
         (None, None) => {
-            bail!("failed to allocate decode cu list: no device id or reserve id provided");
+            return Err(Error::ReserveCuPoolError { plugin: XrmPlugin::Scaler });
         }
     }
 
-    if unsafe { xrmCuListAllocV2(xlnx_dec_ctx.xrm_ctx.raw(), decode_cu_list_prop.as_mut(), xlnx_dec_ctx.cu_list_res.as_mut()) } != XRM_SUCCESS as _ {
-        bail!(
-            "failed to allocate decode cu list from reserve id {:?} and device id {:?}",
-            xlnx_dec_ctx.xrm_reserve_id,
-            xlnx_dec_ctx.device_id
-        );
+    // If this context was used for a reservation previously, release it now.
+    // This is almost certainly dead code but if it does somehow get run
+    // it would prevent a leak of CU resources.
+    if xlnx_dec_ctx.decode_res_in_use {
+        if unsafe { xrmCuListReleaseV2(xlnx_dec_ctx.xrm_ctx.raw(), xlnx_dec_ctx.cu_list_res.as_mut()) } {
+            xlnx_dec_ctx.decode_res_in_use = false;
+        } else {
+            return Err(Error::FailedToReleaseCu { plugin: XrmPlugin::Decoder });
+        }
+    }
+
+    // Now make the new reservation
+    let ret = unsafe { xrmCuListAllocV2(xlnx_dec_ctx.xrm_ctx.raw(), decode_cu_list_prop.as_mut(), xlnx_dec_ctx.cu_list_res.as_mut()) };
+    if ret != XRM_SUCCESS as _ {
+        return Err(Error::ReserveCuError {
+            plugin: XrmPlugin::Decoder,
+            reserve_id: xlnx_dec_ctx.xrm_reserve_id,
+            device_id: xlnx_dec_ctx.device_id,
+            xlnx_error_code: ret,
+        });
     }
 
     xlnx_dec_ctx.decode_res_in_use = true;
@@ -195,12 +210,12 @@ fn xlnx_dec_cu_alloc(xma_dec_props: &mut XmaDecoderProperties, xlnx_dec_ctx: &mu
 pub(crate) fn xlnx_create_dec_session(
     xma_dec_props: &mut XmaDecoderProperties,
     xlnx_dec_ctx: &mut XlnxDecoderXrmCtx<'_>,
-) -> Result<*mut XmaDecoderSession, SimpleError> {
+) -> Result<*mut XmaDecoderSession, Error> {
     xlnx_dec_cu_alloc(xma_dec_props, xlnx_dec_ctx)?;
 
     let dec_session = unsafe { xma_dec_session_create(xma_dec_props) };
     if dec_session.is_null() {
-        bail!("failed to create decoder session. Session is null")
+        return Err(Error::SessionCreateFailed { plugin: XrmPlugin::Decoder });
     }
 
     Ok(dec_session)
@@ -212,11 +227,11 @@ impl<'a> Drop for XlnxDecoderXrmCtx<'a> {
             if self.xrm_ctx.raw().is_null() {
                 return;
             }
-            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
-                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx.raw(), xrm_reserve_id);
-            }
             if self.decode_res_in_use {
                 let _ = xrmCuListReleaseV2(self.xrm_ctx.raw(), self.cu_list_res.as_mut());
+            }
+            if let Some(xrm_reserve_id) = self.xrm_reserve_id {
+                let _ = xrmCuPoolRelinquishV2(self.xrm_ctx.raw(), xrm_reserve_id);
             }
         }
     }

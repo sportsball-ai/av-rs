@@ -47,7 +47,7 @@ const XCLBIN_FILENAME: &[u8] = b"/opt/xilinx/xcdr/xclbins/transcode.xclbin\0";
 
 /// initalizes all devices on system with the default xclbin_name
 ///
-pub fn xlnx_init_all_devices() -> Result<i32, simple_error::SimpleError> {
+pub fn xlnx_init_all_devices() -> Result<i32, Error> {
     let mut xclbin_params = Vec::new();
     let device_count = unsafe { xclProbe() } as i32;
     for i in 0..device_count {
@@ -59,16 +59,16 @@ pub fn xlnx_init_all_devices() -> Result<i32, simple_error::SimpleError> {
 
     let ret = unsafe { xma_initialize(xclbin_params.as_mut_ptr(), device_count) };
     if ret as u32 != XMA_SUCCESS {
-        simple_error::bail!("xma initalization failed: {}", ret)
+        return Err(XlnxError::new(ret, "xma initialization failed".to_string().into()).into());
     }
 
     Ok(device_count)
 }
 
-pub fn xlnx_init_device_by_id(device_id: i32) -> Result<(), simple_error::SimpleError> {
+pub fn xlnx_init_device_by_id(device_id: i32) -> Result<(), Error> {
     let device_count = unsafe { xclProbe() } as i32;
     if device_id < 0 || device_id >= device_count {
-        simple_error::bail!("no device found with supplied device Id: {}", device_id);
+        return Err(Error::DeviceNotFound { device_id });
     }
 
     let mut xclbin_param = XmaXclbinParameter {
@@ -78,7 +78,7 @@ pub fn xlnx_init_device_by_id(device_id: i32) -> Result<(), simple_error::Simple
 
     let ret = unsafe { xma_initialize(&mut xclbin_param, 1) };
     if ret as u32 != XMA_SUCCESS {
-        simple_error::bail!("xma initalization failed: {}", ret)
+        return Err(XlnxError::new(ret, "xma initialization failed".to_string().into()).into());
     }
     Ok(())
 }
@@ -88,10 +88,13 @@ pub(crate) fn xrm_precision_1000000_bitmask(val: i32) -> i32 {
 }
 
 // performs a strcpy from string literal to existing output array. ensures null termination.
-pub(crate) fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), simple_error::SimpleError> {
+pub(crate) fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), Error> {
     //check string length is smaller than buffer size. requires one byte for null termination
     if in_str.len() > buf.len() - 1 {
-        simple_error::bail!("input str exceeds output buffer size")
+        return Err(Error::InputStrExceedsOutputBufferSize {
+            out_buf_size: buf.len(),
+            input_str: in_str.to_string(),
+        });
     }
 
     let src: Vec<i8> = in_str.as_bytes().iter().map(|c| *c as i8).collect();

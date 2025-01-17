@@ -1,5 +1,4 @@
-use crate::{strcpy_to_arr_i8, sys::*, xlnx_dec_utils::*, xlnx_enc_utils::*, xlnx_scal_utils::*, xrm_precision_1000000_bitmask, XrmContext};
-use simple_error::{bail, SimpleError};
+use crate::{strcpy_to_arr_i8, sys::*, xlnx_dec_utils::*, xlnx_enc_utils::*, xlnx_scal_utils::*, xrm_precision_1000000_bitmask, Error, XrmContext, XrmPlugin};
 
 /// This struct is used to hold the load information for the transcode
 /// cu pool.  The load information is used for reservation and allocation
@@ -41,7 +40,7 @@ pub fn xlnx_calc_transcode_load(
     xma_scal_props: &mut XmaScalerProperties,
     xma_enc_props_list: Vec<&mut XmaEncoderProperties>,
     transcode_cu_pool_prop: &mut xrmCuPoolPropertyV2,
-) -> Result<(), SimpleError> {
+) -> Result<(), Error> {
     xlnx_transcode_xrm_ctx.transcode_load.dec_load = xlnx_calc_dec_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_dec_props)?;
     xlnx_transcode_xrm_ctx.transcode_load.scal_load = xlnx_calc_scal_load(xlnx_transcode_xrm_ctx.xrm_ctx, xma_scal_props)?;
     for xma_enc_props in xma_enc_props_list {
@@ -57,7 +56,7 @@ fn xlnx_fill_transcode_pool_props(
     transcode_cu_pool_prop: &mut xrmCuPoolPropertyV2,
     transcode_load: &XlnxTranscodeLoad,
     device_id: Option<u32>,
-) -> Result<(), SimpleError> {
+) -> Result<(), Error> {
     let mut cu_num = 0;
     transcode_cu_pool_prop.cuListNum = 1;
     let mut device_info = 0;
@@ -119,7 +118,7 @@ pub fn xlnx_reserve_transcode_resource(
     xma_dec_props: &mut XmaDecoderProperties,
     xma_scal_props: &mut XmaScalerProperties,
     xma_enc_props: Vec<&mut XmaEncoderProperties>,
-) -> Result<Box<xrmCuPoolResInforV2>, SimpleError> {
+) -> Result<Box<xrmCuPoolResInforV2>, Error> {
     let mut transcode_cu_pool_prop: Box<xrmCuPoolPropertyV2> = Box::new(Default::default());
     let mut cu_pool_res_infor: Box<xrmCuPoolResInforV2> = Box::new(Default::default());
     xlnx_calc_transcode_load(
@@ -132,7 +131,7 @@ pub fn xlnx_reserve_transcode_resource(
     unsafe {
         let num_cu_pool = xrmCheckCuPoolAvailableNumV2(xlnx_transcode_xrm_ctx.xrm_ctx.raw(), transcode_cu_pool_prop.as_mut());
         if num_cu_pool <= 0 {
-            bail!("no xilinx hardware resources avaliable for allocation")
+            return Err(Error::ReserveCuPoolError { plugin: XrmPlugin::Transcoder });
         }
         let xrm_reserve_id = xrmCuPoolReserveV2(
             xlnx_transcode_xrm_ctx.xrm_ctx.raw(),
@@ -140,7 +139,7 @@ pub fn xlnx_reserve_transcode_resource(
             cu_pool_res_infor.as_mut(),
         );
         if xrm_reserve_id == 0 {
-            bail!("failed to reserve transcode cu pool")
+            return Err(Error::ReserveCuPoolError { plugin: XrmPlugin::Transcoder });
         }
         xlnx_transcode_xrm_ctx.xrm_reserve_id = Some(xrm_reserve_id);
     }
