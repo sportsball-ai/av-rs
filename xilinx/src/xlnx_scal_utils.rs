@@ -63,7 +63,7 @@ pub fn xlnx_calc_scal_load(xrm_ctx: &XrmContext, xma_scal_props: *mut XmaScalerP
     Ok(load)
 }
 
-fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, scal_load: i32, device_id: Option<u32>) -> Result<(), Error> {
+pub(crate) fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, scal_load: i32, device_id: Option<u32>) -> Result<(), Error> {
     cu_pool_prop.cuListNum = 1;
     xlnx_fill_scal_cu_props(&mut cu_pool_prop.cuListProp.cuProps[0], scal_load, device_id)?;
     cu_pool_prop.cuListProp.cuNum = 1;
@@ -71,7 +71,7 @@ fn xlnx_fill_scal_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, scal_load: 
     Ok(())
 }
 
-pub(crate) fn xlnx_fill_scal_cu_props(cu_prop: &mut xrmCuPropertyV2, scal_load: i32, device_id: Option<u32>) -> Result<(), Error> {
+fn xlnx_fill_scal_cu_props(cu_prop: &mut xrmCuPropertyV2, scal_load: i32, device_id: Option<u32>) -> Result<(), Error> {
     let mut device_info = 0;
 
     if let Some(device_id) = device_id {
