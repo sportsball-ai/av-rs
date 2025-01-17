@@ -8,9 +8,9 @@ pub const SCAL_RATE_STRING_LEN: usize = 8;
 
 pub struct XlnxScaler<'a> {
     scal_session: *mut XmaScalerSession,
-    out_frame_list: Vec<*mut XmaFrame>,
+    pub out_frame_list: Vec<*mut XmaFrame>,
     xrm_scalres_count: i32,
-    flush_sent: bool,
+    pub flush_sent: bool,
     xlnx_scaler_ctx: ManuallyDrop<XlnxScalerXrmCtx<'a>>,
 }
 
