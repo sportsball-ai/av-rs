@@ -8,9 +8,8 @@ pub const SCAL_RATE_STRING_LEN: usize = 8;
 
 pub struct XlnxScaler<'a> {
     scal_session: *mut XmaScalerSession,
-    pub out_frame_list: Vec<*mut XmaFrame>,
+    out_frame_list: Vec<*mut XmaFrame>,
     xrm_scalres_count: i32,
-    pub flush_sent: bool,
     xlnx_scaler_ctx: ManuallyDrop<XlnxScalerXrmCtx<'a>>,
 }
 
@@ -55,17 +54,12 @@ impl<'a> XlnxScaler<'a> {
             scal_session,
             out_frame_list,
             xrm_scalres_count: xma_scal_props.num_outputs,
-            flush_sent: false,
             xlnx_scaler_ctx: ManuallyDrop::new(xlnx_scaler_ctx),
         })
     }
 
     pub fn num_outputs(&self) -> i32 {
         self.xrm_scalres_count
-    }
-
-    pub fn flush_sent(&self) -> bool {
-        self.flush_sent
     }
 
     pub fn out_frame_list(&self) -> &[*mut XmaFrame] {
