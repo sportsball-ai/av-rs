@@ -16,13 +16,18 @@ pub struct XlnxDecoder<'a> {
 }
 
 impl<'a> XlnxDecoder<'a> {
+    /// Creates a session with the given properties and reserves the resources for it.
+    ///
+    /// # Params
+    /// - device_id: If specified then a particular device will be used. Otherwise, any device can be used.
+    /// - reserve_id: If specified then the given pool id will be used. Otherwise, uses the default pool.
     pub fn new(
         xrm_ctx: &'a XrmContext,
         xma_dec_props: &mut XmaDecoderProperties,
         device_id: Option<u32>,
         reserve_id: Option<u64>,
-        dec_load: i32,
     ) -> Result<Self, Error> {
+        let dec_load = xlnx_calc_dec_load(xrm_ctx, xma_dec_props)?;
         let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(xrm_ctx, device_id, reserve_id, dec_load);
         xlnx_reserve_dec_resource(&mut xlnx_dec_ctx)?;
         let dec_session = xlnx_create_dec_session(xma_dec_props, &mut xlnx_dec_ctx)?;
@@ -157,7 +162,7 @@ impl<'a> Drop for XlnxDecoder<'a> {
 
 #[cfg(test)]
 mod decoder_tests {
-    use crate::{tests::*, xlnx_dec_props::*, xlnx_dec_utils::*, xlnx_decoder::*, xlnx_error::*};
+    use crate::{tests::*, xlnx_dec_props::*, xlnx_decoder::*, xlnx_error::*};
     use std::{fs::File, io::Read};
 
     const H265_TEST_FILE_PATH: &str = "src/testdata/hvc1.1.6.L150.90.h265";
@@ -188,10 +193,8 @@ mod decoder_tests {
         let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
 
         let xrm_ctx = XrmContext::new();
-        let dec_load = xlnx_calc_dec_load(&xrm_ctx, xma_dec_props.as_mut()).unwrap();
-
         // create Xlnx decoder
-        let mut decoder = XlnxDecoder::new(&xrm_ctx, xma_dec_props.as_mut(), None, None, dec_load).unwrap();
+        let mut decoder = XlnxDecoder::new(&xrm_ctx, xma_dec_props.as_mut(), None, None).unwrap();
         let mut frames_decoded = 0;
         let mut packets_sent = 0;
 
@@ -323,9 +326,8 @@ mod decoder_tests {
             let mut xma_dec_props = XlnxXmaDecoderProperties::from(dec_props);
 
             let xrm_ctx = XrmContext::new();
-            let dec_load = xlnx_calc_dec_load(&xrm_ctx, xma_dec_props.as_mut()).unwrap();
 
-            let mut decoder = XlnxDecoder::new(&xrm_ctx, xma_dec_props.as_mut(), None, None, dec_load).unwrap();
+            let mut decoder = XlnxDecoder::new(&xrm_ctx, xma_dec_props.as_mut(), None, None).unwrap();
 
             let mut data = vec![0u8; packet_len];
             if packet_len <= 1280 * 720 {
