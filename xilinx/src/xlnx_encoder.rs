@@ -10,13 +10,18 @@ pub struct XlnxEncoder<'a> {
 }
 
 impl<'a> XlnxEncoder<'a> {
+    /// Creates a session with the given properties and reserves the resources for it.
+    ///
+    /// # Params
+    /// - device_id: If specified then a particular device will be used. Otherwise, any device can be used.
+    /// - reserve_id: If specified then the given pool id will be used. Otherwise, uses the default pool.
     pub fn new(
         xrm_ctx: &'a XrmContext,
         xma_enc_props: &mut XmaEncoderProperties,
         device_id: Option<u32>,
         reserve_id: Option<u64>,
-        enc_load: i32,
     ) -> Result<Self, Error> {
+        let enc_load = xlnx_calc_enc_load(xrm_ctx, xma_enc_props)?;
         let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(xrm_ctx, device_id, reserve_id, enc_load);
         xlnx_reserve_enc_resource(&mut xlnx_enc_ctx)?;
         let enc_session = xlnx_create_enc_session(xma_enc_props, &mut xlnx_enc_ctx)?;
@@ -103,7 +108,7 @@ impl<'a> Drop for XlnxEncoder<'a> {
 
 #[cfg(test)]
 mod encoder_tests {
-    use crate::{tests::*, xlnx_enc_props::*, xlnx_enc_utils::*, xlnx_encoder::*};
+    use crate::{tests::*, xlnx_enc_props::*, xlnx_encoder::*};
 
     fn encode_raw(codec_id: i32, profile: i32, level: i32) -> i32 {
         let mut frame_props = XmaFrameProperties {
@@ -165,10 +170,8 @@ mod encoder_tests {
         let mut xma_enc_props = XlnxXmaEncoderProperties::try_from(enc_props).unwrap();
 
         let xrm_ctx = XrmContext::new();
-        let enc_load = xlnx_calc_enc_load(&xrm_ctx, xma_enc_props.as_mut()).unwrap();
-
         // create xlnx encoder
-        let mut encoder = XlnxEncoder::new(&xrm_ctx, xma_enc_props.as_mut(), None, None, enc_load).unwrap();
+        let mut encoder = XlnxEncoder::new(&xrm_ctx, xma_enc_props.as_mut(), None, None).unwrap();
 
         let mut processed_frame_count = 0;
 

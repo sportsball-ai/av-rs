@@ -61,7 +61,7 @@ pub fn xlnx_calc_enc_load(xrm_ctx: &XrmContext, xma_enc_props: *mut XmaEncoderPr
     Ok(load)
 }
 
-fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i32, enc_load: i32, device_id: Option<u32>) -> Result<(), Error> {
+pub(crate) fn xlnx_fill_enc_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, enc_count: i32, enc_load: i32, device_id: Option<u32>) -> Result<(), Error> {
     cu_pool_prop.cuListNum = 1;
     let mut cu_num = 0;
     let mut device_info = 0;

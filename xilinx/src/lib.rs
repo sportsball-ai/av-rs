@@ -106,7 +106,7 @@ pub(crate) fn strcpy_to_arr_i8(buf: &mut [i8], in_str: &str) -> Result<(), Error
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{sys::*, xlnx_init_all_devices};
+    use crate::{sys::*, xlnx_init_all_devices, XrmContext};
     use std::sync::Once;
 
     use std::{fs::File, io::Read};
@@ -181,5 +181,14 @@ pub mod tests {
         }
 
         (frames, y_components, uv_components)
+    }
+
+    #[test]
+    fn test_cu_available() {
+        initialize();
+        let xrm_ctx = XrmContext::new();
+        xrm_ctx.dec_cu_available().unwrap();
+        xrm_ctx.enc_cu_available().unwrap();
+        xrm_ctx.scal_cu_available().unwrap();
     }
 }

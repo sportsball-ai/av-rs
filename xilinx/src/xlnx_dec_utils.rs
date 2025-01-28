@@ -6,13 +6,6 @@ use crate::{strcpy_to_arr_i8, sys::*, xrm_precision_1000000_bitmask, Error, Xlnx
 
 const DEC_PLUGIN_NAME: &[u8] = b"xrmU30DecPlugin\0";
 
-#[derive(Clone, Debug)]
-pub struct XlnxDecBuffer<'a> {
-    pub data: &'a [u8],
-    pub size: usize,
-    pub allocated: usize,
-}
-
 pub(crate) struct XlnxDecoderXrmCtx<'a> {
     pub xrm_reserve_id: Option<u64>,
     pub device_id: Option<u32>,
@@ -70,7 +63,7 @@ pub fn xlnx_calc_dec_load(xrm_ctx: &XrmContext, xma_dec_props: *mut XmaDecoderPr
     Ok(load)
 }
 
-fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i32, device_id: Option<u32>) -> Result<(), Error> {
+pub(crate) fn xlnx_fill_dec_pool_props(cu_pool_prop: &mut xrmCuPoolPropertyV2, dec_load: i32, device_id: Option<u32>) -> Result<(), Error> {
     cu_pool_prop.cuListNum = 1;
 
     let mut device_info = 0;

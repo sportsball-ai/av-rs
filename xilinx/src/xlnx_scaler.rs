@@ -10,18 +10,22 @@ pub struct XlnxScaler<'a> {
     scal_session: *mut XmaScalerSession,
     out_frame_list: Vec<*mut XmaFrame>,
     xrm_scalres_count: i32,
-    flush_sent: bool,
     xlnx_scaler_ctx: ManuallyDrop<XlnxScalerXrmCtx<'a>>,
 }
 
 impl<'a> XlnxScaler<'a> {
+    /// Creates a session with the given properties and reserves the resources for it.
+    ///
+    /// # Params
+    /// - device_id: If specified then a particular device will be used. Otherwise, any device can be used.
+    /// - reserve_id: If specified then the given pool id will be used. Otherwise, uses the default pool.
     pub fn new(
         xrm_ctx: &'a XrmContext,
         xma_scal_props: &mut XmaScalerProperties,
         device_id: Option<u32>,
         reserve_id: Option<u64>,
-        scal_load: i32,
     ) -> Result<Self, Error> {
+        let scal_load = xlnx_calc_scal_load(xrm_ctx, xma_scal_props)?;
         let mut xlnx_scaler_ctx = XlnxScalerXrmCtx::new(xrm_ctx, device_id, reserve_id, scal_load, xma_scal_props.num_outputs);
         xlnx_reserve_scal_resource(&mut xlnx_scaler_ctx)?;
         let scal_session = xlnx_create_scal_session(xma_scal_props, &mut xlnx_scaler_ctx)?;
@@ -55,17 +59,12 @@ impl<'a> XlnxScaler<'a> {
             scal_session,
             out_frame_list,
             xrm_scalres_count: xma_scal_props.num_outputs,
-            flush_sent: false,
             xlnx_scaler_ctx: ManuallyDrop::new(xlnx_scaler_ctx),
         })
     }
 
     pub fn num_outputs(&self) -> i32 {
         self.xrm_scalres_count
-    }
-
-    pub fn flush_sent(&self) -> bool {
-        self.flush_sent
     }
 
     pub fn out_frame_list(&self) -> &[*mut XmaFrame] {
@@ -135,7 +134,7 @@ impl<'a> Drop for XlnxScaler<'a> {
 
 #[cfg(test)]
 mod scaler_tests {
-    use crate::{tests::*, xlnx_scal_props::*, xlnx_scal_utils::*, xlnx_scaler::*};
+    use crate::{tests::*, xlnx_scal_props::*, xlnx_scaler::*};
 
     #[test]
     fn test_abr_scale() {
@@ -167,10 +166,8 @@ mod scaler_tests {
         let mut xma_scal_props = XlnxXmaScalerProperties::from(scal_props);
 
         let xrm_ctx = XrmContext::new();
-        let scal_load = xlnx_calc_scal_load(&xrm_ctx, xma_scal_props.as_mut()).unwrap();
-
         // create xlnx scaler
-        let mut scaler = XlnxScaler::new(&xrm_ctx, xma_scal_props.as_mut(), None, None, scal_load).unwrap();
+        let mut scaler = XlnxScaler::new(&xrm_ctx, xma_scal_props.as_mut(), None, None).unwrap();
 
         let mut processed_frame_count = 0;
 
