@@ -8,8 +8,12 @@ jobs:
     strategy:
       fail-fast: false
     steps:
-    - name: Install git LFS
-      run: sudo apt-get update -y && sudo apt-get install -y git-lfs clang
+    - name: Install CUDA Toolkit keyring
+      run: |
+        wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb &&
+        sudo dpkg -i cuda-keyring_1.1-1_all.deb
+    - name: Install git LFS, clang, and CUDA toolkit
+      run: sudo apt-get update -y && sudo apt-get install -y git-lfs clang cuda-toolkit-12-8
     - uses: actions/checkout@v4
       with:
         lfs: true
