@@ -9,7 +9,7 @@ jobs:
       fail-fast: false
     steps:
     - name: Install git LFS
-      run: sudo apt-get update -y && sudo apt-get install -y git-lfs
+      run: sudo apt-get update -y && sudo apt-get install -y git-lfs clang
     - uses: actions/checkout@v4
       with:
         lfs: true
