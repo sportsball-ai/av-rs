@@ -22,6 +22,7 @@ members = [
     "mpeg2",
     "mpegts-segmenter",
     "mpeg4",
+    "nvidia-video-sdk",
     "qtff",
     "rfc6381",
     "rkmpp",
@@ -35,5 +36,5 @@ members = [
     "xcoder/xcoder-quadra/xcoder-quadra-sys",
     "xilinx",
     "x264",
-    "x264/x264-sys",
+    "x264/x264-sys", "nvidia-video-sdk",
 ]
