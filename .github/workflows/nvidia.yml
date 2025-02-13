@@ -22,6 +22,8 @@ jobs:
       with:
         toolchain: 1.77.2
         components: clippy
+    - name: Setup CUDA toolkit path
+      run: echo "PATH=/usr/local/cuda-12.8/bin:/usr/local/cuda-12.8/include:$PATH" >> $GITHUB_ENV
     - name: Build
       run: cargo build --verbose -p nvidia-video-sdk
     - name: Lint
