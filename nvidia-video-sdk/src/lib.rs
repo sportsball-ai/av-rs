@@ -1,3 +1,10 @@
+#[allow(non_upper_case_globals)]
+#[allow(non_camel_case_types)]
+#[allow(non_snake_case)]
+mod sys {
+    include!(concat!(env!("OUT_DIR"), "/video_sdk_bindings.rs"));
+}
+
 pub fn add(left: usize, right: usize) -> usize {
     left + right
 }
