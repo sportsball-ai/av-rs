@@ -9,11 +9,11 @@ fn main() {
         .header("src/vendored-headers/nvcuvid.h")
         .header("src/vendored-headers/cuviddec.h")
         .header("src/vendored-headers/nvEncodeAPI.h")
-        .allowlist_item("nv*")
-        .allowlist_item("cuda*")
-        .allowlist_item("CU*")
-        .allowlist_item("cuvid*")
-        .rustified_non_exhaustive_enum("*")
+        .allowlist_item("nv.*")
+        .allowlist_item("cuda.*")
+        .allowlist_item("CU.*")
+        .allowlist_item("cuvid.*")
+        .rustified_non_exhaustive_enum(".*")
         .generate()
         .unwrap();
     bindings
