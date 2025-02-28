@@ -182,7 +182,7 @@ impl<'a> CuVideoDecoder<'a> {
                 inner,
                 codec: dci.CodecType,
                 chroma_format: dci.ChromaFormat,
-                height: dci.ulHeight,
+                height: dci.ulTargetHeight,
                 arc: Some(Arc::new(())),
                 ctx,
             })
@@ -207,6 +207,7 @@ impl<'a> CuVideoDecoder<'a> {
             let mut histogram_dptr = 0;
             let mut params = proc_params.to_sys(&mut histogram_dptr);
             from_cuda_error(unsafe { sys::cuvidMapVideoFrame64(self.inner, pic_idx as c_int, &mut dev_ptr, &mut pitch, &mut params) })?;
+            // Formula taken from NVIDIA documentation
             let memory_len = match self.chroma_format {
                 sys::cudaVideoChromaFormat::cudaVideoChromaFormat_444 => pitch as c_ulong * (3 * self.height),
                 _ => pitch as c_ulong * (self.height + (self.height + 1) / 2),
