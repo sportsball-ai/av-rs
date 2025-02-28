@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+tokio = { version = "1.43.0", features = ["sync"] }
 
 [build-dependencies]
 # We're very permissive here with bindgen due to https://github.com/rust-lang/cargo/issues/5237
