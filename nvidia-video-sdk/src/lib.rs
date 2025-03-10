@@ -17,6 +17,8 @@ use tokio::sync::{Mutex, MutexGuard};
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
+#[allow(unused)]
+#[allow(clippy::all)]
 mod sys {
     include!(concat!(env!("OUT_DIR"), "/video_sdk_bindings.rs"));
 }
@@ -229,7 +231,7 @@ impl<'a> CuVideoDecoder<'a> {
     }
 }
 
-impl<'a> Drop for CuVideoDecoder<'a> {
+impl Drop for CuVideoDecoder<'_> {
     fn drop(&mut self) {
         if Arc::into_inner(self.arc.take().expect("Arc never removed prior to drop")).is_some() {
             unsafe { sys::cuvidDestroyDecoder(self.inner) };
@@ -295,9 +297,9 @@ impl CuvidProcParams {
             raw_output_pitch,
             output_stream,
             histogram_dptr,
-            Reserved: unsafe { mem::zeroed() },
-            Reserved1: unsafe { mem::zeroed() },
-            Reserved2: unsafe { mem::zeroed() },
+            Reserved: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+            Reserved1: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+            Reserved2: unsafe { mem::MaybeUninit::zeroed().assume_init() },
         }
     }
 }
@@ -317,7 +319,7 @@ pub struct DecoderMemory<'decoder, 'context> {
     decoder: &'decoder CuVideoDecoder<'context>,
 }
 
-impl<'decoder, 'context> DecoderMemory<'decoder, 'context> {
+impl<'context> DecoderMemory<'_, 'context> {
     /// Copies `byte_count` bytes from the device memory into the host memory.
     /// The host memory and the device memory must be at least as large as `byte_count`.
     /// Leave `byte_count` as `None` to copy the entire `DecoderMemory` block.
@@ -335,18 +337,19 @@ impl<'decoder, 'context> DecoderMemory<'decoder, 'context> {
                 let mut stream = ptr::null_mut();
                 from_cuda_error(unsafe { sys::cuStreamCreate(&mut stream, sys::CUstream_flags::CU_STREAM_NON_BLOCKING as u32) })?;
                 from_cuda_error(unsafe { sys::cuMemcpyDtoHAsync_v2(dst.ptr, self.dev_ptr, byte_count, stream) })?;
-                CuStreamFuture::new(&self.decoder.ctx, stream)
+                CuStreamFuture::new(self.decoder.ctx, stream)
             })?
             .await;
         Ok(())
     }
 
+    #[allow(clippy::len_without_is_empty)] // This isn't actually a container, so is_empty would be nonsense.
     pub fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<'decoder, 'context> Drop for DecoderMemory<'decoder, 'context> {
+impl Drop for DecoderMemory<'_, '_> {
     fn drop(&mut self) {
         let _ = self
             .decoder
@@ -411,7 +414,7 @@ impl<'context> CuStreamFuture<'context> {
     }
 }
 
-impl<'a, 'context> Future for CuStreamFuture<'context> {
+impl Future for CuStreamFuture<'_> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
@@ -431,7 +434,7 @@ impl<'a, 'context> Future for CuStreamFuture<'context> {
             task::Poll::Ready(guard) => guard,
             task::Poll::Pending => {
                 // Still waiting for a lock, put the future in storage and then return `Pending`.
-                (*self).mutex_lock_future = Some(mutex_lock_future);
+                self.mutex_lock_future = Some(mutex_lock_future);
                 return task::Poll::Pending;
             }
         };
@@ -449,7 +452,7 @@ impl<'a, 'context> Future for CuStreamFuture<'context> {
     }
 }
 
-impl<'context> Drop for CuStreamFuture<'context> {
+impl Drop for CuStreamFuture<'_> {
     fn drop(&mut self) {
         // Uphold our prior promises by dropping the `MutexGuard` before anything else if it exists.
         self.mutex_lock_future.take();
@@ -467,7 +470,7 @@ pub struct CudaHostMemory<'context> {
     _phantom: PhantomData<&'context CuContext>,
 }
 
-impl<'context> CudaHostMemory<'context> {
+impl CudaHostMemory<'_> {
     pub fn as_slice(&self) -> &[u8] {
         // Safe so long as return lifetime is constrained by input lifetime.
         unsafe { slice::from_raw_parts(self.ptr as *const c_void as *const u8, self.len) }
@@ -479,7 +482,7 @@ impl<'context> CudaHostMemory<'context> {
     }
 }
 
-impl<'context> Drop for CudaHostMemory<'context> {
+impl Drop for CudaHostMemory<'_> {
     fn drop(&mut self) {
         unsafe { sys::cuMemFreeHost(self.ptr) };
     }
@@ -573,6 +576,9 @@ pub struct CuvidPicParams<'a, 'b> {
 }
 
 #[derive(Debug)]
+// Not enough instances of this enum to justify heap allocations to shrink it
+// Additionally, enum is accessed often. Better to keep it in stack.
+#[allow(clippy::large_enum_variant)]
 pub enum CuvidPicParamsCodecSpecific {
     Mpeg2 {},
     H264 {
@@ -832,10 +838,10 @@ impl From<&CuvidPicParamsCodecSpecific> for sys::_CUVIDPICPARAMS__bindgen_ty_1 {
                         SliceGroupMap::Mb2(p) => sys::_CUVIDH264PICPARAMS__bindgen_ty_1 { pMb2SliceGroupMap: p },
                     },
                     second_chroma_qp_index_offset,
-                    _bitfield_align_1: unsafe { mem::zeroed() },
-                    _bitfield_1: unsafe { mem::zeroed() },
-                    Reserved: unsafe { mem::zeroed() },
-                    __bindgen_anon_1: unsafe { mem::zeroed() },
+                    _bitfield_align_1: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+                    _bitfield_1: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+                    Reserved: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+                    __bindgen_anon_1: unsafe { mem::MaybeUninit::zeroed().assume_init() },
                 },
             },
             CuvidPicParamsCodecSpecific::H264Svc {} => todo!(),
@@ -1052,10 +1058,10 @@ impl From<&CuvidPicParamsCodecSpecific> for sys::_CUVIDPICPARAMS__bindgen_ty_1 {
                     ScalingList32x32: scaling_list32x32,
                     ScalingListDCCoeff16x16: scaling_list_dccoeff16x16,
                     ScalingListDCCoeff32x32: scaling_list_dccoeff32x32,
-                    reserved1: unsafe { mem::zeroed() },
-                    reserved2: unsafe { mem::zeroed() },
-                    reserved3: unsafe { mem::zeroed() },
-                    reserved4: unsafe { mem::zeroed() },
+                    reserved1: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+                    reserved2: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+                    reserved3: unsafe { mem::MaybeUninit::zeroed().assume_init() },
+                    reserved4: unsafe { mem::MaybeUninit::zeroed().assume_init() },
                 },
             },
             CuvidPicParamsCodecSpecific::Vp8 {} => todo!(),
@@ -1080,7 +1086,7 @@ impl<'a, 'b> From<&CuvidPicParams<'a, 'b>> for sys::CUVIDPICPARAMS {
             pSliceDataOffsets: value.slice_data_offsets.as_ptr(),
             ref_pic_flag: value.ref_pic_flag,
             intra_pic_flag: value.intra_pic_flag,
-            Reserved: unsafe { mem::zeroed() },
+            Reserved: unsafe { mem::MaybeUninit::zeroed().assume_init() },
             CodecSpecific: (&value.codec_specific).into(),
         }
     }
