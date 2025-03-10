@@ -21,12 +21,7 @@ impl<'a> XlnxDecoder<'a> {
     /// # Params
     /// - device_id: If specified then a particular device will be used. Otherwise, any device can be used.
     /// - reserve_id: If specified then the given pool id will be used. Otherwise, uses the default pool.
-    pub fn new(
-        xrm_ctx: &'a XrmContext,
-        xma_dec_props: &mut XmaDecoderProperties,
-        device_id: Option<u32>,
-        reserve_id: Option<u64>,
-    ) -> Result<Self, Error> {
+    pub fn new(xrm_ctx: &'a XrmContext, xma_dec_props: &mut XmaDecoderProperties, device_id: Option<u32>, reserve_id: Option<u64>) -> Result<Self, Error> {
         let dec_load = xlnx_calc_dec_load(xrm_ctx, xma_dec_props)?;
         let mut xlnx_dec_ctx = XlnxDecoderXrmCtx::new(xrm_ctx, device_id, reserve_id, dec_load);
         xlnx_reserve_dec_resource(&mut xlnx_dec_ctx)?;

@@ -19,12 +19,7 @@ impl<'a> XlnxScaler<'a> {
     /// # Params
     /// - device_id: If specified then a particular device will be used. Otherwise, any device can be used.
     /// - reserve_id: If specified then the given pool id will be used. Otherwise, uses the default pool.
-    pub fn new(
-        xrm_ctx: &'a XrmContext,
-        xma_scal_props: &mut XmaScalerProperties,
-        device_id: Option<u32>,
-        reserve_id: Option<u64>,
-    ) -> Result<Self, Error> {
+    pub fn new(xrm_ctx: &'a XrmContext, xma_scal_props: &mut XmaScalerProperties, device_id: Option<u32>, reserve_id: Option<u64>) -> Result<Self, Error> {
         let scal_load = xlnx_calc_scal_load(xrm_ctx, xma_scal_props)?;
         let mut xlnx_scaler_ctx = XlnxScalerXrmCtx::new(xrm_ctx, device_id, reserve_id, scal_load, xma_scal_props.num_outputs);
         xlnx_reserve_scal_resource(&mut xlnx_scaler_ctx)?;

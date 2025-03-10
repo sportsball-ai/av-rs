@@ -5,10 +5,6 @@ pub use sys::*;
 pub mod xrm_context;
 pub use xrm_context::*;
 
-/*---- transcoder ----*/
-pub mod xlnx_transcoder_utils;
-pub use xlnx_transcoder_utils::*;
-
 /*---- decoder ----*/
 pub mod xlnx_decoder;
 pub use xlnx_decoder::*;
