@@ -8,10 +8,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-12-large]
-        include:
-          - os: macos-12-large
-            args: --exclude v4l2
+        os: [ubuntu-24.04]
     steps:
     - uses: actions/checkout@v4
       with:
