@@ -15,12 +15,7 @@ impl<'a> XlnxEncoder<'a> {
     /// # Params
     /// - device_id: If specified then a particular device will be used. Otherwise, any device can be used.
     /// - reserve_id: If specified then the given pool id will be used. Otherwise, uses the default pool.
-    pub fn new(
-        xrm_ctx: &'a XrmContext,
-        xma_enc_props: &mut XmaEncoderProperties,
-        device_id: Option<u32>,
-        reserve_id: Option<u64>,
-    ) -> Result<Self, Error> {
+    pub fn new(xrm_ctx: &'a XrmContext, xma_enc_props: &mut XmaEncoderProperties, device_id: Option<u32>, reserve_id: Option<u64>) -> Result<Self, Error> {
         let enc_load = xlnx_calc_enc_load(xrm_ctx, xma_enc_props)?;
         let mut xlnx_enc_ctx = XlnxEncoderXrmCtx::new(xrm_ctx, device_id, reserve_id, enc_load);
         xlnx_reserve_enc_resource(&mut xlnx_enc_ctx)?;
