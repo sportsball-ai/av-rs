@@ -450,13 +450,6 @@ impl Future for CuStreamFuture<'_> {
     }
 }
 
-impl Drop for CuStreamFuture<'_> {
-    fn drop(&mut self) {
-        // Uphold our prior promises by dropping the `MutexGuard` before anything else if it exists.
-        self.mutex_lock_future.take();
-    }
-}
-
 /// Memory owned by the CUDA driver, and stored on the host
 pub struct CudaHostMemory<'context> {
     // Specifically choosing against a slice here because it is undefined
