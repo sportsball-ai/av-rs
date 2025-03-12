@@ -682,6 +682,7 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "pin-utils",
+ "slab",
 ]
 
 [[package]]
@@ -1299,7 +1300,7 @@ name = "nvidia-video-sdk"
 version = "0.1.0"
 dependencies = [
  "bindgen 0.71.1",
- "tokio",
+ "futures-util",
  "which",
 ]
 

@@ -10,9 +10,13 @@ use std::{
     slice,
     sync::Arc,
     task::{self, Waker},
+    thread,
 };
 
-use tokio::sync::{Mutex, MutexGuard};
+use futures_util::{
+    lock::{Mutex, OwnedMutexLockFuture},
+    FutureExt,
+};
 
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
@@ -359,11 +363,7 @@ impl Drop for DecoderMemory<'_, '_> {
 }
 
 pub struct CuStreamFuture<'context> {
-    // If we're trying asynchronously to get a lock on the Mutex, store the future for that work here.
-    // Must be a `Box` because the future is an opaque type. This data is not actually 'static,
-    // it's tied to the lifetime of the `waker_storage`. We manage this lifetime internally via `unsafe`.
-    // Do not ever expose this as part of the public API.
-    mutex_lock_future: Option<Pin<Box<dyn Future<Output = MutexGuard<'static, WakerState>>>>>,
+    mutex_lock_future: Option<OwnedMutexLockFuture<WakerState>>,
     waker_storage: Arc<Mutex<WakerState>>,
     _phantom: PhantomData<&'context CuContext>,
 }
@@ -403,7 +403,15 @@ impl<'context> CuStreamFuture<'context> {
         let user_data = Arc::<Mutex<WakerState>>::from_raw(user_data as *mut Mutex<WakerState>);
         let mut state = WakerState::WorkComplete;
         {
-            let mut guard = user_data.blocking_lock();
+            // Spin to acquire lock. This is not a high contention lock, so spinning should be very uncommon.
+            let mut guard = loop {
+                if let Some(lock) = user_data.try_lock() {
+                    break lock;
+                } else {
+                    // Don't totally lock down the CPU core if the lock is currently held.
+                    thread::yield_now();
+                }
+            };
             // In all cases we move to work complete, so swap that in.
             mem::swap(&mut state, &mut *guard);
         }
@@ -418,18 +426,8 @@ impl Future for CuStreamFuture<'_> {
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> task::Poll<Self::Output> {
-        let mut mutex_lock_future = self.mutex_lock_future.take().unwrap_or_else(|| {
-            // SAFETY: We're going to transmute the lifetime on this a bit. Instead of the lifetime of the Mutex reference,
-            // we're going to force it to lifetime 'static. This is a convenient lie. The data is not actually 'static.
-            // We manage its actual lifetime internally. Do not ever expose this lifetime publicly.
-            unsafe {
-                // Types fully specified to prevent mistakes. Please don't remove these types.
-                mem::transmute::<Pin<Box<dyn Future<Output = MutexGuard<'_, WakerState>>>>, Pin<Box<dyn Future<Output = MutexGuard<'static, WakerState>>>>>(
-                    Box::pin(self.waker_storage.lock()),
-                )
-            }
-        });
-        let mutex_poll = Future::poll(mutex_lock_future.as_mut(), cx);
+        let mut mutex_lock_future = self.mutex_lock_future.take().unwrap_or_else(|| Arc::clone(&self.waker_storage).lock_owned());
+        let mutex_poll = mutex_lock_future.poll_unpin(cx);
         let mut mutex_guard = match mutex_poll {
             task::Poll::Ready(guard) => guard,
             task::Poll::Pending => {
