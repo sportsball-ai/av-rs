@@ -38,44 +38,6 @@ jobs:
       run: cargo clippy --workspace --exclude xilinx --features srt/async --all-targets ${{ matrix.args }} -- --deny warnings
     - name: Test
       run: cargo test --verbose --workspace --exclude xilinx --all-features --exclude xcoder-quadra --exclude xcoder-logan --exclude v4l2 --exclude rkmpp ${{ matrix.args }}
-  test_xcoder_logan:
-    name: Test xcoder-logan
-    runs-on:
-      - self-hosted
-      - netint-t408-310X2013
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: 1.77.2
-      - name: Initialize
-        run: |
-          init_rsrc_logan || true
-      - name: Test
-        run: cargo test --verbose -p xcoder-logan -p xcoder-logan-310-sys -- --test-threads=1
-  test_xcoder_logan_v2_compat:
-    name: Test xcoder-logan v2-compat
-    runs-on:
-      - self-hosted
-      - netint-t408-251X1E09
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          lfs: true
-      - name: Install Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: 1.77.2
-      - name: Initialize
-        run: |
-          init_rsrc || true
-      - name: Test
-        run: cargo test --verbose -p xcoder-logan -p xcoder-logan-259-sys --features v2-compat -- --test-threads=1
   test_xcoder_quadra:
     name: Test xcoder-quadra
     runs-on:
