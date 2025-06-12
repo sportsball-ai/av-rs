@@ -9,7 +9,7 @@ pub struct XlnxEncoder<'a> {
     xlnx_enc_ctx: ManuallyDrop<XlnxEncoderXrmCtx<'a>>,
 }
 
-unsafe impl Send for XlnxEncoder<'_> { }
+unsafe impl Send for XlnxEncoder<'_> {}
 
 impl<'a> XlnxEncoder<'a> {
     /// Creates a session with the given properties and reserves the resources for it.
