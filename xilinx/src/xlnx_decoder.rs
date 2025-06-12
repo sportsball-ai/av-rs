@@ -15,6 +15,8 @@ pub struct XlnxDecoder<'a> {
     xlnx_dec_ctx: ManuallyDrop<XlnxDecoderXrmCtx<'a>>,
 }
 
+unsafe impl Send for XlnxDecoder<'_> {}
+
 impl<'a> XlnxDecoder<'a> {
     /// Creates a session with the given properties and reserves the resources for it.
     ///
