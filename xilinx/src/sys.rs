@@ -10,4 +10,4 @@
 )]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
-unsafe impl Send for XmaParameter { }
+unsafe impl Send for *mut XmaParameter { }
