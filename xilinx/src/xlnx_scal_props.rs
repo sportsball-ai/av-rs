@@ -29,6 +29,8 @@ pub struct XlnxXmaScalerProperties {
     _props: Box<XlnxScalerProperties>,
 }
 
+unsafe impl Send for XlnxXmaScalerProperties {}
+
 impl From<XlnxScalerProperties> for XlnxXmaScalerProperties {
     fn from(props: XlnxScalerProperties) -> Self {
         let mut props = Box::new(props);

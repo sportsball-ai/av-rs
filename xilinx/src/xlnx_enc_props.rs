@@ -77,6 +77,8 @@ pub struct XlnxXmaEncoderProperties {
     _enc_options: String,
 }
 
+unsafe impl Send for XlnxXmaEncoderProperties {}
+
 impl TryFrom<XlnxEncoderProperties> for XlnxXmaEncoderProperties {
     type Error = Error;
 
