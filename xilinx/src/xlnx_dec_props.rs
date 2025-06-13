@@ -39,6 +39,8 @@ pub struct XlnxXmaDecoderProperties {
     _props: Box<XlnxDecoderProperties>,
 }
 
+unsafe impl Send for XlnxXmaDecoderProperties {}
+
 impl From<XlnxDecoderProperties> for XlnxXmaDecoderProperties {
     fn from(props: XlnxDecoderProperties) -> Self {
         let mut props = Box::new(props);

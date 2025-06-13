@@ -13,6 +13,8 @@ pub struct XlnxScaler<'a> {
     xlnx_scaler_ctx: ManuallyDrop<XlnxScalerXrmCtx<'a>>,
 }
 
+unsafe impl Send for XlnxScaler<'_> {}
+
 impl<'a> XlnxScaler<'a> {
     /// Creates a session with the given properties and reserves the resources for it.
     ///
