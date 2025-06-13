@@ -9,5 +9,3 @@
     clippy::too_many_arguments
 )]
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
-
-unsafe impl Send for *mut XmaParameter { }
