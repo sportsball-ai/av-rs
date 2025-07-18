@@ -246,10 +246,10 @@ pub struct UserDataUnregistered {
 
 impl UserDataUnregistered {
     pub fn decode<T: Iterator<Item = u8>>(mut bs: Bitstream<T>) -> io::Result<Self> {
-        let mut ret = Self::default();
-        ret.uuid_iso_iec_11578 = (bs.read_bits(64)? as u128) << 64 | bs.read_bits(64)? as u128;
-        ret.user_data_payload = bs.into_inner().collect();
-        Ok(ret)
+        Ok(Self {
+            uuid_iso_iec_11578: (bs.read_bits(64)? as u128) << 64 | bs.read_bits(64)? as u128,
+            user_data_payload: bs.into_inner().collect(),
+        })
     }
 }
 
