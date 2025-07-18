@@ -3,6 +3,7 @@ use super::{decode, encode, sequence_parameter_set::VUIParameters, syntax_elemen
 use std::io;
 
 pub const SEI_PAYLOAD_TYPE_PIC_TIMING: u64 = 1;
+pub const SEI_PAYLOAD_TYPE_USER_DATA_UNREGISTERED: u64 = 5;
 
 // ITU-T H.264, 04/2017, 7.3.2.3.1
 #[derive(Clone, Debug, Default)]
@@ -235,6 +236,88 @@ impl PicTiming {
     }
 }
 
+pub const UUID_ISO_IEC_11578_AVCHD_METADATA: u128 = 0x17ee8c60f84d11d98cd60800200c9a66;
+
+#[derive(Clone, Debug, Default)]
+pub struct UserDataUnregistered {
+    pub uuid_iso_iec_11578: u128,
+    pub user_data_payload: Vec<u8>,
+}
+
+impl UserDataUnregistered {
+    pub fn decode<T: Iterator<Item = u8>>(mut bs: Bitstream<T>) -> io::Result<Self> {
+        let mut ret = Self::default();
+        ret.uuid_iso_iec_11578 = (bs.read_bits(64)? as u128) << 64 | bs.read_bits(64)? as u128;
+        ret.user_data_payload = bs.into_inner().collect();
+        Ok(ret)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AVCHDMetadata {
+    pub tags: Vec<(u8, u32)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AVCHDMetadataDateTime {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+}
+
+fn bcd_decode(bcd: u8) -> u8 {
+    (bcd >> 4) * 10 + (bcd & 0x0F)
+}
+
+impl AVCHDMetadata {
+    pub fn decode<T: Iterator<Item = u8>>(bs: &mut Bitstream<T>) -> io::Result<Self> {
+        let mut ret = Self::default();
+
+        let magic = bs.read_bits(32)?;
+        if magic != 0x4d44504d {
+            return Err(io::Error::new(io::ErrorKind::Other, "unexpected avchd metadata magic"));
+        }
+
+        let n = bs.read_bits(8)? as usize;
+        for _ in 0..n {
+            let tag = bs.read_bits(8)? as u8;
+            let value = bs.read_bits(32)? as u32;
+            ret.tags.push((tag, value));
+        }
+
+        Ok(ret)
+    }
+
+    pub fn datetime(&self) -> Option<AVCHDMetadataDateTime> {
+        let mut ret = AVCHDMetadataDateTime::default();
+
+        for (key, value) in &self.tags {
+            match key {
+                0x18 => {
+                    ret.year = bcd_decode((value >> 16) as _) as u16 * 100 + bcd_decode((value >> 8) as _) as u16;
+                    ret.month = bcd_decode(*value as _);
+                }
+                0x19 => {
+                    ret.day = bcd_decode((value >> 24) as _);
+                    ret.hour = bcd_decode((value >> 16) as _);
+                    ret.minute = bcd_decode((value >> 8) as _);
+                    ret.second = bcd_decode(*value as _);
+                }
+                _ => {}
+            }
+        }
+
+        if ret.year != 0 && ret.day != 0 {
+            Some(ret)
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -329,5 +412,26 @@ mod test {
         assert_eq!(0, timecode.minutes_flag.0);
         assert_eq!(0, timecode.hours_flag.0);
         assert_eq!(0, timecode.time_offset.0);
+    }
+
+    #[test]
+    fn test_avchd_metadata() {
+        let bs = Bitstream::new(vec![
+            0x17, 0xee, 0x8c, 0x60, 0xf8, 0x4d, 0x11, 0xd9, 0x8c, 0xd6, 0x8, 0x0, 0x20, 0xc, 0x9a, 0x66, 0x4d, 0x44, 0x50, 0x4d, 0x7, 0x13, 0x64, 0x32, 0x51,
+            0x1, 0x14, 0x0, 0x0, 0x0, 0x0, 0x18, 0x2a, 0x20, 0x24, 0x9, 0x19, 0x15, 0x12, 0x26, 0x22, 0xe0, 0x1, 0x3, 0x4, 0x9, 0xe6, 0x0, 0x1, 0x0, 0x0, 0xe8,
+            0xf, 0x0, 0x0, 0x0,
+        ]);
+
+        let msg = UserDataUnregistered::decode(bs).unwrap();
+        assert_eq!(UUID_ISO_IEC_11578_AVCHD_METADATA, msg.uuid_iso_iec_11578);
+
+        let metadata = AVCHDMetadata::decode(&mut Bitstream::new(msg.user_data_payload)).unwrap();
+        let t = metadata.datetime().unwrap();
+        assert_eq!(t.year, 2024);
+        assert_eq!(t.month, 9);
+        assert_eq!(t.day, 15);
+        assert_eq!(t.hour, 12);
+        assert_eq!(t.minute, 26);
+        assert_eq!(t.second, 22);
     }
 }
