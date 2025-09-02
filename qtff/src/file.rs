@@ -141,7 +141,7 @@ impl File {
         let mut dest = data::SampleTableData::default();
         let mut mdat: Vec<Data> = Vec::new();
 
-        dest.sample_description = source.sample_description.clone();
+        dest.sample_description.clone_from(&source.sample_description);
         dest.time_to_sample = source.time_to_sample.as_ref().map(|stts| stts.trimmed(start_sample, sample_count));
         dest.sample_to_chunk = source.sample_to_chunk.as_ref().map(|stsc| stsc.trimmed(start_sample, sample_count));
         dest.sample_size = source.sample_size.as_ref().map(|stsz| stsz.trimmed(start_sample, sample_count));
@@ -600,7 +600,7 @@ mod tests {
             ]
             .iter()
             {
-                let values = metadata.get(&(*k).to_string());
+                let values = metadata.get(*k);
                 assert!(values.is_some(), "{}", k);
                 let values = values.unwrap();
                 assert_eq!(values.len(), 1, "{}", k);
@@ -636,11 +636,26 @@ mod tests {
 
                 match (&mut expected.media.information, &actual.media.information) {
                     (Some(data::MediaInformationData::Video(expected)), Some(data::MediaInformationData::Video(actual))) => {
-                        expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
-                        expected.sample_table.as_mut().unwrap().sample_description = actual.sample_table.as_ref().unwrap().sample_description.clone();
+                        expected
+                            .sample_table
+                            .as_mut()
+                            .unwrap()
+                            .chunk_offset_64
+                            .clone_from(&actual.sample_table.as_ref().unwrap().chunk_offset_64);
+                        expected
+                            .sample_table
+                            .as_mut()
+                            .unwrap()
+                            .sample_description
+                            .clone_from(&actual.sample_table.as_ref().unwrap().sample_description);
                     }
                     (Some(data::MediaInformationData::Sound(expected)), Some(data::MediaInformationData::Sound(actual))) => {
-                        expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
+                        expected
+                            .sample_table
+                            .as_mut()
+                            .unwrap()
+                            .chunk_offset_64
+                            .clone_from(&actual.sample_table.as_ref().unwrap().chunk_offset_64);
                     }
                     (Some(data::MediaInformationData::Timecode(expected_minf)), Some(data::MediaInformationData::Timecode(actual_minf))) => {
                         let expected_stbl = expected_minf.sample_table.as_ref().unwrap();
@@ -652,11 +667,26 @@ mod tests {
                         assert_eq!(expected_f.read_u32::<BigEndian>().unwrap(), f.read_u32::<BigEndian>().unwrap());
 
                         expected.media.header.duration = actual.media.header.duration;
-                        expected_minf.sample_table.as_mut().unwrap().time_to_sample = actual_minf.sample_table.as_ref().unwrap().time_to_sample.clone();
-                        expected_minf.sample_table.as_mut().unwrap().chunk_offset_64 = actual_minf.sample_table.as_ref().unwrap().chunk_offset_64.clone();
+                        expected_minf
+                            .sample_table
+                            .as_mut()
+                            .unwrap()
+                            .time_to_sample
+                            .clone_from(&actual_minf.sample_table.as_ref().unwrap().time_to_sample);
+                        expected_minf
+                            .sample_table
+                            .as_mut()
+                            .unwrap()
+                            .chunk_offset_64
+                            .clone_from(&actual_minf.sample_table.as_ref().unwrap().chunk_offset_64);
                     }
                     (Some(data::MediaInformationData::Base(expected)), Some(data::MediaInformationData::Base(actual))) => {
-                        expected.sample_table.as_mut().unwrap().chunk_offset_64 = actual.sample_table.as_ref().unwrap().chunk_offset_64.clone();
+                        expected
+                            .sample_table
+                            .as_mut()
+                            .unwrap()
+                            .chunk_offset_64
+                            .clone_from(&actual.sample_table.as_ref().unwrap().chunk_offset_64);
                     }
                     _ => panic!("mismatched media information"),
                 }
