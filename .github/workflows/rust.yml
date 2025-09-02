@@ -16,7 +16,7 @@ jobs:
     - name: Set Up Linux
       if: startsWith(matrix.os, 'ubuntu-')
       run: |
-        sudo apt-get update && sudo apt-get install -y nasm libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev libswscale-dev
+        sudo apt-get update && sudo apt-get install -y nasm libavcodec-dev libavfilter-dev libavformat-dev libavutil-dev libswscale-dev libavdevice-dev
         git clone https://github.com/mirror/x264.git x264-mirror
         (cd x264-mirror && git checkout 5db6aa6cab1b146e07b60cc1736a01f21da01154 && ./configure --disable-cli --enable-static && make -j && sudo make install)
         git clone https://github.com/ultravideo/kvazaar.git
