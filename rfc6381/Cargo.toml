@@ -1,6 +1,6 @@
 [package]
 name = "rfc6381"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2018"
 
 [features]
@@ -10,4 +10,4 @@ ffmpeg = ["dep:ffmpeg"]
 [dependencies]
 h264 = { path = "../h264" }
 h265 = { path = "../h265" }
-ffmpeg = { path = "../ffmpeg", features = ["avcodec"], optional = true }
+ffmpeg = { package = "ffmpeg-next", version = "7", optional = true }
