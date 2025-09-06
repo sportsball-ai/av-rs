@@ -2611,7 +2611,7 @@ ni_logan_retcode_t ni_logan_encoder_session_close(ni_logan_session_context_t* p_
     LRETURN;
   }
 
-  ni_log(NI_LOG_ERROR, "Encoder_complete_info: session_id 0x%x, total frames input: %u  "
+  ni_log(NI_LOG_INFO, "Encoder_complete_info: session_id 0x%x, total frames input: %u  "
                "buffered: %u  completed: %u  output: %u  dropped: %u ,  "
                "inst_errors: %u\n", p_ctx->session_id, p_ctx->session_stats.frames_input,
                p_ctx->session_stats.frames_buffered, p_ctx->session_stats.frames_completed,
