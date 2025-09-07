@@ -26,10 +26,42 @@ pub struct RkMppEncoder<F> {
     frames_emitted: u64,
 }
 
+#[derive(Debug)]
+pub struct BadParameterError {
+    name: &'static str,
+    value: String,
+}
+
+impl std::fmt::Display for BadParameterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "bad rkmpp encoder {}={:?}", self.name, &self.value)
+    }
+}
+
+impl std::error::Error for BadParameterError {}
+
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub enum RkMppEncoderInputFormat {
     Yuv420Planar,
     Bgra,
+}
+
+impl std::str::FromStr for RkMppEncoderInputFormat {
+    type Err = BadParameterError;
+
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+        Ok(match s {
+            "yuv420p" => Self::Yuv420Planar,
+            "bgra" => Self::Bgra,
+            _ => {
+                return Err(BadParameterError {
+                    name: "input-format",
+                    value: s.to_owned(),
+                })
+            }
+        })
+    }
 }
 
 impl RkMppEncoderInputFormat {
@@ -48,6 +80,39 @@ impl RkMppEncoderInputFormat {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub enum RkMppEncoderCodec {
+    H264,
+    H265,
+}
+
+impl std::str::FromStr for RkMppEncoderCodec {
+    type Err = BadParameterError;
+
+    fn from_str(s: &str) -> core::result::Result<Self, Self::Err> {
+        Ok(match s {
+            "h264" => Self::H264,
+            "h265" => Self::H265,
+            _ => {
+                return Err(BadParameterError {
+                    name: "codec",
+                    value: s.to_owned(),
+                })
+            }
+        })
+    }
+}
+
+impl RkMppEncoderCodec {
+    fn to_mpp(self) -> sys::MppFrameFormat {
+        match self {
+            Self::H264 => sys::MppCodingType_MPP_VIDEO_CodingAVC,
+            Self::H265 => sys::MppCodingType_MPP_VIDEO_CodingHEVC,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct RkMppEncoderConfig {
     pub height: u16,
@@ -56,6 +121,7 @@ pub struct RkMppEncoderConfig {
     pub bitrate: Option<u32>,
     pub keyframe_interval: Option<u32>,
     pub input_format: RkMppEncoderInputFormat,
+    pub codec: RkMppEncoderCodec,
 }
 
 impl RkMppEncoderConfig {
@@ -78,7 +144,7 @@ impl<F> RkMppEncoder<F> {
     pub fn new(config: RkMppEncoderConfig) -> Result<Self> {
         let lib = mpp::Lib::new().ok_or(RkMppEncoderError::LibraryUnavailable)?;
 
-        let mut context = lib.new_context(sys::MppCodingType_MPP_VIDEO_CodingAVC)?;
+        let mut context = lib.new_context(config.codec.to_mpp())?;
 
         let mut mpp_config = lib.new_config()?;
         context.get_config(&mut mpp_config)?;
@@ -250,6 +316,7 @@ mod test {
             bitrate: Some(50000),
             keyframe_interval: Some(120),
             input_format: RkMppEncoderInputFormat::Yuv420Planar,
+            codec: RkMppEncoderCodec::H264,
         })
         .unwrap();
 
