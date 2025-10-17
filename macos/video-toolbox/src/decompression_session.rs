@@ -1,5 +1,5 @@
 use super::sys;
-use core_foundation::{result, CFType, OSStatus};
+use core_foundation::{result, CFType, Dictionary, OSStatus};
 use core_media::{BlockBuffer, SampleBuffer, VideoFormatDescription};
 use core_video::ImageBuffer;
 use std::{
@@ -14,6 +14,17 @@ type Callback = Box<dyn FnMut(sys::OSStatus, sys::CVImageBufferRef)>;
 
 impl DecompressionSession {
     pub fn new(format_desc: &VideoFormatDescription) -> Result<Self, OSStatus> {
+        Self::new_impl(format_desc, None)
+    }
+
+    pub fn new_with_destination_image_buffer_attributes(
+        format_desc: &VideoFormatDescription,
+        destination_image_buffer_attributes: Dictionary,
+    ) -> Result<Self, OSStatus> {
+        Self::new_impl(format_desc, Some(destination_image_buffer_attributes))
+    }
+
+    fn new_impl(format_desc: &VideoFormatDescription, destination_image_buffer_attributes: Option<Dictionary>) -> Result<Self, OSStatus> {
         unsafe extern "C" fn callback(
             _decompression_output_ref_con: *mut std::os::raw::c_void,
             source_frame_ref_con: *mut std::os::raw::c_void,
@@ -30,13 +41,17 @@ impl DecompressionSession {
             decompressionOutputRefCon: std::ptr::null_mut(),
         };
         let mut ret = std::ptr::null_mut();
+        let destination_image_buffer_attributes_ptr = match &destination_image_buffer_attributes {
+            Some(dict) => unsafe { dict.cf_type_ref() as _ },
+            None => std::ptr::null(),
+        };
         result(
             unsafe {
                 sys::VTDecompressionSessionCreate(
                     std::ptr::null_mut(),
                     format_desc.cf_type_ref() as _,
                     std::ptr::null(),
-                    std::ptr::null(),
+                    destination_image_buffer_attributes_ptr,
                     &callback_record as _,
                     &mut ret as _,
                 )
@@ -82,6 +97,7 @@ impl DecompressionSession {
 #[cfg(test)]
 mod test {
     use super::*;
+    use core_foundation::{MutableDictionary, Number};
     use core_media::VideoFormatDescription;
     use std::{fs::File, io::Read};
 
@@ -100,6 +116,39 @@ mod test {
             let mut frame_data = vec![0, 0, (nalu.len() / 256) as u8, nalu.len() as u8];
             frame_data.extend_from_slice(nalu);
             sess.decode_frame(&frame_data, &format_desc).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_decompression_session_with_destination_image_buffer_attributes() {
+        let mut f = File::open("src/testdata/smptebars.h264").unwrap();
+        let mut buf = Vec::new();
+        f.read_to_end(&mut buf).unwrap();
+
+        let nalus: Vec<_> = h264::iterate_annex_b(&buf).collect();
+        let format_desc = VideoFormatDescription::with_h264_parameter_sets(&[nalus[0], nalus[1]], 4).unwrap();
+
+        let mut destination_image_buffer_attributes = MutableDictionary::new_cf_type();
+        // Set the pixel format to BGRA
+        unsafe {
+            let key = sys::kCVPixelBufferPixelFormatTypeKey as _;
+            let value = Number::from(sys::kCVPixelFormatType_32BGRA).cf_type_ref();
+            destination_image_buffer_attributes.set_value(key, value);
+        }
+        let mut sess = DecompressionSession::new_with_destination_image_buffer_attributes(&format_desc, destination_image_buffer_attributes.into()).unwrap();
+
+        // This file is encoded as exactly one NALU per frame.
+        for nalu in &nalus[3..10] {
+            let mut frame_data = vec![0, 0, (nalu.len() / 256) as u8, nalu.len() as u8];
+            frame_data.extend_from_slice(nalu);
+            let decoded_frame = sess.decode_frame(&frame_data, &format_desc).unwrap();
+            let decoded_pixel_format = decoded_frame.pixel_buffer().pixel_format_type();
+            let decoded_width = decoded_frame.pixel_buffer().width();
+            let decoded_height = decoded_frame.pixel_buffer().height();
+
+            assert_eq!(decoded_width, 1280);
+            assert_eq!(decoded_height, 720);
+            assert_eq!(decoded_pixel_format, sys::kCVPixelFormatType_32BGRA);
         }
     }
 }
