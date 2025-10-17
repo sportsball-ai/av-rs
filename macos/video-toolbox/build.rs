@@ -18,6 +18,7 @@ fn main() {
             .allowlist_function("VTSessionCopySupportedPropertyDictionary")
             .allowlist_function("VTSessionSetProperty")
             .allowlist_var("kCMTime.+")
+            .allowlist_var("kCVPixelBufferPixelFormatTypeKey")
             .allowlist_var("kCVPixelFormatType_.+")
             .allowlist_var("kCMSampleAttachmentKey_.+")
             .allowlist_var("kVTVideoEncoderList_.+")
