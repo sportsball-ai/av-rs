@@ -14,42 +14,17 @@ type Callback = Box<dyn FnMut(sys::OSStatus, sys::CVImageBufferRef)>;
 
 impl DecompressionSession {
     pub fn new(format_desc: &VideoFormatDescription) -> Result<Self, OSStatus> {
-        unsafe extern "C" fn callback(
-            _decompression_output_ref_con: *mut std::os::raw::c_void,
-            source_frame_ref_con: *mut std::os::raw::c_void,
-            status: sys::OSStatus,
-            _info_flags: sys::VTDecodeInfoFlags,
-            image_buffer: sys::CVImageBufferRef,
-            _presentation_time_stamp: sys::CMTime,
-            _presentation_duration: sys::CMTime,
-        ) {
-            (*(source_frame_ref_con as *mut Callback))(status, image_buffer)
-        }
-        let callback_record = sys::VTDecompressionOutputCallbackRecord {
-            decompressionOutputCallback: Some(callback),
-            decompressionOutputRefCon: std::ptr::null_mut(),
-        };
-        let mut ret = std::ptr::null_mut();
-        result(
-            unsafe {
-                sys::VTDecompressionSessionCreate(
-                    std::ptr::null_mut(),
-                    format_desc.cf_type_ref() as _,
-                    std::ptr::null(),
-                    std::ptr::null(),
-                    &callback_record as _,
-                    &mut ret as _,
-                )
-            }
-            .into(),
-        )?;
-        Ok(Self(ret))
+        Self::new_impl(format_desc, None)
     }
 
     pub fn new_with_destination_image_buffer_attributes(
         format_desc: &VideoFormatDescription,
         destination_image_buffer_attributes: Dictionary,
     ) -> Result<Self, OSStatus> {
+        Self::new_impl(format_desc, Some(destination_image_buffer_attributes))
+    }
+
+    fn new_impl(format_desc: &VideoFormatDescription, destination_image_buffer_attributes: Option<Dictionary>) -> Result<Self, OSStatus> {
         unsafe extern "C" fn callback(
             _decompression_output_ref_con: *mut std::os::raw::c_void,
             source_frame_ref_con: *mut std::os::raw::c_void,
@@ -66,13 +41,17 @@ impl DecompressionSession {
             decompressionOutputRefCon: std::ptr::null_mut(),
         };
         let mut ret = std::ptr::null_mut();
+        let destination_image_buffer_attributes_ptr = match &destination_image_buffer_attributes {
+            Some(dict) => unsafe { dict.cf_type_ref() as _ },
+            None => std::ptr::null(),
+        };
         result(
             unsafe {
                 sys::VTDecompressionSessionCreate(
                     std::ptr::null_mut(),
                     format_desc.cf_type_ref() as _,
                     std::ptr::null(),
-                    destination_image_buffer_attributes.cf_type_ref() as _,
+                    destination_image_buffer_attributes_ptr,
                     &callback_record as _,
                     &mut ret as _,
                 )
