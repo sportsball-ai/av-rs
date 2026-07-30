@@ -1,4 +1,4 @@
-use super::{XcoderHardware, XcoderHardwareFrame};
+use super::{valid_dimensions, XcoderHardware, XcoderHardwareFrame};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
 use std::mem;

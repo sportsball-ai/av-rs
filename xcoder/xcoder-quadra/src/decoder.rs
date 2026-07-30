@@ -1,4 +1,4 @@
-use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use super::{alloc_zeroed, fps_to_rational, valid_dimensions, XcoderHardware, XcoderHardwareFrame};
 use scopeguard::{guard, ScopeGuard};
 use snafu::{Error, Snafu};
 use std::{

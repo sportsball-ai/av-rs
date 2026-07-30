@@ -1,6 +1,6 @@
 use crate::XcoderPixelFormat;
 
-use super::{alloc_zeroed, fps_to_rational, XcoderHardware, XcoderHardwareFrame};
+use super::{alloc_zeroed, fps_to_rational, valid_dimensions, XcoderHardware, XcoderHardwareFrame};
 use av_traits::{EncodedFrameType, EncodedVideoFrame, RawVideoFrame, VideoEncoder, VideoEncoderOutput};
 use scopeguard::{guard, ScopeGuard};
 use snafu::Snafu;
@@ -84,14 +84,15 @@ impl EncodedFrame {
     }
 
     pub fn as_slice(&self) -> Result<&[u8]> {
-        let data_len = self.data_io.data.packet.data_len as usize;
+        let packet = self.packet();
+        let data_len = packet.data_len as usize;
         if data_len < self.meta_size {
             return Err(XcoderEncoderError::InvalidEncodedPacket {
                 actual: data_len,
                 metadata: self.meta_size,
             });
         }
-        let data = unsafe { std::slice::from_raw_parts(self.data_io.data.packet.p_data as _, data_len) };
+        let data = unsafe { std::slice::from_raw_parts(packet.p_data as _, data_len) };
         Ok(&data[self.meta_size..])
     }
 
