@@ -14,6 +14,10 @@ pub struct XcoderScalerConfig {
 
 #[derive(Debug, Snafu)]
 pub enum XcoderScalerError {
+    #[snafu(display("invalid scaler dimensions {width}x{height}"))]
+    InvalidDimensions { width: i32, height: i32 },
+    #[snafu(display("unsupported scaler bit depth {bit_depth}"))]
+    UnsupportedBitDepth { bit_depth: u8 },
     #[snafu(display("unable to allocate device session context"))]
     UnableToAllocateDeviceSessionContext,
     #[snafu(display("error {operation} (code = {code})"))]
@@ -32,6 +36,16 @@ unsafe impl Send for XcoderScaler {}
 
 impl XcoderScaler {
     pub fn new(config: XcoderScalerConfig) -> Result<Self> {
+        if !valid_dimensions(config.width, config.height) || config.width % 2 != 0 || config.height % 2 != 0 {
+            return Err(XcoderScalerError::InvalidDimensions {
+                width: config.width,
+                height: config.height,
+            });
+        }
+        if !matches!(config.bit_depth, 8 | 10) {
+            return Err(XcoderScalerError::UnsupportedBitDepth { bit_depth: config.bit_depth });
+        }
+
         unsafe {
             let session = sys::ni_device_session_context_alloc_init();
             if session.is_null() {
@@ -191,6 +205,29 @@ mod test {
         super::{decoder::read_frames, *},
         *,
     };
+
+    #[test]
+    fn rejects_invalid_scaler_configuration_before_opening_a_device() {
+        let hardware = XcoderHardware { id: -1, device_handle: -1 };
+        assert!(matches!(
+            XcoderScaler::new(XcoderScalerConfig {
+                hardware: hardware.clone(),
+                width: 0,
+                height: 360,
+                bit_depth: 8,
+            }),
+            Err(XcoderScalerError::InvalidDimensions { .. })
+        ));
+        assert!(matches!(
+            XcoderScaler::new(XcoderScalerConfig {
+                hardware,
+                width: 640,
+                height: 360,
+                bit_depth: 12,
+            }),
+            Err(XcoderScalerError::UnsupportedBitDepth { .. })
+        ));
+    }
 
     #[test]
     fn test_scaler() {

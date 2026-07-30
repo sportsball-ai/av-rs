@@ -34,6 +34,11 @@ pub struct XcoderDecoderInputFrame {
 
 impl XcoderDecoderInputFrame {
     fn to_data_io<E: Error>(&self, pos: i64, width: i32, height: i32, is_start_of_stream: bool) -> Result<DataIo, XcoderDecoderError<E>> {
+        let data_len = i32::try_from(self.data.len()).map_err(|_| XcoderDecoderError::PacketTooLarge {
+            actual: self.data.len(),
+            maximum: i32::MAX as usize,
+        })?;
+
         unsafe {
             // Granting an exception here. This structure is valid in zeroed memory state and there is no
             // officially sanctioned way to initialize it otherwise. Plus the netint SDK zeroes this structure itself.
@@ -45,15 +50,18 @@ impl XcoderDecoderInputFrame {
             packet.start_of_stream = if is_start_of_stream { 1 } else { 0 };
             packet.video_width = width as _;
             packet.video_height = height as _;
-            packet.data_len = self.data.len() as _;
+            packet.data_len = data_len as _;
 
-            let code = sys::ni_packet_buffer_alloc(&mut packet as _, self.data.len() as _);
+            let code = sys::ni_packet_buffer_alloc(&mut packet as _, data_len);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
                 return Err(XcoderDecoderError::Unknown {
                     code,
                     operation: "allocating packet buffer",
                 });
             }
+            let mut packet = guard(packet, |mut packet| {
+                sys::ni_packet_buffer_free(&mut packet);
+            });
             let mut prev_size = 0;
             let copied = sys::ni_packet_copy(
                 packet.p_data,
@@ -62,16 +70,18 @@ impl XcoderDecoderInputFrame {
                 self.data.as_ptr() as _,
                 &mut prev_size as _,
             );
-            if copied < self.data.len() as i32 {
+            if copied < data_len {
                 return Err(XcoderDecoderError::UnableToCopyToPacketBuffer {
-                    actual: copied as _,
+                    actual: copied,
                     expected: self.data.len(),
                 });
             }
 
             Ok(DataIo {
                 inner: sys::ni_session_data_io_t {
-                    data: sys::_ni_session_data_io__bindgen_ty_1 { packet },
+                    data: sys::_ni_session_data_io__bindgen_ty_1 {
+                        packet: ScopeGuard::into_inner(packet),
+                    },
                 },
             })
         }
@@ -180,10 +190,16 @@ pub enum XcoderDecoderError<E: Error + 'static> {
     InputError { source: E },
     #[snafu(display("unsupported bit depth"))]
     UnsupportedBitDepth,
+    #[snafu(display("invalid decoder dimensions {width}x{height}"))]
+    InvalidDimensions { width: i32, height: i32 },
+    #[snafu(display("invalid decoder frame rate {fps}"))]
+    InvalidFrameRate { fps: f64 },
     #[snafu(display("unable to allocate device session context"))]
     UnableToAllocateDeviceSessionContext,
     #[snafu(display("unable to copy to packet buffer (copied {actual} bytes, expected {expected}))"))]
-    UnableToCopyToPacketBuffer { expected: usize, actual: usize },
+    UnableToCopyToPacketBuffer { expected: usize, actual: i32 },
+    #[snafu(display("packet is {actual} bytes, maximum supported size is {maximum} bytes"))]
+    PacketTooLarge { actual: usize, maximum: usize },
     #[snafu(display("error {operation} (code = {code})"))]
     Unknown { code: sys::ni_retcode_t, operation: &'static str },
 }
@@ -211,7 +227,16 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
     where
         II: IntoIterator<IntoIter = I>,
     {
-        let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
+        if !valid_dimensions(config.width, config.height) {
+            return Err(XcoderDecoderError::InvalidDimensions {
+                width: config.width,
+                height: config.height,
+            });
+        }
+        if !matches!(config.bit_depth, 8 | 10) {
+            return Err(XcoderDecoderError::UnsupportedBitDepth);
+        }
+        let (fps_numerator, fps_denominator) = fps_to_rational(config.fps).ok_or(XcoderDecoderError::InvalidFrameRate { fps: config.fps })?;
 
         unsafe {
             let mut params = alloc_zeroed();
@@ -241,11 +266,7 @@ impl<E: Error, I: XcoderDecoderInput<E>> XcoderDecoder<I, E> {
                 XcoderDecoderCodec::H264 => sys::_ni_codec_format_NI_CODEC_FORMAT_H264,
                 XcoderDecoderCodec::H265 => sys::_ni_codec_format_NI_CODEC_FORMAT_H265,
             };
-            (**session).bit_depth_factor = match config.bit_depth {
-                8 => 1,
-                10 => 2,
-                _ => return Err(XcoderDecoderError::UnsupportedBitDepth),
-            };
+            (**session).bit_depth_factor = if config.bit_depth == 8 { 1 } else { 2 };
 
             let code = sys::ni_device_session_open(*session, sys::ni_device_type_t_NI_DEVICE_TYPE_DECODER);
             if code != sys::ni_retcode_t_NI_RETCODE_SUCCESS {
@@ -431,23 +452,49 @@ pub fn read_frames(path: &str) -> Vec<Result<XcoderDecoderInputFrame, std::io::E
 mod test {
     use super::{super::*, *};
 
+    fn test_config() -> XcoderDecoderConfig {
+        XcoderDecoderConfig {
+            width: 1280,
+            height: 720,
+            codec: XcoderDecoderCodec::H264,
+            bit_depth: 8,
+            fps: 29.97,
+            hardware_id: None,
+            multicore_joint_mode: false,
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_decoder_configuration_before_opening_a_device() {
+        let empty_input = || Vec::<Result<XcoderDecoderInputFrame, std::io::Error>>::new();
+
+        let mut config = test_config();
+        config.width = 0;
+        assert!(matches!(
+            XcoderDecoder::new(config, empty_input()),
+            Err(XcoderDecoderError::InvalidDimensions { .. })
+        ));
+
+        let mut config = test_config();
+        config.fps = f64::INFINITY;
+        assert!(matches!(
+            XcoderDecoder::new(config, empty_input()),
+            Err(XcoderDecoderError::InvalidFrameRate { .. })
+        ));
+
+        let mut config = test_config();
+        config.bit_depth = 12;
+        assert!(matches!(
+            XcoderDecoder::new(config, empty_input()),
+            Err(XcoderDecoderError::UnsupportedBitDepth)
+        ));
+    }
+
     #[test]
     fn test_decoder() {
         let frames = read_frames("src/testdata/smptebars.h264");
         let expected_frame_count = frames.len();
-        let mut decoder = XcoderDecoder::new(
-            XcoderDecoderConfig {
-                width: 1280,
-                height: 720,
-                codec: XcoderDecoderCodec::H264,
-                bit_depth: 8,
-                fps: 29.97,
-                hardware_id: None,
-                multicore_joint_mode: false,
-            },
-            frames,
-        )
-        .unwrap();
+        let mut decoder = XcoderDecoder::new(test_config(), frames).unwrap();
 
         let mut frame_count = 0;
         while decoder.read_decoded_frame().unwrap().is_some() {
@@ -507,5 +554,68 @@ mod test {
 
         assert_eq!(encoded_frames, expected_frame_count);
         assert!(encoded.len() > 5000);
+    }
+
+    #[test]
+    fn test_hardware_encoder_forced_key_frames() {
+        let frames = read_frames("src/testdata/smptebars.h264");
+        let expected_frame_count = frames.len();
+
+        let mut decoder = XcoderDecoder::new(
+            XcoderDecoderConfig {
+                width: 1280,
+                height: 720,
+                codec: XcoderDecoderCodec::H264,
+                bit_depth: 8,
+                fps: 29.97,
+                hardware_id: None,
+                multicore_joint_mode: false,
+            },
+            frames,
+        )
+        .unwrap();
+
+        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+            width: 1280,
+            height: 720,
+            fps: 29.97,
+            bitrate: None,
+            codec: XcoderEncoderCodec::H264 {
+                profile: Some(XcoderH264Profile::High),
+                level_idc: Some(41),
+            },
+            bit_depth: 8,
+            pixel_format: XcoderPixelFormat::Yuv420Planar,
+            hardware: Some(decoder.hardware()),
+            multicore_joint_mode: false,
+        })
+        .unwrap();
+
+        let mut input_index = 0;
+        let mut outputs = Vec::new();
+        while let Some(frame) = decoder.read_decoded_frame().unwrap() {
+            let frame_type = if input_index % 5 == 0 {
+                EncodedFrameType::Key
+            } else {
+                EncodedFrameType::Auto
+            };
+            if let Some(output) = encoder.encode_hardware_frame_with_type(input_index, frame.into(), frame_type).unwrap() {
+                outputs.push(output);
+            }
+            input_index += 1;
+        }
+        while let Some(output) = encoder.flush().unwrap() {
+            outputs.push(output);
+        }
+
+        assert_eq!(outputs.len(), expected_frame_count);
+        for output in outputs {
+            assert_eq!(
+                output.encoded_frame.expect("frame was not dropped").is_keyframe,
+                output.raw_frame % 5 == 0,
+                "unexpected keyframe state for input frame {}",
+                output.raw_frame
+            );
+        }
     }
 }

@@ -1,6 +1,33 @@
+#[cfg(any(target_os = "linux", test))]
+fn fps_to_rational(fps: f64) -> Option<(i32, i32)> {
+    if !fps.is_finite() || fps <= 0.0 {
+        return None;
+    }
+
+    let denominator = if fps.fract() == 0.0 {
+        1000
+    } else {
+        // A denominator of 1001 is conventional for fractional broadcast
+        // rates such as 23.976, 29.97, and 59.94.
+        1001
+    };
+    let numerator = (fps * f64::from(denominator)).round();
+    if numerator <= 0.0 || numerator > f64::from(i32::MAX) {
+        return None;
+    }
+
+    Some((numerator as i32, denominator))
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn valid_dimensions(width: i32, height: i32) -> bool {
+    width > 0 && height > 0
+}
+
 #[cfg(target_os = "linux")]
 #[path = ""]
 pub mod linux_impl {
+    use super::{fps_to_rational, valid_dimensions};
     use snafu::Snafu;
     use std::{ffi::c_uint, ops::Deref};
     use xcoder_quadra_sys as sys;
@@ -47,6 +74,10 @@ pub mod linux_impl {
         unsafe fn surface_mut(&mut self) -> &mut sys::niFrameSurface1_t {
             &mut *(self.p_data[3] as *mut sys::niFrameSurface1_t)
         }
+
+        pub(crate) fn frame_mut(&mut self) -> &mut sys::ni_frame_t {
+            unsafe { &mut self.data_io.data.frame }
+        }
     }
 
     unsafe impl Send for XcoderHardwareFrame {}
@@ -77,18 +108,6 @@ pub mod linux_impl {
             return Err(XcoderInitError::Unknown { code });
         }
         Ok(())
-    }
-
-    pub(crate) fn fps_to_rational(fps: f64) -> (i32, i32) {
-        let den = if fps.fract() == 0.0 {
-            1000
-        } else {
-            // a denominator of 1001 for 29.97 or 59.94 is more
-            // conventional
-            1001
-        };
-        let num = (fps * den as f64).round() as _;
-        (num, den)
     }
 
     fn alloc_zeroed<T>() -> Box<std::mem::MaybeUninit<T>> {
@@ -128,9 +147,16 @@ pub mod linux_impl {
     }
 
     impl XcoderPixelFormat {
+        pub fn bit_depth(&self) -> Option<u8> {
+            match self {
+                XcoderPixelFormat::Yuv420Planar10BitLittleEndian | XcoderPixelFormat::P010LittleEndian => Some(10),
+                XcoderPixelFormat::None => None,
+                _ => Some(8),
+            }
+        }
+
         pub fn ten_bit(&self) -> bool {
-            use XcoderPixelFormat::*;
-            matches!(self, Yuv420Planar10BitLittleEndian | P010LittleEndian)
+            self.bit_depth() == Some(10)
         }
 
         /// Returns how many planes are in the layout. For semi-planar formats, a plane containing multiple
@@ -139,12 +165,12 @@ pub mod linux_impl {
             match self {
                 XcoderPixelFormat::Yuv420Planar | XcoderPixelFormat::Yuv420Planar10BitLittleEndian => 3,
                 XcoderPixelFormat::Nv12 | XcoderPixelFormat::Nv16 | XcoderPixelFormat::P010LittleEndian => 2,
+                XcoderPixelFormat::Bgrp => 3,
                 XcoderPixelFormat::Rgba
                 | XcoderPixelFormat::Bgra
                 | XcoderPixelFormat::Argb
                 | XcoderPixelFormat::Abgr
                 | XcoderPixelFormat::Bgr0
-                | XcoderPixelFormat::Bgrp
                 | XcoderPixelFormat::Yuyv422
                 | XcoderPixelFormat::Uyvy422 => 1,
                 XcoderPixelFormat::None => 0,
@@ -160,8 +186,9 @@ pub mod linux_impl {
                 XcoderPixelFormat::Rgba | XcoderPixelFormat::Bgra | XcoderPixelFormat::Argb | XcoderPixelFormat::Abgr | XcoderPixelFormat::Bgr0 => {
                     [width * 4, 0, 0]
                 }
-                XcoderPixelFormat::Bgrp => [width * 3, 0, 0],
-                XcoderPixelFormat::Nv16 | XcoderPixelFormat::Yuyv422 | XcoderPixelFormat::Uyvy422 => [width, width / 2, 0],
+                XcoderPixelFormat::Bgrp => [width, width, width],
+                XcoderPixelFormat::Nv16 => [width, width, 0],
+                XcoderPixelFormat::Yuyv422 | XcoderPixelFormat::Uyvy422 => [width * 2, 0, 0],
                 XcoderPixelFormat::None => [0; 3],
             }
         }
@@ -175,10 +202,22 @@ pub mod linux_impl {
                 | XcoderPixelFormat::Argb
                 | XcoderPixelFormat::Abgr
                 | XcoderPixelFormat::Bgr0
-                | XcoderPixelFormat::Bgrp => [height, 0, 0],
-                XcoderPixelFormat::Nv16 | XcoderPixelFormat::Yuyv422 | XcoderPixelFormat::Uyvy422 => [height, height, 0],
+                | XcoderPixelFormat::Yuyv422
+                | XcoderPixelFormat::Uyvy422 => [height, 0, 0],
+                XcoderPixelFormat::Bgrp => [height, height, height],
+                XcoderPixelFormat::Nv16 => [height, height, 0],
                 XcoderPixelFormat::None => [0; 3],
             }
+        }
+
+        pub(crate) fn requires_even_dimensions(&self) -> bool {
+            matches!(
+                self,
+                XcoderPixelFormat::Yuv420Planar
+                    | XcoderPixelFormat::Yuv420Planar10BitLittleEndian
+                    | XcoderPixelFormat::Nv12
+                    | XcoderPixelFormat::P010LittleEndian
+            )
         }
     }
 }
@@ -186,17 +225,53 @@ pub mod linux_impl {
 #[cfg(target_os = "linux")]
 pub use linux_impl::*;
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod test {
+    use super::*;
+
+    #[test]
+    fn converts_common_frame_rates() {
+        assert_eq!(fps_to_rational(23.976), Some((24000, 1001)));
+        assert_eq!(fps_to_rational(29.97), Some((30000, 1001)));
+        assert_eq!(fps_to_rational(30.0), Some((30000, 1000)));
+        assert_eq!(fps_to_rational(59.94), Some((60000, 1001)));
+        assert_eq!(fps_to_rational(60.0), Some((60000, 1000)));
+    }
+
+    #[test]
+    fn rejects_invalid_frame_rates_and_dimensions() {
+        assert_eq!(fps_to_rational(0.0), None);
+        assert_eq!(fps_to_rational(-1.0), None);
+        assert_eq!(fps_to_rational(f64::NAN), None);
+        assert_eq!(fps_to_rational(f64::INFINITY), None);
+        assert!(!valid_dimensions(0, 1080));
+        assert!(!valid_dimensions(1920, -1));
+        assert!(valid_dimensions(7680, 4320));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod hardware_test {
     use super::{decoder::read_frames, *};
     use rayon::prelude::*;
 
     #[test]
-    fn test_fps_to_rational() {
-        assert_eq!(fps_to_rational(29.97), (30000, 1001));
-        assert_eq!(fps_to_rational(30.0), (30000, 1000));
-        assert_eq!(fps_to_rational(59.94), (60000, 1001));
-        assert_eq!(fps_to_rational(60.0), (60000, 1000));
+    fn pixel_format_source_layouts_match_libxcoder() {
+        assert_eq!(XcoderPixelFormat::Yuv420Planar.plane_count(), 3);
+        assert_eq!(XcoderPixelFormat::Yuv420Planar.strides(1920), [1920, 960, 960]);
+        assert_eq!(XcoderPixelFormat::Yuv420Planar.heights(1080), [1080, 540, 540]);
+
+        assert_eq!(XcoderPixelFormat::Nv16.plane_count(), 2);
+        assert_eq!(XcoderPixelFormat::Nv16.strides(1920), [1920, 1920, 0]);
+        assert_eq!(XcoderPixelFormat::Nv16.heights(1080), [1080, 1080, 0]);
+
+        assert_eq!(XcoderPixelFormat::Yuyv422.plane_count(), 1);
+        assert_eq!(XcoderPixelFormat::Yuyv422.strides(1920), [3840, 0, 0]);
+        assert_eq!(XcoderPixelFormat::Yuyv422.heights(1080), [1080, 0, 0]);
+
+        assert_eq!(XcoderPixelFormat::Bgrp.plane_count(), 3);
+        assert_eq!(XcoderPixelFormat::Bgrp.strides(1920), [1920, 1920, 1920]);
+        assert_eq!(XcoderPixelFormat::Bgrp.heights(1080), [1080, 1080, 1080]);
     }
 
     #[test]

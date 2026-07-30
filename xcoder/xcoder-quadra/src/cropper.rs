@@ -11,6 +11,15 @@ pub struct XcoderCropperConfig {
 
 #[derive(Debug, Snafu)]
 pub enum XcoderCropperError {
+    #[snafu(display("invalid crop {width}x{height}+{x}+{y} for source dimensions {source_width}x{source_height}"))]
+    InvalidCrop {
+        x: i32,
+        y: i32,
+        width: i32,
+        height: i32,
+        source_width: i32,
+        source_height: i32,
+    },
     #[snafu(display("unable to allocate device session context"))]
     UnableToAllocateDeviceSessionContext,
     #[snafu(display("error {operation} (code = {code})"))]
@@ -66,6 +75,28 @@ impl XcoderCropper {
     }
 
     pub fn crop(&mut self, f: &XcoderHardwareFrame, crop: XcoderCrop) -> Result<XcoderHardwareFrame> {
+        let source_width = i32::from(f.surface().ui16width);
+        let source_height = i32::from(f.surface().ui16height);
+        let valid = crop.x >= 0
+            && crop.y >= 0
+            && crop.width > 0
+            && crop.height > 0
+            && crop.x % 2 == 0
+            && crop.y % 2 == 0
+            && crop.width % 2 == 0
+            && crop.height % 2 == 0
+            && crop.x.checked_add(crop.width).is_some_and(|right| right <= source_width)
+            && crop.y.checked_add(crop.height).is_some_and(|bottom| bottom <= source_height);
+        if !valid {
+            return Err(XcoderCropperError::InvalidCrop {
+                x: crop.x,
+                y: crop.y,
+                width: crop.width,
+                height: crop.height,
+                source_width,
+                source_height,
+            });
+        }
         let pixel_format = if f.surface().bit_depth == 2 { sys::GC620_I010_ } else { sys::GC620_I420_ };
         unsafe {
             let frame_in = **f;
@@ -218,8 +249,8 @@ mod test {
                     XcoderCrop {
                         x: 0,
                         y: 0,
-                        width: 1280 - frame_count,
-                        height: 720 - frame_count,
+                        width: 1280 - frame_count * 2,
+                        height: 720 - frame_count * 2,
                     },
                 )
                 .unwrap();

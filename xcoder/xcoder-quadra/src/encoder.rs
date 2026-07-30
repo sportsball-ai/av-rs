@@ -15,6 +15,37 @@ use xcoder_quadra_sys::{self as sys, ni_packet_t, ni_xcoder_params_t};
 
 #[derive(Debug, Snafu)]
 pub enum XcoderEncoderError {
+    #[snafu(display("invalid encoder dimensions {width}x{height}"))]
+    InvalidDimensions { width: u16, height: u16 },
+    #[snafu(display("invalid encoder frame rate {fps}"))]
+    InvalidFrameRate { fps: f64 },
+    #[snafu(display("unsupported encoder bit depth {bit_depth}"))]
+    UnsupportedBitDepth { bit_depth: u8 },
+    #[snafu(display("pixel format {pixel_format:?} does not support {bit_depth}-bit input"))]
+    PixelFormatBitDepthMismatch { pixel_format: XcoderPixelFormat, bit_depth: u8 },
+    #[snafu(display("hardware frames require planar YUV420 input, not {pixel_format:?}"))]
+    UnsupportedHardwarePixelFormat { pixel_format: XcoderPixelFormat },
+    #[snafu(display("bitrate must be greater than zero when rate control is enabled"))]
+    InvalidBitrate,
+    #[snafu(display("input plane {plane} is {actual} bytes, expected at least {expected} bytes"))]
+    InputPlaneTooSmall { plane: usize, actual: usize, expected: usize },
+    #[snafu(display("encoded packet is {actual} bytes, smaller than its {metadata} bytes of metadata"))]
+    InvalidEncodedPacket { actual: usize, metadata: usize },
+    #[snafu(display("hardware frame index {index} is outside the supported range 0..{maximum}"))]
+    InvalidHardwareFrameIndex { index: usize, maximum: usize },
+    #[snafu(display("hardware frame index {index} is still in use by the encoder"))]
+    HardwareFrameStillInUse { index: usize },
+    #[snafu(display(
+        "hardware frame format {actual_width}x{actual_height} {actual_bit_depth}-bit does not match encoder format {expected_width}x{expected_height} {expected_bit_depth}-bit"
+    ))]
+    HardwareFrameFormatMismatch {
+        actual_width: u16,
+        actual_height: u16,
+        actual_bit_depth: u8,
+        expected_width: u16,
+        expected_height: u16,
+        expected_bit_depth: u8,
+    },
     #[snafu(display("unable to allocate device session context"))]
     UnableToAllocateDeviceSessionContext,
     #[snafu(display("error {operation} (code = {code})"))]
@@ -52,14 +83,21 @@ impl EncodedFrame {
         })
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        let data = unsafe { &std::slice::from_raw_parts(self.data_io.data.packet.p_data as _, self.data_io.data.packet.data_len as _) };
-        &data[self.meta_size..]
+    pub fn as_slice(&self) -> Result<&[u8]> {
+        let data_len = self.data_io.data.packet.data_len as usize;
+        if data_len < self.meta_size {
+            return Err(XcoderEncoderError::InvalidEncodedPacket {
+                actual: data_len,
+                metadata: self.meta_size,
+            });
+        }
+        let data = unsafe { std::slice::from_raw_parts(self.data_io.data.packet.p_data as _, data_len) };
+        Ok(&data[self.meta_size..])
     }
 
     /// When parameter sets are emitted by the encoder, they're provided here.
-    pub fn parameter_sets(&self) -> Option<&Vec<u8>> {
-        self.parameter_sets.as_ref()
+    pub fn parameter_sets(&self) -> Option<&[u8]> {
+        self.parameter_sets.as_deref()
     }
 
     pub fn packet(&self) -> &sys::ni_packet_t {
@@ -148,7 +186,37 @@ pub struct XcoderEncoderConfig {
 
 impl<F> XcoderEncoder<F> {
     pub fn new(config: XcoderEncoderConfig) -> Result<Self> {
-        let (fps_numerator, fps_denominator) = fps_to_rational(config.fps);
+        if !valid_dimensions(i32::from(config.width), i32::from(config.height))
+            || (config.pixel_format.requires_even_dimensions() && (config.width % 2 != 0 || config.height % 2 != 0))
+        {
+            return Err(XcoderEncoderError::InvalidDimensions {
+                width: config.width,
+                height: config.height,
+            });
+        }
+        if !matches!(config.bit_depth, 8 | 10) {
+            return Err(XcoderEncoderError::UnsupportedBitDepth { bit_depth: config.bit_depth });
+        }
+        if config.pixel_format.bit_depth() != Some(config.bit_depth) {
+            return Err(XcoderEncoderError::PixelFormatBitDepthMismatch {
+                pixel_format: config.pixel_format,
+                bit_depth: config.bit_depth,
+            });
+        }
+        if config.hardware.is_some()
+            && !matches!(
+                config.pixel_format,
+                XcoderPixelFormat::Yuv420Planar | XcoderPixelFormat::Yuv420Planar10BitLittleEndian
+            )
+        {
+            return Err(XcoderEncoderError::UnsupportedHardwarePixelFormat {
+                pixel_format: config.pixel_format,
+            });
+        }
+        if config.bitrate == Some(0) {
+            return Err(XcoderEncoderError::InvalidBitrate);
+        }
+        let (fps_numerator, fps_denominator) = fps_to_rational(config.fps).ok_or(XcoderEncoderError::InvalidFrameRate { fps: config.fps })?;
 
         unsafe {
             let mut params = alloc_zeroed::<sys::ni_xcoder_params_t>();
@@ -239,6 +307,21 @@ impl<F> XcoderEncoder<F> {
                 frame_data_strides.as_mut_ptr(),
                 frame_data_heights.as_mut_ptr(),
             );
+            // libxcoder's ni_get_frame_dim leaves incorrect plane heights for
+            // NV16 and does not populate BGRP at all, despite both formats
+            // being supported by ni_frame_buffer_alloc_pixfmt.
+            match config.pixel_format {
+                XcoderPixelFormat::Nv16 => {
+                    frame_data_heights[0] = i32::from(config.height);
+                    frame_data_heights[1] = i32::from(config.height);
+                }
+                XcoderPixelFormat::Bgrp => {
+                    let aligned_width = (i32::from(config.width) + 31) & !31;
+                    frame_data_strides[..3].fill(aligned_width);
+                    frame_data_heights[..3].fill(i32::from(config.height));
+                }
+                _ => {}
+            }
             if config.hardware.is_some() {
                 params.hwframes = 1;
             }
@@ -359,18 +442,19 @@ impl<F> XcoderEncoder<F> {
                         self.hardware_frames[packet.recycle_index as usize] = None;
                     }
                     if packet.pts == 0 && packet.avg_frame_qp == 0 {
-                        self.encoded_frame.parameter_sets = Some(self.encoded_frame.as_slice().to_vec());
+                        self.encoded_frame.parameter_sets = Some(self.encoded_frame.as_slice()?.to_vec());
                     } else {
+                        let encoded_data = match self.encoded_frame.parameter_sets() {
+                            Some(sets) => [sets, self.encoded_frame.as_slice()?].concat(),
+                            None => self.encoded_frame.as_slice()?.to_vec(),
+                        };
                         self.output_frames.push_back(VideoEncoderOutput {
                             raw_frame: self
                                 .input_frames
                                 .pop_front()
                                 .expect("there should never be more output frames than input frames"),
                             encoded_frame: Some(EncodedVideoFrame {
-                                data: match self.encoded_frame.parameter_sets() {
-                                    Some(sets) => [sets, self.encoded_frame.as_slice()].concat(),
-                                    None => self.encoded_frame.as_slice().to_vec(),
-                                },
+                                data: encoded_data,
                                 is_keyframe: self.encoded_frame.is_key_frame(),
                             }),
                         });
@@ -388,7 +472,6 @@ impl<F> XcoderEncoder<F> {
     /// Attempts to write the decoded frame to the encoder. If Some is returned, the caller must
     /// try again with the same frame later.
     unsafe fn try_write_frame_data_io(&mut self, f: F, data_io: *mut sys::ni_session_data_io_t) -> Result<Option<F>> {
-        self.did_start = true;
         let written = sys::ni_device_session_write(self.session, data_io, sys::ni_device_type_t_NI_DEVICE_TYPE_ENCODER);
         if written < 0 {
             return Err(XcoderEncoderError::Unknown {
@@ -398,6 +481,7 @@ impl<F> XcoderEncoder<F> {
         }
 
         if written > 0 {
+            self.did_start = true;
             self.frame_data_io_has_next_frame = false;
             self.input_frames.push_back(f);
             Ok(None)
@@ -406,19 +490,54 @@ impl<F> XcoderEncoder<F> {
         }
     }
 
-    pub fn encode_hardware_frame(&mut self, mut input: F, mut hw_frame: XcoderHardwareFrame) -> Result<Option<VideoEncoderOutput<F>>> {
-        let mut frame = *hw_frame;
+    pub fn encode_hardware_frame(&mut self, input: F, hw_frame: XcoderHardwareFrame) -> Result<Option<VideoEncoderOutput<F>>> {
+        self.encode_hardware_frame_with_type(input, hw_frame, EncodedFrameType::Auto)
+    }
+
+    pub fn encode_hardware_frame_with_type(
+        &mut self,
+        mut input: F,
+        mut hw_frame: XcoderHardwareFrame,
+        frame_type: EncodedFrameType,
+    ) -> Result<Option<VideoEncoderOutput<F>>> {
+        let surface = hw_frame.surface();
+        let actual_bit_depth = if surface.bit_depth == 2 { 10 } else { 8 };
+        if surface.ui16width != self.config.width || surface.ui16height != self.config.height || actual_bit_depth != self.config.bit_depth {
+            return Err(XcoderEncoderError::HardwareFrameFormatMismatch {
+                actual_width: surface.ui16width,
+                actual_height: surface.ui16height,
+                actual_bit_depth,
+                expected_width: self.config.width,
+                expected_height: self.config.height,
+                expected_bit_depth: self.config.bit_depth,
+            });
+        }
+        let idx = surface.ui16FrameIdx as usize;
+        let maximum = self.hardware_frames.len();
+        let slot = self
+            .hardware_frames
+            .get(idx)
+            .ok_or(XcoderEncoderError::InvalidHardwareFrameIndex { index: idx, maximum })?;
+        if slot.is_some() {
+            return Err(XcoderEncoderError::HardwareFrameStillInUse { index: idx });
+        }
+
+        let frame = hw_frame.frame_mut();
         frame.start_of_stream = if self.did_start { 0 } else { 1 };
         frame.extra_data_len = sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _;
-        frame.force_key_frame = 0;
-        frame.ni_pict_type = 0;
+        if matches!(frame_type, EncodedFrameType::Key) {
+            frame.force_key_frame = 1;
+            frame.ni_pict_type = sys::ni_pic_type_t_PIC_TYPE_IDR;
+        } else {
+            frame.force_key_frame = 0;
+            frame.ni_pict_type = 0;
+        }
 
         loop {
             self.try_reading_encoded_frames()?;
             match unsafe { self.try_write_frame_data_io(input, hw_frame.as_data_io_mut_ptr())? } {
                 Some(frame) => input = frame,
                 None => {
-                    let idx = hw_frame.surface().ui16FrameIdx as usize;
                     self.hardware_frames[idx] = Some(hw_frame);
                     break;
                 }
@@ -451,6 +570,19 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
     /// try again with the same frame later.
     fn try_write_frame(&mut self, f: F, force_key_frame: bool) -> Result<Option<F>> {
         if !self.frame_data_io_has_next_frame {
+            let source_strides = self.config.pixel_format.strides(self.config.width as i32);
+            let source_heights = self.config.pixel_format.heights(self.config.height as i32);
+            for plane in 0..self.config.pixel_format.plane_count() {
+                let actual = f.samples(plane).len();
+                let expected = usize::try_from(source_strides[plane])
+                    .ok()
+                    .and_then(|stride| usize::try_from(source_heights[plane]).ok().map(|height| stride * height))
+                    .expect("validated encoder dimensions must produce positive plane sizes");
+                if actual < expected {
+                    return Err(XcoderEncoderError::InputPlaneTooSmall { plane, actual, expected });
+                }
+            }
+
             let frame = unsafe { &mut self.frame_data_io.data.frame };
             frame.start_of_stream = if self.did_start { 0 } else { 1 };
             frame.extra_data_len = sys::NI_APP_ENC_FRAME_META_DATA_SIZE as _;
@@ -472,8 +604,8 @@ impl<F: RawVideoFrame<u8>> XcoderEncoder<F> {
                     null_mut()
                 }
             });
-            let mut src_strides = self.config.pixel_format.strides(self.config.width as i32);
-            let mut src_heights = self.config.pixel_format.heights(self.config.height as i32);
+            let mut src_strides = source_strides;
+            let mut src_heights = source_heights;
             let factor = if self.config.pixel_format.ten_bit() { 2 } else { 1 };
             unsafe {
                 sys::ni_copy_frame_data(
@@ -553,9 +685,8 @@ mod test {
         }
     }
 
-    #[test]
-    fn test_video_encoder() {
-        let mut encoder = XcoderEncoder::new(XcoderEncoderConfig {
+    fn test_config() -> XcoderEncoderConfig {
+        XcoderEncoderConfig {
             width: 1920,
             height: 1080,
             fps: 29.97,
@@ -568,8 +699,75 @@ mod test {
             pixel_format: XcoderPixelFormat::Yuv420Planar,
             hardware: None,
             multicore_joint_mode: false,
-        })
-        .unwrap();
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_encoder_configuration_before_opening_a_device() {
+        let mut config = test_config();
+        config.width = 0;
+        assert!(matches!(
+            XcoderEncoder::<TestFrame>::new(config),
+            Err(XcoderEncoderError::InvalidDimensions { .. })
+        ));
+
+        let mut config = test_config();
+        config.width = 1919;
+        assert!(matches!(
+            XcoderEncoder::<TestFrame>::new(config),
+            Err(XcoderEncoderError::InvalidDimensions { .. })
+        ));
+
+        let mut config = test_config();
+        config.fps = f64::NAN;
+        assert!(matches!(
+            XcoderEncoder::<TestFrame>::new(config),
+            Err(XcoderEncoderError::InvalidFrameRate { .. })
+        ));
+
+        let mut config = test_config();
+        config.bit_depth = 10;
+        assert!(matches!(
+            XcoderEncoder::<TestFrame>::new(config),
+            Err(XcoderEncoderError::PixelFormatBitDepthMismatch { .. })
+        ));
+
+        let mut config = test_config();
+        config.pixel_format = XcoderPixelFormat::Bgra;
+        config.hardware = Some(XcoderHardware { id: -1, device_handle: -1 });
+        assert!(matches!(
+            XcoderEncoder::<TestFrame>::new(config),
+            Err(XcoderEncoderError::UnsupportedHardwarePixelFormat { .. })
+        ));
+
+        let mut config = test_config();
+        config.bitrate = Some(0);
+        assert!(matches!(XcoderEncoder::<TestFrame>::new(config), Err(XcoderEncoderError::InvalidBitrate)));
+    }
+
+    #[test]
+    fn rejects_short_input_planes_before_copying_to_the_sdk() {
+        let mut config = test_config();
+        config.width = 64;
+        config.height = 64;
+        let mut encoder = XcoderEncoder::new(config).unwrap();
+        let frame = TestFrame {
+            samples: vec![vec![0; 64 * 64 - 1], vec![0; 64 * 32], vec![0; 64 * 32]],
+        };
+
+        assert!(matches!(
+            encoder.encode(frame, EncodedFrameType::Auto),
+            Err(XcoderEncoderError::InputPlaneTooSmall {
+                plane: 0,
+                actual: 4095,
+                expected: 4096
+            })
+        ));
+    }
+
+    #[test]
+    fn test_video_encoder() {
+        let mut encoder = XcoderEncoder::new(test_config()).unwrap();
 
         let mut encoded = vec![];
         let mut encoded_frames = 0;
